@@ -229,6 +229,31 @@ Admin routes:
 
 The Decision Engine uses configuration data for business rules, FAQ, knowledge base and fallback behavior.
 
+## Multi-Tenant Foundation
+
+Sprint 4 adds prepared SaaS entities:
+
+- organizations;
+- sites;
+- users and roles.
+
+Admin routes:
+
+- `GET /api/admin/organizations`
+- `POST /api/admin/organizations`
+- `GET /api/admin/organizations/:organizationId`
+- `PUT /api/admin/organizations/:organizationId`
+- `PATCH /api/admin/organizations/:organizationId/status`
+- `DELETE /api/admin/organizations/:organizationId`
+- `GET /api/admin/sites`
+- `POST /api/admin/sites`
+- `GET /api/admin/sites/:siteId`
+- `PUT /api/admin/sites/:siteId`
+- `PATCH /api/admin/sites/:siteId/status`
+- `DELETE /api/admin/sites/:siteId`
+
+The widget accepts `siteId`, `siteSlug` or `siteKey` and loads the associated business configuration.
+
 ## PostgreSQL
 
 The startup process calls a PostgreSQL connection check before listening for requests.

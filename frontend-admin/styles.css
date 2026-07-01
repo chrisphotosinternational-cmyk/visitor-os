@@ -73,6 +73,65 @@ select {
   margin-bottom: 16px;
 }
 
+.tenant-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.tenant-panel {
+  overflow: hidden;
+}
+
+.tenant-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.tenant-form input,
+.tenant-form select {
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.tenant-form button,
+.tenant-actions button {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #fff;
+  background: #1f6f5b;
+  cursor: pointer;
+}
+
+.tenant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.tenant-row small {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
+}
+
+.tenant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .metric {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -409,7 +468,8 @@ select {
 @media (max-width: 860px) {
   .app-shell,
   .layout,
-  .metrics {
+  .metrics,
+  .tenant-layout {
     grid-template-columns: 1fr;
   }
 

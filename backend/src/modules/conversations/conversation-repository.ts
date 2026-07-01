@@ -5,7 +5,12 @@ export type SiteRecord = {
   id: string;
   organization_id: string;
   name: string;
+  slug: string | null;
+  widget_public_key: string;
   activity: string;
+  business_config_id: string;
+  status: string;
+  widget_enabled: boolean;
 };
 
 export type ConversationRecord = {
@@ -75,7 +80,7 @@ export class ConversationRepository {
 
   async findSiteByWidgetKey(widgetKey: string): Promise<SiteRecord | null> {
     const result = await this.database.query<SiteRecord>(
-      `select id, organization_id, name, activity from sites where widget_public_key = $1`,
+      `select * from sites where widget_public_key = $1 and status = 'active' and widget_enabled = true`,
       [widgetKey]
     );
 
@@ -83,9 +88,15 @@ export class ConversationRepository {
   }
 
   async findSite(id: string): Promise<SiteRecord | null> {
+    const result = await this.database.query<SiteRecord>(`select * from sites where id = $1`, [id]);
+
+    return result.rows[0] ?? null;
+  }
+
+  async findSiteBySlug(slug: string): Promise<SiteRecord | null> {
     const result = await this.database.query<SiteRecord>(
-      `select id, organization_id, name, activity from sites where id = $1`,
-      [id]
+      `select * from sites where slug = $1 and status = 'active' and widget_enabled = true`,
+      [slug]
     );
 
     return result.rows[0] ?? null;
@@ -137,11 +148,15 @@ export class ConversationRepository {
     return requireRow(result.rows[0], 'Conversation was not created');
   }
 
-  async findConversation(id: string): Promise<ConversationRecord | null> {
-    const result = await this.database.query<ConversationRecord>(
-      `select * from conversations where id = $1`,
-      [id]
-    );
+  async findConversation(id: string, organizationId?: string): Promise<ConversationRecord | null> {
+    const result = organizationId
+      ? await this.database.query<ConversationRecord>(
+          `select * from conversations where id = $1 and organization_id = $2`,
+          [id, organizationId]
+        )
+      : await this.database.query<ConversationRecord>(`select * from conversations where id = $1`, [
+          id
+        ]);
 
     return result.rows[0] ?? null;
   }
@@ -238,16 +253,26 @@ export class ConversationRepository {
     );
   }
 
-  async listMessages(conversationId: string): Promise<MessageRecord[]> {
-    const result = await this.database.query<MessageRecord>(
-      `select * from messages where conversation_id = $1 order by created_at asc`,
-      [conversationId]
-    );
+  async listMessages(conversationId: string, organizationId?: string): Promise<MessageRecord[]> {
+    const result = organizationId
+      ? await this.database.query<MessageRecord>(
+          `select * from messages where conversation_id = $1 and organization_id = $2 order by created_at asc`,
+          [conversationId, organizationId]
+        )
+      : await this.database.query<MessageRecord>(
+          `select * from messages where conversation_id = $1 order by created_at asc`,
+          [conversationId]
+        );
 
     return result.rows;
   }
 
-  async listAdminConversations(search?: string): Promise<AdminConversationListItem[]> {
+  async listAdminConversations(input?: {
+    organizationId?: string;
+    search?: string;
+  }): Promise<AdminConversationListItem[]> {
+    const organizationId = input?.organizationId;
+    const search = input?.search;
     const searchValue = search?.trim();
 
     if (searchValue) {
@@ -272,16 +297,19 @@ export class ConversationRepository {
         from conversations c
         left join prospects p on p.id = c.prospect_id
         where
+          ($2::uuid is null or c.organization_id = $2)
+          and (
           p.display_name ilike $1
           or exists (
             select 1
             from messages m
             where m.conversation_id = c.id and m.content ilike $1
           )
+          )
         order by c.updated_at desc, c.created_at desc
         limit 100
         `,
-        [`%${searchValue}%`]
+        [`%${searchValue}%`, organizationId ?? null]
       );
 
       return result.rows;
@@ -307,15 +335,20 @@ export class ConversationRepository {
         ) as last_message
       from conversations c
       left join prospects p on p.id = c.prospect_id
+      where ($1::uuid is null or c.organization_id = $1)
       order by c.updated_at desc, c.created_at desc
       limit 100
-      `
+      `,
+      [organizationId ?? null]
     );
 
     return result.rows;
   }
 
-  async findAdminConversation(id: string): Promise<AdminConversationDetail | null> {
+  async findAdminConversation(
+    id: string,
+    organizationId?: string
+  ): Promise<AdminConversationDetail | null> {
     const result = await this.database.query<AdminConversationListItem>(
       `
       select
@@ -336,9 +369,9 @@ export class ConversationRepository {
         ) as last_message
       from conversations c
       left join prospects p on p.id = c.prospect_id
-      where c.id = $1
+      where c.id = $1 and ($2::uuid is null or c.organization_id = $2)
       `,
-      [id]
+      [id, organizationId ?? null]
     );
     const conversation = result.rows[0];
 
@@ -348,7 +381,7 @@ export class ConversationRepository {
 
     return {
       ...conversation,
-      messages: await this.listMessages(id)
+      messages: await this.listMessages(id, organizationId)
     };
   }
 

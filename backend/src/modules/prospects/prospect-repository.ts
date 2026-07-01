@@ -99,19 +99,26 @@ export class ProspectRepository {
     return requireRow(result.rows[0], 'Prospect was not created');
   }
 
-  async list(): Promise<ProspectRecord[]> {
-    const result = await this.database.query<ProspectRecord>(
-      `select * from prospects order by updated_at desc, created_at desc limit 100`
-    );
+  async list(organizationId?: string): Promise<ProspectRecord[]> {
+    const result = organizationId
+      ? await this.database.query<ProspectRecord>(
+          `select * from prospects where organization_id = $1 order by updated_at desc, created_at desc limit 100`,
+          [organizationId]
+        )
+      : await this.database.query<ProspectRecord>(
+          `select * from prospects order by updated_at desc, created_at desc limit 100`
+        );
 
     return result.rows;
   }
 
-  async findDetail(id: string): Promise<ProspectDetail | null> {
-    const prospectResult = await this.database.query<ProspectRecord>(
-      `select * from prospects where id = $1`,
-      [id]
-    );
+  async findDetail(id: string, organizationId?: string): Promise<ProspectDetail | null> {
+    const prospectResult = organizationId
+      ? await this.database.query<ProspectRecord>(
+          `select * from prospects where id = $1 and organization_id = $2`,
+          [id, organizationId]
+        )
+      : await this.database.query<ProspectRecord>(`select * from prospects where id = $1`, [id]);
     const prospect = prospectResult.rows[0];
 
     if (!prospect) {
@@ -123,7 +130,10 @@ export class ProspectRepository {
       status: string;
       page_url: string | null;
       created_at: Date;
-    }>(`select id, status, page_url, created_at from conversations where prospect_id = $1`, [id]);
+    }>(
+      `select id, status, page_url, created_at from conversations where prospect_id = $1 and ($2::uuid is null or organization_id = $2)`,
+      [id, organizationId ?? null]
+    );
 
     const conversations = await Promise.all(
       conversationsResult.rows.map(async (conversation) => {

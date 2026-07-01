@@ -131,7 +131,12 @@ function createMemoryDatabase(): Database {
     id: '00000000-0000-4000-8000-000000000101',
     organization_id: '00000000-0000-4000-8000-000000000001',
     name: 'Site demo',
-    activity: 'demo'
+    slug: 'demo-site',
+    widget_public_key: 'demo-site-key',
+    activity: 'default',
+    business_config_id: 'default',
+    status: 'active',
+    widget_enabled: true
   };
   const visitors = new Map<string, { id: string; anonymous_id: string }>();
   const conversations = new Map<string, Record<string, unknown>>();

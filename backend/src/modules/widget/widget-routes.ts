@@ -7,12 +7,19 @@ import { ProspectRepository } from '../prospects/prospect-repository.js';
 import type { Database } from '../../database/client.js';
 import type { DecisionEngine } from '../decision-engine/decision-engine.js';
 
-const siteKeyQuerySchema = z.object({
-  siteKey: z.string().min(1)
-});
+const widgetSiteReferenceSchema = z
+  .object({
+    siteKey: z.string().min(1).optional(),
+    siteId: z.string().uuid().optional(),
+    siteSlug: z.string().min(1).optional()
+  })
+  .refine((value) => Boolean(value.siteKey || value.siteId || value.siteSlug), {
+    message: 'siteKey, siteId or siteSlug is required'
+  });
 
-const startConversationSchema = z.object({
-  siteKey: z.string().min(1),
+const siteKeyQuerySchema = widgetSiteReferenceSchema;
+
+const startConversationSchema = widgetSiteReferenceSchema.extend({
   anonymousId: z.string().min(1).optional(),
   pageUrl: z.string().url().optional(),
   referrer: z.string().optional()
@@ -32,15 +39,14 @@ export function registerWidgetRoutes(
 
   app.get('/api/widget/config', async (request) => {
     const query = siteKeyQuerySchema.parse(request.query);
-    const site = await conversations.findSiteByWidgetKey(query.siteKey);
+    const site = await resolveWidgetSite(conversations, query);
 
-    if (!site) {
-      throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
-    }
-    const businessConfig = await decisionEngine.getBusinessConfig(site.activity);
+    const businessConfig = await decisionEngine.getBusinessConfig(site.business_config_id);
 
     return {
-      siteKey: query.siteKey,
+      siteKey: site.widget_public_key,
+      siteId: site.id,
+      siteSlug: site.slug,
       brandName: businessConfig.identity.name,
       activity: businessConfig.identity.category,
       welcomeMessage: businessConfig.widget.welcomeMessage ?? 'Bonjour, je peux vous aider.',
@@ -54,11 +60,7 @@ export function registerWidgetRoutes(
 
   app.post('/api/widget/conversations', async (request) => {
     const body = startConversationSchema.parse(request.body);
-    const site = await conversations.findSiteByWidgetKey(body.siteKey);
-
-    if (!site) {
-      throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
-    }
+    const site = await resolveWidgetSite(conversations, body);
 
     const visitorId = await conversations.upsertVisitor({
       organizationId: site.organization_id,
@@ -139,7 +141,7 @@ export function registerWidgetRoutes(
     const decision = await decisionEngine.decide({
       conversationId: conversation.id,
       siteId: conversation.site_id,
-      activity: site?.activity ?? 'demo',
+      activity: site?.business_config_id ?? 'default',
       message: body.content,
       recentHistory: recentHistory.map((message) => ({
         senderType: message.sender_type,
@@ -189,4 +191,39 @@ export function registerWidgetRoutes(
       reason: decision.reason
     };
   });
+}
+
+async function resolveWidgetSite(
+  conversations: ConversationRepository,
+  input: {
+    siteKey?: string | undefined;
+    siteId?: string | undefined;
+    siteSlug?: string | undefined;
+  }
+) {
+  if (input.siteId) {
+    const site = await conversations.findSite(input.siteId);
+
+    if (site?.status === 'active' && site.widget_enabled) {
+      return site;
+    }
+  }
+
+  if (input.siteSlug) {
+    const site = await conversations.findSiteBySlug(input.siteSlug);
+
+    if (site) {
+      return site;
+    }
+  }
+
+  if (input.siteKey) {
+    const site = await conversations.findSiteByWidgetKey(input.siteKey);
+
+    if (site) {
+      return site;
+    }
+  }
+
+  throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
 }

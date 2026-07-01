@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.4.0-dev - Sprint 4
+
+- Added multi-tenant foundation with organizations, sites and prepared users/roles.
+- Added site-to-business-configuration association.
+- Added widget site resolution by site id, site slug or widget key.
+- Added admin endpoints and minimal UI for organizations and sites.
+- Prepared organization filters for tenant isolation on conversations and prospects.
+
 ## v0.3.0-dev - Sprint 3
 
 - Added Business Configuration Engine with Zod validation, JSON loading, import, export and history.

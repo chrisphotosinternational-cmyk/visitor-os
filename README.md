@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Release candidate: `v0.1.0`.
+Development version: `v0.4.0-dev`.
 
 The first working MVP is available:
 
@@ -16,6 +16,8 @@ The first working MVP is available:
 - temporary non-AI replies;
 - minimal admin dashboard;
 - conversation search and status update.
+- multi-tenant foundation with organizations and sites;
+- configurable business engine per site.
 
 ## Planned Modules
 
@@ -28,6 +30,7 @@ The first working MVP is available:
 - Statistics and exports
 - Notifications
 - Configuration by business activity
+- Multi-organization and multi-site administration
 - Future calendar, bookings, payments, documents, and automations
 
 ## Moto CMS 4 Constraint
@@ -61,6 +64,12 @@ The first working MVP is available:
 8. CRM foundations
 9. AI integration
 10. Analytics, exports, and notifications
+
+Current architecture:
+
+```text
+Organization -> Sites -> Business Configuration -> Widget -> Conversations -> Prospects
+```
 
 ## Quick Start
 

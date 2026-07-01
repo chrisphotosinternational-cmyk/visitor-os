@@ -2,6 +2,8 @@
   const currentScript = document.currentScript;
   const apiBaseUrl = currentScript?.dataset.apiUrl || 'http://localhost:3000';
   const siteKey = currentScript?.dataset.siteKey || 'demo-site-key';
+  const siteId = currentScript?.dataset.siteId || '';
+  const siteSlug = currentScript?.dataset.siteSlug || '';
   const anonymousId = getAnonymousId();
   let conversationId = null;
 
@@ -169,7 +171,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        siteKey,
+        ...buildSiteReference(),
         anonymousId,
         pageUrl: window.location.href,
         referrer: document.referrer
@@ -178,6 +180,13 @@
     const data = await response.json();
     conversationId = data.conversationId;
     addMessage('assistant', 'Bonjour, je peux vous aider. Posez-moi votre question.');
+  }
+
+  function buildSiteReference() {
+    if (siteId) return { siteId };
+    if (siteSlug) return { siteSlug };
+
+    return { siteKey };
   }
 
   function addMessage(type, content) {

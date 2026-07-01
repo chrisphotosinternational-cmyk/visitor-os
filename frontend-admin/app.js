@@ -9,12 +9,38 @@ createApp({
       conversationStatuses: [],
       selectedConversation: null,
       prospects: [],
+      organizations: [],
+      sites: [],
       configs: [],
       selectedConfigId: '',
       selectedConfig: null,
       configText: '',
       configPrompt: '',
       configHistory: [],
+      organizationForm: {
+        id: '',
+        name: '',
+        slug: '',
+        email: '',
+        phone: '',
+        country: 'FR',
+        language: 'fr',
+        timezone: 'Europe/Paris',
+        currency: 'EUR',
+        status: 'active',
+        plan: ''
+      },
+      siteForm: {
+        id: '',
+        organizationId: '',
+        name: '',
+        slug: '',
+        domain: '',
+        businessConfigId: 'default',
+        language: 'fr',
+        status: 'active',
+        widgetEnabled: true
+      },
       search: '',
       loading: true,
       configLoading: false,
@@ -38,7 +64,13 @@ createApp({
       this.error = '';
 
       try {
-        await Promise.all([this.loadConversations(), this.loadProspects(), this.loadConfigs()]);
+        await Promise.all([
+          this.loadConversations(),
+          this.loadProspects(),
+          this.loadConfigs(),
+          this.loadOrganizations(),
+          this.loadSites()
+        ]);
       } finally {
         this.loading = false;
       }
@@ -75,6 +107,24 @@ createApp({
       if (!this.selectedConfigId && this.configs.length > 0) {
         await this.selectConfig(this.configs[0].id);
       }
+    },
+
+    async loadOrganizations() {
+      const response = await fetch(`${API_BASE_URL}/api/admin/organizations`);
+      if (!response.ok) throw new Error('Impossible de charger les organisations.');
+      const data = await response.json();
+      this.organizations = data.organizations;
+
+      if (!this.organizationForm.organizationId && this.organizations.length > 0) {
+        this.siteForm.organizationId = this.organizations[0].id;
+      }
+    },
+
+    async loadSites() {
+      const response = await fetch(`${API_BASE_URL}/api/admin/sites`);
+      if (!response.ok) throw new Error('Impossible de charger les sites.');
+      const data = await response.json();
+      this.sites = data.sites;
     },
 
     async searchConversations() {
@@ -224,6 +274,159 @@ createApp({
       URL.revokeObjectURL(link.href);
     },
 
+    editOrganization(organization) {
+      this.organizationForm = {
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        email: organization.email || '',
+        phone: organization.phone || '',
+        country: organization.country,
+        language: organization.language,
+        timezone: organization.timezone,
+        currency: organization.currency,
+        status: organization.status,
+        plan: organization.plan || ''
+      };
+    },
+
+    resetOrganizationForm() {
+      this.organizationForm = {
+        id: '',
+        name: '',
+        slug: '',
+        email: '',
+        phone: '',
+        country: 'FR',
+        language: 'fr',
+        timezone: 'Europe/Paris',
+        currency: 'EUR',
+        status: 'active',
+        plan: ''
+      };
+    },
+
+    async saveOrganization() {
+      const payload = {
+        name: this.organizationForm.name,
+        slug: this.organizationForm.slug,
+        email: this.organizationForm.email || undefined,
+        phone: this.organizationForm.phone || undefined,
+        country: this.organizationForm.country,
+        language: this.organizationForm.language,
+        timezone: this.organizationForm.timezone,
+        currency: this.organizationForm.currency,
+        status: this.organizationForm.status,
+        plan: this.organizationForm.plan || undefined
+      };
+      const url = this.organizationForm.id
+        ? `${API_BASE_URL}/api/admin/organizations/${this.organizationForm.id}`
+        : `${API_BASE_URL}/api/admin/organizations`;
+      const response = await fetch(url, {
+        method: this.organizationForm.id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error("Impossible d'enregistrer l'organisation.");
+      this.resetOrganizationForm();
+      await this.loadOrganizations();
+    },
+
+    async toggleOrganization(organization) {
+      const response = await fetch(`${API_BASE_URL}/api/admin/organizations/${organization.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: organization.status === 'active' ? 'inactive' : 'active' })
+      });
+
+      if (!response.ok) throw new Error("Impossible de modifier l'organisation.");
+      await this.loadOrganizations();
+    },
+
+    async deleteOrganization(organization) {
+      const response = await fetch(`${API_BASE_URL}/api/admin/organizations/${organization.id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error("Impossible de supprimer l'organisation.");
+      await this.loadOrganizations();
+      await this.loadSites();
+    },
+
+    editSite(site) {
+      this.siteForm = {
+        id: site.id,
+        organizationId: site.organization_id,
+        name: site.name,
+        slug: site.slug || '',
+        domain: site.domain || '',
+        businessConfigId: site.business_config_id,
+        language: site.language,
+        status: site.status,
+        widgetEnabled: site.widget_enabled
+      };
+    },
+
+    resetSiteForm() {
+      this.siteForm = {
+        id: '',
+        organizationId: this.organizations[0]?.id || '',
+        name: '',
+        slug: '',
+        domain: '',
+        businessConfigId: 'default',
+        language: 'fr',
+        status: 'active',
+        widgetEnabled: true
+      };
+    },
+
+    async saveSite() {
+      const payload = {
+        organizationId: this.siteForm.organizationId,
+        name: this.siteForm.name,
+        slug: this.siteForm.slug,
+        domain: this.siteForm.domain || undefined,
+        businessConfigId: this.siteForm.businessConfigId,
+        language: this.siteForm.language,
+        status: this.siteForm.status,
+        widgetEnabled: this.siteForm.widgetEnabled
+      };
+      const url = this.siteForm.id
+        ? `${API_BASE_URL}/api/admin/sites/${this.siteForm.id}`
+        : `${API_BASE_URL}/api/admin/sites`;
+      const response = await fetch(url, {
+        method: this.siteForm.id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error("Impossible d'enregistrer le site.");
+      this.resetSiteForm();
+      await this.loadSites();
+    },
+
+    async toggleSite(site) {
+      const response = await fetch(`${API_BASE_URL}/api/admin/sites/${site.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: site.status === 'active' ? 'inactive' : 'active' })
+      });
+
+      if (!response.ok) throw new Error('Impossible de modifier le site.');
+      await this.loadSites();
+    },
+
+    async deleteSite(site) {
+      const response = await fetch(`${API_BASE_URL}/api/admin/sites/${site.id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Impossible de supprimer le site.');
+      await this.loadSites();
+    },
+
     formatDate(value) {
       return new Intl.DateTimeFormat('fr-FR', {
         dateStyle: 'short',
@@ -291,6 +494,70 @@ createApp({
           <article class="metric">
             <span>Prospects</span>
             <strong>{{ prospects.length }}</strong>
+          </article>
+        </section>
+
+        <section class="tenant-layout">
+          <article class="panel tenant-panel">
+            <div class="panel-header">
+              <h2>Organisations</h2>
+            </div>
+            <form class="tenant-form" @submit.prevent="saveOrganization">
+              <input v-model="organizationForm.name" placeholder="Nom" required />
+              <input v-model="organizationForm.slug" placeholder="Slug" required />
+              <input v-model="organizationForm.email" placeholder="Email" />
+              <input v-model="organizationForm.phone" placeholder="Telephone" />
+              <button type="submit">{{ organizationForm.id ? 'Modifier' : 'Creer' }}</button>
+              <button type="button" @click="resetOrganizationForm">Nouveau</button>
+            </form>
+            <div v-for="organization in organizations" :key="organization.id" class="tenant-row">
+              <span>
+                <strong>{{ organization.name }}</strong>
+                <small>{{ organization.slug }} · {{ organization.status }}</small>
+              </span>
+              <span class="tenant-actions">
+                <button type="button" @click="editOrganization(organization)">Editer</button>
+                <button type="button" @click="toggleOrganization(organization)">
+                  {{ organization.status === 'active' ? 'Desactiver' : 'Activer' }}
+                </button>
+                <button type="button" @click="deleteOrganization(organization)">Supprimer</button>
+              </span>
+            </div>
+          </article>
+
+          <article class="panel tenant-panel">
+            <div class="panel-header">
+              <h2>Sites</h2>
+            </div>
+            <form class="tenant-form" @submit.prevent="saveSite">
+              <select v-model="siteForm.organizationId" required>
+                <option v-for="organization in organizations" :key="organization.id" :value="organization.id">
+                  {{ organization.name }}
+                </option>
+              </select>
+              <input v-model="siteForm.name" placeholder="Nom" required />
+              <input v-model="siteForm.slug" placeholder="Slug" required />
+              <select v-model="siteForm.businessConfigId" required>
+                <option v-for="config in configs" :key="config.id" :value="config.id">
+                  {{ config.id }}
+                </option>
+              </select>
+              <button type="submit">{{ siteForm.id ? 'Modifier' : 'Creer' }}</button>
+              <button type="button" @click="resetSiteForm">Nouveau</button>
+            </form>
+            <div v-for="site in sites" :key="site.id" class="tenant-row">
+              <span>
+                <strong>{{ site.name }}</strong>
+                <small>{{ site.slug }} · {{ site.business_config_id }} · {{ site.status }}</small>
+              </span>
+              <span class="tenant-actions">
+                <button type="button" @click="editSite(site)">Editer</button>
+                <button type="button" @click="toggleSite(site)">
+                  {{ site.status === 'active' ? 'Desactiver' : 'Activer' }}
+                </button>
+                <button type="button" @click="deleteSite(site)">Supprimer</button>
+              </span>
+            </div>
           </article>
         </section>
 

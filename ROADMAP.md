@@ -1,5 +1,13 @@
 # Roadmap
 
+## Current Development - v0.4.0-dev
+
+- Organizations and sites
+- Prepared users and roles
+- Site to business configuration association
+- Widget site id, slug and key resolution
+- Tenant isolation filters
+
 ## Current Development - v0.3.0-dev
 
 - Business Configuration Engine

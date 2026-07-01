@@ -6,18 +6,70 @@ export async function initializeSchema(database: Database): Promise<void> {
       id uuid primary key,
       name text not null,
       slug text not null unique,
+      description text,
+      email text,
+      phone text,
+      country text not null default 'FR',
+      language text not null default 'fr',
+      timezone text not null default 'Europe/Paris',
+      currency text not null default 'EUR',
+      status text not null default 'active',
+      subscription_status text,
+      ai_quota integer,
+      conversation_quota integer,
+      storage_quota_mb integer,
+      plan text,
       created_at timestamptz not null default now()
+    );
+
+    create table if not exists users (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      first_name text not null,
+      last_name text not null,
+      email text not null,
+      password_hash text,
+      role text not null,
+      status text not null default 'active',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (organization_id, email)
     );
 
     create table if not exists sites (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
       name text not null,
+      slug text,
       domain text,
       widget_public_key text not null unique,
       activity text not null,
+      business_config_id text not null default 'default',
+      language text not null default 'fr',
+      status text not null default 'active',
+      widget_enabled boolean not null default true,
       created_at timestamptz not null default now()
     );
+
+    alter table organizations add column if not exists description text;
+    alter table organizations add column if not exists email text;
+    alter table organizations add column if not exists phone text;
+    alter table organizations add column if not exists country text not null default 'FR';
+    alter table organizations add column if not exists language text not null default 'fr';
+    alter table organizations add column if not exists timezone text not null default 'Europe/Paris';
+    alter table organizations add column if not exists currency text not null default 'EUR';
+    alter table organizations add column if not exists status text not null default 'active';
+    alter table organizations add column if not exists subscription_status text;
+    alter table organizations add column if not exists ai_quota integer;
+    alter table organizations add column if not exists conversation_quota integer;
+    alter table organizations add column if not exists storage_quota_mb integer;
+    alter table organizations add column if not exists plan text;
+
+    alter table sites add column if not exists slug text;
+    alter table sites add column if not exists business_config_id text not null default 'default';
+    alter table sites add column if not exists language text not null default 'fr';
+    alter table sites add column if not exists status text not null default 'active';
+    alter table sites add column if not exists widget_enabled boolean not null default true;
 
     create table if not exists visitors (
       id uuid primary key,
@@ -95,7 +147,10 @@ export async function initializeSchema(database: Database): Promise<void> {
     alter table messages add column if not exists decision_reason text;
 
     create index if not exists idx_sites_widget_public_key on sites(widget_public_key);
+    create unique index if not exists idx_sites_organization_slug on sites(organization_id, slug);
+    create index if not exists idx_sites_organization on sites(organization_id);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);
+    create index if not exists idx_conversations_organization_site on conversations(organization_id, site_id);
     create index if not exists idx_messages_conversation_created on messages(conversation_id, created_at);
     create index if not exists idx_decision_events_conversation_created
       on decision_events(conversation_id, created_at);
@@ -105,18 +160,61 @@ export async function initializeSchema(database: Database): Promise<void> {
 
 export async function seedFoundationData(database: Database): Promise<void> {
   await database.query(`
-    insert into organizations (id, name, slug)
-    values ('00000000-0000-4000-8000-000000000001', 'VISITOR-OS Demo', 'demo')
+    insert into organizations (
+      id,
+      name,
+      slug,
+      description,
+      email,
+      phone,
+      country,
+      language,
+      timezone,
+      currency,
+      status,
+      plan
+    )
+    values (
+      '00000000-0000-4000-8000-000000000001',
+      'VISITOR-OS Demo',
+      'demo',
+      'Organisation de demonstration',
+      'contact@example.com',
+      '+33000000000',
+      'FR',
+      'fr',
+      'Europe/Paris',
+      'EUR',
+      'active',
+      'dev'
+    )
     on conflict (slug) do nothing;
 
-    insert into sites (id, organization_id, name, domain, widget_public_key, activity)
+    insert into sites (
+      id,
+      organization_id,
+      name,
+      slug,
+      domain,
+      widget_public_key,
+      activity,
+      business_config_id,
+      language,
+      status,
+      widget_enabled
+    )
     values (
       '00000000-0000-4000-8000-000000000101',
       '00000000-0000-4000-8000-000000000001',
       'Site demo',
+      'demo-site',
       'localhost',
       'demo-site-key',
-      'default'
+      'default',
+      'default',
+      'fr',
+      'active',
+      true
     )
     on conflict (widget_public_key) do nothing;
   `);
