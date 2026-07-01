@@ -250,6 +250,36 @@ select {
   color: #6b7280;
 }
 
+.decision-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #d1fae5;
+}
+
+.decision-meta div {
+  min-width: 0;
+}
+
+.decision-meta dt,
+.decision-meta dd {
+  margin: 0;
+}
+
+.decision-meta dt {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.decision-meta dd {
+  margin-top: 2px;
+  color: #111827;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .alert {
   border-radius: 6px;
   padding: 12px;

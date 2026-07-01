@@ -122,6 +122,24 @@ createApp({
           closed: 'Fermee'
         }[status] ?? status
       );
+    },
+
+    confidenceLabel(value) {
+      if (value === null || value === undefined) return 'n/a';
+
+      return `${Math.round(Number(value) * 100)} %`;
+    },
+
+    sourceLabel(source) {
+      return (
+        {
+          faq: 'FAQ',
+          knowledge_base: 'Base de connaissance',
+          ai: 'IA mock',
+          fallback: 'Fallback',
+          human_escalation: 'Escalade humaine'
+        }[source] ?? source
+      );
     }
   },
 
@@ -226,6 +244,24 @@ createApp({
                 >
                   <small>{{ message.sender_type }} · {{ formatDate(message.created_at) }}</small>
                   <p>{{ message.content }}</p>
+                  <dl v-if="message.response_source" class="decision-meta">
+                    <div>
+                      <dt>Source</dt>
+                      <dd>{{ sourceLabel(message.response_source) }}</dd>
+                    </div>
+                    <div>
+                      <dt>Confiance</dt>
+                      <dd>{{ confidenceLabel(message.response_confidence) }}</dd>
+                    </div>
+                    <div>
+                      <dt>Escalade</dt>
+                      <dd>{{ message.should_escalate ? 'Oui' : 'Non' }}</dd>
+                    </div>
+                    <div>
+                      <dt>Temps</dt>
+                      <dd>{{ message.processing_time_ms }} ms</dd>
+                    </div>
+                  </dl>
                 </div>
               </section>
             </template>

@@ -8,6 +8,8 @@ import { registerAdminRoutes } from './modules/admin/admin-routes.js';
 import { registerWidgetRoutes } from './modules/widget/widget-routes.js';
 import { registerSecurityHeaders } from './core/security/security-headers.js';
 import { registerSimpleRateLimit } from './core/security/simple-rate-limit.js';
+import { createDefaultAiProvider } from './modules/ai/mock-ai-provider.js';
+import { createDecisionEngine } from './modules/decision-engine/decision-engine.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -43,7 +45,10 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     environment: dependencies.config.app.environment
   }));
 
-  registerWidgetRoutes(app, dependencies.database);
+  const aiProvider = createDefaultAiProvider(dependencies.config.ai.openAiApiKey);
+  const decisionEngine = createDecisionEngine({ aiProvider });
+
+  registerWidgetRoutes(app, dependencies.database, decisionEngine);
   registerAdminRoutes(app, dependencies.database);
 
   return app;

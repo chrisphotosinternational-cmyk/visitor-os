@@ -64,6 +64,7 @@ Useful variables:
 - `DATABASE_CONNECTION_TIMEOUT_MS`
 - `ALLOWED_ORIGINS`
 - `SHUTDOWN_TIMEOUT_MS`
+- `OPENAI_API_KEY` optional, unused by default in Sprint 2 unless a real provider is added later.
 
 The backend validates configuration at startup and fails fast when required variables are missing or invalid.
 
@@ -191,7 +192,26 @@ The widget/admin routes are intentionally minimal and exist only to validate the
 - Production requires explicit `ALLOWED_ORIGINS`.
 - Basic security headers are sent on responses.
 - A simple in-memory rate limiter protects the MVP.
+- If `OPENAI_API_KEY` is absent, the decision engine uses the mock AI provider and does not call external services.
 - Authentication is intentionally not present yet and must be added before public production usage.
+
+## Conversational Decision Engine
+
+The widget message flow is now:
+
+```text
+visitor message -> decision engine -> assistant reply -> persisted decision metadata
+```
+
+Decision priority:
+
+1. human escalation for sensitive requests;
+2. FAQ local match;
+3. knowledge base match;
+4. AI provider abstraction;
+5. fallback.
+
+The admin conversation detail shows the response source, confidence, escalation flag and processing time for assistant messages.
 
 ## PostgreSQL
 

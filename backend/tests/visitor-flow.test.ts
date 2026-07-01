@@ -40,9 +40,16 @@ describe('visitor to admin flow', () => {
       }
     });
     assert.equal(messageResponse.statusCode, 200);
-    const message = messageResponse.json() as { prospectId: string; reply: string };
+    const message = messageResponse.json() as {
+      prospectId: string;
+      reply: string;
+      source: string;
+      shouldEscalate: boolean;
+    };
     assert.ok(message.prospectId);
-    assert.match(message.reply, /tarifs/i);
+    assert.equal(message.source, 'human_escalation');
+    assert.equal(message.shouldEscalate, true);
+    assert.match(message.reply, /information approximative/i);
 
     const prospectsResponse = await app.inject({
       method: 'GET',
@@ -79,10 +86,14 @@ describe('visitor to admin flow', () => {
     });
     assert.equal(conversationDetailResponse.statusCode, 200);
     const conversationDetail = conversationDetailResponse.json() as {
-      conversation: { messages: Array<{ content: string }>; status: string };
+      conversation: {
+        messages: Array<{ content: string; response_source: string | null }>;
+        status: string;
+      };
     };
     assert.equal(conversationDetail.conversation.messages.length, 3);
     assert.equal(conversationDetail.conversation.status, 'open');
+    assert.equal(conversationDetail.conversation.messages[2]?.response_source, 'human_escalation');
 
     const statusResponse = await app.inject({
       method: 'PATCH',
@@ -140,6 +151,10 @@ function createMemoryDatabase(): Database {
         return result([site]);
       }
 
+      if (sql.includes('from sites where id')) {
+        return result(String(values[0]) === site.id ? [site] : []);
+      }
+
       if (sql.includes('insert into visitors')) {
         const id = String(values[0]);
         const anonymousId = String(values[3]);
@@ -177,12 +192,22 @@ function createMemoryDatabase(): Database {
           conversation_id: values[2],
           sender_type: values[3],
           content: values[4],
+          response_source: values[5] ?? null,
+          response_confidence: values[6] ?? null,
+          should_escalate: values[7] ?? null,
+          processing_time_ms: values[8] ?? null,
+          matched_item_id: values[9] ?? null,
+          decision_reason: values[10] ?? null,
           created_at: new Date()
         };
         const conversationMessages = messages.get(String(row.conversation_id)) ?? [];
         conversationMessages.push(row);
         messages.set(String(row.conversation_id), conversationMessages);
         return result([row]);
+      }
+
+      if (sql.includes('insert into decision_events')) {
+        return result([]);
       }
 
       if (sql.includes('insert into prospects')) {

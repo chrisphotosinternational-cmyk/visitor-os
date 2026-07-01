@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.2.0-dev - Sprint 2
+
+- Added conversational decision engine with FAQ, knowledge base, mock AI provider, fallback and human escalation.
+- Stored response source, confidence, escalation flag and processing time on assistant messages.
+- Added decision event persistence for future metrics.
+- Displayed decision metadata in the minimal admin conversation detail.
+- Added tests for FAQ matching, escalation, mock provider fallback and widget-to-admin persistence.
+
 ## v0.1.0 - Release Candidate
 
 - Delivered first working MVP flow: widget message, backend response, PostgreSQL persistence, admin dashboard.

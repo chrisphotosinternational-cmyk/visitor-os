@@ -131,9 +131,25 @@ export class ProspectRepository {
           id: string;
           sender_type: string;
           content: string;
+          response_source: string | null;
+          response_confidence: number | null;
+          should_escalate: boolean | null;
+          processing_time_ms: number | null;
+          matched_item_id: string | null;
+          decision_reason: string | null;
           created_at: Date;
         }>(
-          `select id, sender_type, content, created_at
+          `select
+             id,
+             sender_type,
+             content,
+             response_source,
+             response_confidence,
+             should_escalate,
+             processing_time_ms,
+             matched_item_id,
+             decision_reason,
+             created_at
            from messages
            where conversation_id = $1
            order by created_at asc`,

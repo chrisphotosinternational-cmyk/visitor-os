@@ -5,6 +5,7 @@ import { AppError } from '../../core/errors/app-error.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
 import { ProspectRepository } from '../prospects/prospect-repository.js';
 import type { Database } from '../../database/client.js';
+import type { DecisionEngine } from '../decision-engine/decision-engine.js';
 
 const siteKeyQuerySchema = z.object({
   siteKey: z.string().min(1)
@@ -21,7 +22,11 @@ const messageSchema = z.object({
   content: z.string().min(1).max(2000)
 });
 
-export function registerWidgetRoutes(app: FastifyInstance, database: Database): void {
+export function registerWidgetRoutes(
+  app: FastifyInstance,
+  database: Database,
+  decisionEngine: DecisionEngine
+): void {
   const conversations = new ConversationRepository(database);
   const prospects = new ProspectRepository(database);
 
@@ -105,6 +110,7 @@ export function registerWidgetRoutes(app: FastifyInstance, database: Database): 
         code: 'CONVERSATION_NOT_FOUND'
       });
     }
+    const site = await conversations.findSite(conversation.site_id);
 
     await conversations.addMessage({
       organizationId: conversation.organization_id,
@@ -127,33 +133,58 @@ export function registerWidgetRoutes(app: FastifyInstance, database: Database): 
       await conversations.linkProspect(conversation.id, prospect.id);
     }
 
-    const reply = buildTemporaryReply(body.content);
+    const recentHistory = await conversations.listMessages(conversation.id);
+    const decision = await decisionEngine.decide({
+      conversationId: conversation.id,
+      siteId: conversation.site_id,
+      activity: site?.activity ?? 'demo',
+      message: body.content,
+      recentHistory: recentHistory.map((message) => ({
+        senderType: message.sender_type,
+        content: message.content
+      })),
+      pageUrl: conversation.page_url
+    });
 
-    await conversations.addMessage({
+    const decisionMetadata = {
+      responseSource: decision.source,
+      responseConfidence: decision.confidence,
+      shouldEscalate: decision.shouldEscalate,
+      processingTimeMs: decision.processingTimeMs,
+      ...(decision.matchedItemId ? { matchedItemId: decision.matchedItemId } : {}),
+      ...(decision.reason ? { decisionReason: decision.reason } : {})
+    };
+
+    const assistantMessage = await conversations.addMessage({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
       senderType: 'assistant',
-      content: reply
+      content: decision.reply,
+      decision: decisionMetadata
+    });
+
+    await conversations.addDecisionEvent({
+      organizationId: conversation.organization_id,
+      conversationId: conversation.id,
+      messageId: assistantMessage.id,
+      source: decision.source,
+      confidence: decision.confidence,
+      shouldEscalate: decision.shouldEscalate,
+      processingTimeMs: decision.processingTimeMs,
+      ...(decision.matchedItemId ? { matchedItemId: decision.matchedItemId } : {}),
+      ...(decision.reason ? { reason: decision.reason } : {})
     });
 
     return {
       conversationId: conversation.id,
       prospectId: prospect?.id ?? conversation.prospect_id,
-      reply
+      reply: decision.reply,
+      source: decision.source,
+      confidence: decision.confidence,
+      shouldEscalate: decision.shouldEscalate,
+      processingTimeMs: decision.processingTimeMs,
+      matchedItemId: decision.matchedItemId,
+      reason: decision.reason
     };
   });
-}
-
-function buildTemporaryReply(message: string): string {
-  const normalized = message.toLowerCase();
-
-  if (/(prix|tarif)/.test(normalized)) {
-    return 'Merci pour votre question. Les tarifs dependent de votre besoin ; je transmets votre demande pour une reponse precise.';
-  }
-
-  if (/(disponible|disponibilite|réserver|reserver|reservation|réservation)/.test(normalized)) {
-    return 'Je peux vous aider a preparer une demande de disponibilite. Une confirmation humaine reste necessaire.';
-  }
-
-  return 'Merci, votre message a bien ete recu. Cette reponse temporaire sera remplacee plus tard par la FAQ et le module IA.';
 }

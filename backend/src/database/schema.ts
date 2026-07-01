@@ -64,12 +64,41 @@ export async function initializeSchema(database: Database): Promise<void> {
       conversation_id uuid not null references conversations(id),
       sender_type text not null,
       content text not null,
+      response_source text,
+      response_confidence numeric(4, 3),
+      should_escalate boolean,
+      processing_time_ms integer,
+      matched_item_id text,
+      decision_reason text,
       created_at timestamptz not null default now()
     );
+
+    create table if not exists decision_events (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      conversation_id uuid not null references conversations(id),
+      message_id uuid references messages(id),
+      source text not null,
+      confidence numeric(4, 3) not null,
+      should_escalate boolean not null,
+      processing_time_ms integer not null,
+      matched_item_id text,
+      reason text,
+      created_at timestamptz not null default now()
+    );
+
+    alter table messages add column if not exists response_source text;
+    alter table messages add column if not exists response_confidence numeric(4, 3);
+    alter table messages add column if not exists should_escalate boolean;
+    alter table messages add column if not exists processing_time_ms integer;
+    alter table messages add column if not exists matched_item_id text;
+    alter table messages add column if not exists decision_reason text;
 
     create index if not exists idx_sites_widget_public_key on sites(widget_public_key);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);
     create index if not exists idx_messages_conversation_created on messages(conversation_id, created_at);
+    create index if not exists idx_decision_events_conversation_created
+      on decision_events(conversation_id, created_at);
     create index if not exists idx_prospects_site_updated on prospects(site_id, updated_at desc);
   `);
 }

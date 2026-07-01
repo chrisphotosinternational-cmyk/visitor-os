@@ -27,7 +27,8 @@ const environmentSchema = z
       ),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
-    RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120)
+    RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
+    OPENAI_API_KEY: z.string().optional()
   })
   .superRefine((env, context) => {
     if (env.NODE_ENV === 'production' && env.ALLOWED_ORIGINS.length === 0) {
@@ -62,6 +63,9 @@ export type AppConfig = {
     rateLimitWindowMs: number;
     rateLimitMaxRequests: number;
   };
+  ai: {
+    openAiApiKey?: string;
+  };
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
@@ -77,7 +81,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
 
   const env = result.data;
 
-  return {
+  const config: AppConfig = {
     app: {
       name: env.APP_NAME,
       environment: env.NODE_ENV
@@ -99,6 +103,13 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       allowedOrigins: env.ALLOWED_ORIGINS,
       rateLimitWindowMs: env.RATE_LIMIT_WINDOW_MS,
       rateLimitMaxRequests: env.RATE_LIMIT_MAX_REQUESTS
-    }
+    },
+    ai: {}
   };
+
+  if (env.OPENAI_API_KEY) {
+    config.ai.openAiApiKey = env.OPENAI_API_KEY;
+  }
+
+  return config;
 }

@@ -1,5 +1,13 @@
 # Roadmap
 
+## Current Development - v0.2.0-dev
+
+- Conversational decision engine
+- FAQ and knowledge base matching
+- Mock AI provider ready for future OpenAI integration
+- Human escalation for sensitive or uncertain requests
+- Minimal decision metrics stored for later analysis
+
 ## Current Release - v0.1.0 RC
 
 - MVP widget demo

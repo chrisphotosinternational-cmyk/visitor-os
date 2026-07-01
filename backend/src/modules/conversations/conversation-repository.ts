@@ -36,7 +36,22 @@ export type MessageRecord = {
   conversation_id: string;
   sender_type: 'visitor' | 'assistant' | 'system';
   content: string;
+  response_source: string | null;
+  response_confidence: number | null;
+  should_escalate: boolean | null;
+  processing_time_ms: number | null;
+  matched_item_id: string | null;
+  decision_reason: string | null;
   created_at: Date;
+};
+
+export type DecisionMetadata = {
+  responseSource: string;
+  responseConfidence: number;
+  shouldEscalate: boolean;
+  processingTimeMs: number;
+  matchedItemId?: string;
+  decisionReason?: string;
 };
 
 export type AdminConversationListItem = {
@@ -62,6 +77,15 @@ export class ConversationRepository {
     const result = await this.database.query<SiteRecord>(
       `select id, organization_id, name, activity from sites where widget_public_key = $1`,
       [widgetKey]
+    );
+
+    return result.rows[0] ?? null;
+  }
+
+  async findSite(id: string): Promise<SiteRecord | null> {
+    const result = await this.database.query<SiteRecord>(
+      `select id, organization_id, name, activity from sites where id = $1`,
+      [id]
     );
 
     return result.rows[0] ?? null;
@@ -127,17 +151,84 @@ export class ConversationRepository {
     conversationId: string;
     senderType: MessageRecord['sender_type'];
     content: string;
+    decision?: DecisionMetadata;
   }): Promise<MessageRecord> {
     const result = await this.database.query<MessageRecord>(
       `
-      insert into messages (id, organization_id, conversation_id, sender_type, content)
-      values ($1, $2, $3, $4, $5)
+      insert into messages (
+        id,
+        organization_id,
+        conversation_id,
+        sender_type,
+        content,
+        response_source,
+        response_confidence,
+        should_escalate,
+        processing_time_ms,
+        matched_item_id,
+        decision_reason
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       returning *
       `,
-      [randomUUID(), input.organizationId, input.conversationId, input.senderType, input.content]
+      [
+        randomUUID(),
+        input.organizationId,
+        input.conversationId,
+        input.senderType,
+        input.content,
+        input.decision?.responseSource ?? null,
+        input.decision?.responseConfidence ?? null,
+        input.decision?.shouldEscalate ?? null,
+        input.decision?.processingTimeMs ?? null,
+        input.decision?.matchedItemId ?? null,
+        input.decision?.decisionReason ?? null
+      ]
     );
 
     return requireRow(result.rows[0], 'Message was not created');
+  }
+
+  async addDecisionEvent(input: {
+    organizationId: string;
+    conversationId: string;
+    messageId: string;
+    source: string;
+    confidence: number;
+    shouldEscalate: boolean;
+    processingTimeMs: number;
+    matchedItemId?: string;
+    reason?: string;
+  }): Promise<void> {
+    await this.database.query(
+      `
+      insert into decision_events (
+        id,
+        organization_id,
+        conversation_id,
+        message_id,
+        source,
+        confidence,
+        should_escalate,
+        processing_time_ms,
+        matched_item_id,
+        reason
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `,
+      [
+        randomUUID(),
+        input.organizationId,
+        input.conversationId,
+        input.messageId,
+        input.source,
+        input.confidence,
+        input.shouldEscalate,
+        input.processingTimeMs,
+        input.matchedItemId ?? null,
+        input.reason ?? null
+      ]
+    );
   }
 
   async linkProspect(conversationId: string, prospectId: string): Promise<void> {
