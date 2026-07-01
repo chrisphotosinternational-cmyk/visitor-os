@@ -12,6 +12,10 @@ import {
   type BusinessConfigEngine
 } from '../business-config/configuration-loader.js';
 import { buildSystemPrompt } from '../business-config/prompt-builder.js';
+import type { AIConfigurationRepository } from '../ai/ai-configuration-repository.js';
+import { aiConfigurationSchema, defaultModelForProvider } from '../ai/ai-config.js';
+import { estimateCostFromConfig } from '../ai/cost-estimator.js';
+import type { ProviderFactory } from '../ai/provider-factory.js';
 import {
   OrganizationRepository,
   organizationStatuses
@@ -52,11 +56,17 @@ const organizationQuerySchema = z.object({
   search: z.string().optional()
 });
 
+const aiConfigPayloadSchema = aiConfigurationSchema.extend({
+  organizationId: z.string().uuid().optional()
+});
+
 export function registerAdminRoutes(
   app: FastifyInstance,
   database: Database,
   businessConfigEngine: BusinessConfigEngine,
-  auth: AuthService
+  auth: AuthService,
+  aiConfigurations?: AIConfigurationRepository,
+  providerFactory?: ProviderFactory
 ): void {
   const prospects = new ProspectRepository(database);
   const conversations = new ConversationRepository(database);
@@ -93,6 +103,97 @@ export function registerAdminRoutes(
     const context = getAuthContext(authContexts, request);
 
     return { user: context.user, permissions: permissionsForRole(context.user.role) };
+  });
+
+  app.get('/api/admin/ai/config', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId =
+      auth.requireOrganizationAccess(context, query.organizationId) ?? context.user.organizationId;
+    const configuration =
+      (await aiConfigurations?.getByOrganizationId(organizationId)) ??
+      aiConfigurationSchema.parse({ provider: 'mock' });
+
+    return {
+      organizationId,
+      configuration,
+      estimates: estimateCostFromConfig(configuration, 100),
+      providers: ['mock', 'openai', 'anthropic', 'mistral', 'ollama']
+    };
+  });
+
+  app.put('/api/admin/ai/config', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = aiConfigPayloadSchema.parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+    const provider = body.provider;
+    const configuration = {
+      ...body,
+      model: body.model || defaultModelForProvider(provider),
+      systemPrompt: body.systemPrompt
+    };
+    const saved =
+      (await aiConfigurations?.save(organizationId, configuration)) ??
+      aiConfigurationSchema.parse(configuration);
+
+    return {
+      organizationId,
+      configuration: saved,
+      estimates: estimateCostFromConfig(saved, 100)
+    };
+  });
+
+  app.post('/api/admin/ai/test', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = z
+      .object({
+        organizationId: z.string().uuid().optional(),
+        configId: z.string().min(1).optional(),
+        question: z.string().min(1).default('Bonjour, pouvez-vous aider un visiteur ?')
+      })
+      .parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+    const businessConfig = await businessConfigEngine.resolveConfig(body.configId);
+    const configuration =
+      (await aiConfigurations?.getByOrganizationId(organizationId)) ??
+      aiConfigurationSchema.parse({ provider: 'mock' });
+    const provider = providerFactory?.createProviderFor(configuration);
+
+    if (!provider) {
+      throw new AppError('AI provider factory is not available', {
+        statusCode: 503,
+        code: 'AI_PROVIDER_UNAVAILABLE'
+      });
+    }
+
+    const result = await provider.generateReply({
+      organizationId,
+      siteId: '00000000-0000-4000-8000-000000000000',
+      conversationId: '00000000-0000-4000-8000-000000000000',
+      question: body.question,
+      messages: [],
+      systemPrompt: configuration.systemPrompt || buildSystemPrompt(businessConfig),
+      businessContext: {
+        brandName: businessConfig.identity.name,
+        activity: businessConfig.identity.category,
+        rules: [...businessConfig.restrictions.never, ...businessConfig.restrictions.always],
+        fallbackMessage:
+          businessConfig.widget.fallbackMessage ??
+          "Je n'ai pas encore cette information. Contactez-nous pour une reponse precise."
+      },
+      configuration
+    });
+
+    return {
+      result,
+      prompt: configuration.systemPrompt || buildSystemPrompt(businessConfig),
+      estimates: estimateCostFromConfig(configuration, 100)
+    };
   });
 
   app.get('/api/admin/conversations', async (request) => {

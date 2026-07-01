@@ -298,6 +298,14 @@ async function createMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('insert into ai_events')) {
+        return result([]);
+      }
+
+      if (sql.includes('from ai_configurations')) {
+        return result([]);
+      }
+
       if (sql.includes('insert into prospects')) {
         const row = {
           id: values[0],

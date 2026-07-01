@@ -8,7 +8,8 @@ import { registerAdminRoutes } from './modules/admin/admin-routes.js';
 import { registerWidgetRoutes } from './modules/widget/widget-routes.js';
 import { registerSecurityHeaders } from './core/security/security-headers.js';
 import { registerSimpleRateLimit } from './core/security/simple-rate-limit.js';
-import { createDefaultAiProvider } from './modules/ai/mock-ai-provider.js';
+import { AIConfigurationRepository } from './modules/ai/ai-configuration-repository.js';
+import { ProviderFactory } from './modules/ai/provider-factory.js';
 import { createDecisionEngine } from './modules/decision-engine/decision-engine.js';
 import {
   createBusinessConfigEngine,
@@ -57,12 +58,21 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     createBusinessConfigEngine({
       configDirectory: dependencies.config.businessConfig.directory
     });
-  const aiProvider = createDefaultAiProvider(dependencies.config.ai.openAiApiKey);
+  const aiConfigurations = new AIConfigurationRepository(dependencies.database);
+  const aiProviderFactory = new ProviderFactory(dependencies.config, aiConfigurations);
+  const aiProvider = aiProviderFactory.createProvider();
   const decisionEngine = createDecisionEngine({ aiProvider, businessConfigEngine });
   const authService = new AuthService(dependencies.database, dependencies.config);
 
   registerWidgetRoutes(app, dependencies.database, decisionEngine);
-  registerAdminRoutes(app, dependencies.database, businessConfigEngine, authService);
+  registerAdminRoutes(
+    app,
+    dependencies.database,
+    businessConfigEngine,
+    authService,
+    aiConfigurations,
+    aiProviderFactory
+  );
 
   return app;
 }

@@ -1,6 +1,8 @@
-import type { AiProvider } from '../ai/ai-provider.js';
+import type { AIProvider, AIProviderConfiguration, AIProviderResult } from '../ai/ai-provider.js';
+import { defaultAIConfiguration } from '../ai/ai-config.js';
 import { createDefaultAiProvider } from '../ai/mock-ai-provider.js';
 import { type BusinessConfigEngine } from '../business-config/configuration-loader.js';
+import { buildSystemPrompt } from '../business-config/prompt-builder.js';
 import type {
   BusinessConfig,
   BusinessFaq,
@@ -11,6 +13,7 @@ import type {
 export type DecisionSource = 'faq' | 'knowledge_base' | 'ai' | 'fallback' | 'human_escalation';
 
 export type DecisionEngineInput = {
+  organizationId: string;
   conversationId: string;
   siteId: string;
   activity: string;
@@ -31,6 +34,15 @@ export type DecisionEngineResult = {
   processingTimeMs: number;
   matchedItemId?: string;
   reason?: string;
+  aiEvent?: {
+    provider: string;
+    model: string;
+    latencyMs: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCost: number;
+    fallbackUsed: boolean;
+  };
 };
 
 export type DecisionEngine = {
@@ -43,7 +55,7 @@ const KNOWLEDGE_BASE_MIN_CONFIDENCE = 0.66;
 const AI_MIN_CONFIDENCE = 0.35;
 
 export function createDecisionEngine(options: {
-  aiProvider?: AiProvider;
+  aiProvider?: AIProvider;
   businessConfigEngine: BusinessConfigEngine;
 }): DecisionEngine {
   const aiProvider = options?.aiProvider ?? createDefaultAiProvider();
@@ -103,18 +115,27 @@ export function createDecisionEngine(options: {
         );
       }
 
+      const aiConfiguration = resolveAIConfiguration(config);
       const aiInput = {
+        organizationId: input.organizationId,
+        siteId: input.siteId,
+        conversationId: input.conversationId,
         question: input.message,
-        recentHistory: input.recentHistory,
+        messages: input.recentHistory.map((message) => ({
+          role: message.senderType === 'assistant' ? ('assistant' as const) : ('user' as const),
+          content: message.content
+        })),
+        systemPrompt: aiConfiguration.systemPrompt || buildSystemPrompt(config),
         businessContext: {
           brandName: config.identity.name,
           activity: config.identity.category,
           rules: [...config.restrictions.never, ...config.restrictions.always],
           fallbackMessage: config.widget.fallbackMessage ?? buildEscalationReply(config)
-        }
+        },
+        configuration: aiConfiguration
       };
 
-      const aiResult = await aiProvider.generateReply(
+      const aiResult: AIProviderResult = await aiProvider.generateReply(
         input.language ? { ...aiInput, language: input.language } : aiInput
       );
 
@@ -125,7 +146,8 @@ export function createDecisionEngine(options: {
             source: 'ai',
             confidence: clampConfidence(aiResult.confidence),
             shouldEscalate: false,
-            reason: `${aiProvider.providerName}:${aiResult.reason}`
+            reason: `${aiResult.provider}:${aiResult.reason}`,
+            aiEvent: toAIEvent(aiResult)
           },
           startedAt
         );
@@ -137,11 +159,32 @@ export function createDecisionEngine(options: {
           source: 'fallback',
           confidence: 0.25,
           shouldEscalate: true,
-          reason: 'low_confidence_fallback'
+          reason: 'low_confidence_fallback',
+          aiEvent: toAIEvent(aiResult)
         },
         startedAt
       );
     }
+  };
+}
+
+function resolveAIConfiguration(config: BusinessConfig): AIProviderConfiguration {
+  return {
+    ...defaultAIConfiguration,
+    language: config.personality.defaultLanguage,
+    systemPrompt: buildSystemPrompt(config)
+  };
+}
+
+function toAIEvent(result: AIProviderResult): NonNullable<DecisionEngineResult['aiEvent']> {
+  return {
+    provider: result.provider,
+    model: result.model,
+    latencyMs: result.latencyMs,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    estimatedCost: result.estimatedCost,
+    fallbackUsed: result.fallbackUsed
   };
 }
 

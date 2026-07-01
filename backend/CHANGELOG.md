@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added AI Provider Engine with mock, OpenAI-ready adapter, provider factory and fallback.
+- Added AI configuration and AI event database tables.
+- Added admin AI configuration and provider test routes.
+- Added AI provider, fallback and cost estimation tests.
 - Added first minimal visitor-to-admin vertical slice.
 - Added widget routes for conversation start and message send.
 - Added admin conversation list, detail, search, and status update routes.

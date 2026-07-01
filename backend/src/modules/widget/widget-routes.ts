@@ -139,6 +139,7 @@ export function registerWidgetRoutes(
 
     const recentHistory = await conversations.listMessages(conversation.id);
     const decision = await decisionEngine.decide({
+      organizationId: conversation.organization_id,
       conversationId: conversation.id,
       siteId: conversation.site_id,
       activity: site?.business_config_id ?? 'default',
@@ -178,6 +179,15 @@ export function registerWidgetRoutes(
       ...(decision.matchedItemId ? { matchedItemId: decision.matchedItemId } : {}),
       ...(decision.reason ? { reason: decision.reason } : {})
     });
+
+    if (decision.aiEvent) {
+      await conversations.addAIEvent({
+        organizationId: conversation.organization_id,
+        siteId: conversation.site_id,
+        conversationId: conversation.id,
+        ...decision.aiEvent
+      });
+    }
 
     return {
       conversationId: conversation.id,

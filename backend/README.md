@@ -14,8 +14,10 @@ This package now contains the first minimal vertical slice:
 - admin prospect listing;
 - prospect detail with conversation history;
 - prospect status update.
+- admin authentication, sessions and RBAC;
+- AI Provider Engine with mock/OpenAI abstraction and fallback.
 
-It still contains no chatbot AI, no authentication, no advanced CRM, and no business-specific logic.
+It still contains no advanced CRM, notifications, payments or business-specific hardcoded logic.
 
 ## Stack
 
@@ -64,8 +66,10 @@ Useful variables:
 - `DATABASE_CONNECTION_TIMEOUT_MS`
 - `ALLOWED_ORIGINS`
 - `SHUTDOWN_TIMEOUT_MS`
-- `OPENAI_API_KEY` optional, unused by default in Sprint 2 unless a real provider is added later.
+- `OPENAI_API_KEY` optional. If absent, OpenAI requests automatically fall back to the mock provider.
 - `BUSINESS_CONFIG_DIR` defaults to `../configs`.
+- `ADMIN_SESSION_SECRET`, `ADMIN_SESSION_TTL_MS`, `ADMIN_SESSION_RENEWAL_MS`.
+- `FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` can bootstrap the first admin user.
 
 The backend validates configuration at startup and fails fast when required variables are missing or invalid.
 
@@ -129,6 +133,8 @@ The test suite verifies:
 - technical health route;
 - database startup check contract.
 - full MVP visitor-to-admin flow.
+- admin authentication, sessions, RBAC and organization isolation.
+- AI provider abstraction, mock fallback, OpenAI adapter and cost estimation.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -184,8 +190,11 @@ tests/
 - `GET /api/admin/prospects`
 - `GET /api/admin/prospects/:prospectId`
 - `PATCH /api/admin/prospects/:prospectId/status`
+- `GET /api/admin/ai/config`
+- `PUT /api/admin/ai/config`
+- `POST /api/admin/ai/test`
 
-The widget/admin routes are intentionally minimal and exist only to validate the first product flow.
+The widget/admin routes are intentionally minimal and exist only to validate the product flow.
 
 ## Security Notes
 
@@ -194,7 +203,7 @@ The widget/admin routes are intentionally minimal and exist only to validate the
 - Basic security headers are sent on responses.
 - A simple in-memory rate limiter protects the MVP.
 - If `OPENAI_API_KEY` is absent, the decision engine uses the mock AI provider and does not call external services.
-- Authentication is intentionally not present yet and must be added before public production usage.
+- Admin routes are protected by signed httpOnly sessions and RBAC.
 
 ## Conversational Decision Engine
 
@@ -209,10 +218,24 @@ Decision priority:
 1. human escalation for sensitive requests;
 2. FAQ local match;
 3. knowledge base match;
-4. AI provider abstraction;
+4. AI provider abstraction with provider factory and fallback;
 5. fallback.
 
 The admin conversation detail shows the response source, confidence, escalation flag and processing time for assistant messages.
+
+## AI Provider Engine
+
+The Decision Engine depends only on the `AIProvider` interface. Providers receive a generated
+system prompt, conversation context and normalized configuration. They do not build prompts.
+
+Supported architecture:
+
+- `MockAIProvider`: zero-cost test provider.
+- `OpenAIProvider`: real adapter, active only when `OPENAI_API_KEY` is configured.
+- `PreparedProvider`: Anthropic, Mistral and Ollama placeholders ready for future implementation.
+- `ProviderFactory`: selects the configured provider and falls back to mock when a provider is unavailable.
+
+AI events are persisted with provider, model, latency, input tokens, output tokens and estimated cost.
 
 ## Business Configuration Engine
 

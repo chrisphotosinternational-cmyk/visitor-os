@@ -1,5 +1,14 @@
 # Roadmap
 
+## Current Development - v0.6.0-dev
+
+- AI Provider Engine
+- Mock provider and OpenAI provider abstraction
+- Provider factory and fallback strategy
+- AI cost estimation
+- AI events for future monitoring
+- Minimal admin AI configuration
+
 ## Current Development - v0.5.0-dev
 
 - Admin authentication

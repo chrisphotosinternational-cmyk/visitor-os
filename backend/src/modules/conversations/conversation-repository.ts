@@ -246,6 +246,51 @@ export class ConversationRepository {
     );
   }
 
+  async addAIEvent(input: {
+    organizationId: string;
+    siteId: string;
+    conversationId: string;
+    provider: string;
+    model: string;
+    latencyMs: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCost: number;
+    fallbackUsed: boolean;
+  }): Promise<void> {
+    await this.database.query(
+      `
+      insert into ai_events (
+        id,
+        organization_id,
+        site_id,
+        conversation_id,
+        provider,
+        model,
+        latency_ms,
+        input_tokens,
+        output_tokens,
+        estimated_cost,
+        fallback_used
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `,
+      [
+        randomUUID(),
+        input.organizationId,
+        input.siteId,
+        input.conversationId,
+        input.provider,
+        input.model,
+        input.latencyMs,
+        input.inputTokens,
+        input.outputTokens,
+        input.estimatedCost,
+        input.fallbackUsed
+      ]
+    );
+  }
+
   async linkProspect(conversationId: string, prospectId: string): Promise<void> {
     await this.database.query(
       `update conversations set prospect_id = $1, updated_at = now() where id = $2`,

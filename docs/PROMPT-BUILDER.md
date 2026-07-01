@@ -35,5 +35,11 @@ FAQ:
 
 ## Limite volontaire
 
-Le Prompt Builder ne choisit pas la reponse et ne contacte pas de modele IA. Il fournit seulement le contexte systeme lorsque le futur provider OpenAI sera ajoute.
+Le Prompt Builder ne choisit pas la reponse et ne contacte pas de modele IA. Il fournit seulement le contexte systeme au AI Provider Engine.
 
+Depuis le Sprint 6 :
+
+- le provider ne construit jamais le prompt ;
+- le Decision Engine fournit le prompt systeme genere ;
+- OpenAI, Anthropic, Mistral, Ollama et Mock recoivent le meme contrat ;
+- FAQ, Knowledge Base et Business Rules sont evaluees avant tout appel IA.

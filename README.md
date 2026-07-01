@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Development version: `v0.5.0-dev`.
+Development version: `v0.6.0-dev`.
 
 The first working MVP is available:
 
@@ -19,6 +19,7 @@ The first working MVP is available:
 - multi-tenant foundation with organizations and sites;
 - configurable business engine per site.
 - protected admin authentication and RBAC.
+- AI Provider Engine with mock fallback and OpenAI-ready abstraction.
 
 ## Planned Modules
 
@@ -51,7 +52,7 @@ The first working MVP is available:
 - Hosting: Render for V1, Railway as an alternative
 - Email: Resend later
 - Errors: Sentry later
-- AI: OpenAI API later
+- AI: provider abstraction with Mock and OpenAI-ready provider
 
 ## Simplified Roadmap
 
@@ -63,7 +64,7 @@ The first working MVP is available:
 6. First conversation flow
 7. Lead capture
 8. CRM foundations
-9. AI integration
+9. AI provider integration
 10. Analytics, exports, and notifications
 
 Current architecture:

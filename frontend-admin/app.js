@@ -31,6 +31,22 @@ createApp({
       configText: '',
       configPrompt: '',
       configHistory: [],
+      aiProviders: [],
+      aiConfig: {
+        provider: 'mock',
+        model: 'mock-conversational-v1',
+        temperature: 0.2,
+        maxTokens: 600,
+        topP: 1,
+        timeoutMs: 8000,
+        language: 'fr',
+        systemPrompt: '',
+        enabled: true,
+        futureCostLimit: null
+      },
+      aiTestQuestion: 'Bonjour, pouvez-vous aider un visiteur ?',
+      aiTestResult: null,
+      aiCostEstimates: null,
       organizationForm: {
         id: '',
         name: '',
@@ -128,6 +144,7 @@ createApp({
           this.loadConversations(),
           this.loadProspects(),
           this.loadConfigs(),
+          this.loadAiConfig(),
           this.loadOrganizations(),
           this.loadSites()
         ]);
@@ -166,6 +183,57 @@ createApp({
 
       if (!this.selectedConfigId && this.configs.length > 0) {
         await this.selectConfig(this.configs[0].id);
+      }
+    },
+
+    async loadAiConfig() {
+      if (!this.can('settings:access')) return;
+
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/ai/config`);
+      if (!response.ok) throw new Error('Impossible de charger la configuration IA.');
+      const data = await response.json();
+      this.aiProviders = data.providers;
+      this.aiConfig = data.configuration;
+      this.aiCostEstimates = data.estimates;
+    },
+
+    async saveAiConfig() {
+      this.error = '';
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/ai/config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.aiConfig)
+        });
+        if (!response.ok) throw new Error('Configuration IA invalide.');
+        const data = await response.json();
+        this.aiConfig = data.configuration;
+        this.aiCostEstimates = data.estimates;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async testAiProvider() {
+      this.error = '';
+      this.aiTestResult = null;
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/ai/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            configId: this.selectedConfigId,
+            question: this.aiTestQuestion
+          })
+        });
+        if (!response.ok) throw new Error('Test IA impossible.');
+        const data = await response.json();
+        this.aiTestResult = data.result;
+        this.aiCostEstimates = data.estimates;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
       }
     },
 
@@ -798,6 +866,99 @@ createApp({
                 </li>
               </ul>
             </div>
+          </div>
+        </section>
+
+        <section v-if="can('settings:access')" class="panel ai-panel">
+          <div class="panel-header config-header">
+            <div>
+              <h2>Configuration IA</h2>
+              <p class="muted">Provider interchangeable, test sans coupler le moteur de decision.</p>
+            </div>
+            <div class="config-actions">
+              <button type="button" @click="saveAiConfig">Sauvegarder IA</button>
+              <button type="button" @click="testAiProvider">Tester le provider</button>
+            </div>
+          </div>
+
+          <div class="ai-grid">
+            <label>
+              Provider
+              <select v-model="aiConfig.provider">
+                <option v-for="provider in aiProviders" :key="provider" :value="provider">
+                  {{ provider }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Modele
+              <input v-model="aiConfig.model" />
+            </label>
+            <label>
+              Temperature
+              <input v-model.number="aiConfig.temperature" type="number" min="0" max="2" step="0.1" />
+            </label>
+            <label>
+              Max tokens
+              <input v-model.number="aiConfig.maxTokens" type="number" min="1" max="4000" />
+            </label>
+            <label>
+              Top P
+              <input v-model.number="aiConfig.topP" type="number" min="0" max="1" step="0.1" />
+            </label>
+            <label>
+              Timeout ms
+              <input v-model.number="aiConfig.timeoutMs" type="number" min="250" max="60000" />
+            </label>
+            <label>
+              Langue
+              <input v-model="aiConfig.language" />
+            </label>
+            <label>
+              Actif
+              <select v-model="aiConfig.enabled">
+                <option :value="true">Oui</option>
+                <option :value="false">Non</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="ai-test">
+            <label>
+              Question de test
+              <input v-model="aiTestQuestion" />
+            </label>
+            <dl v-if="aiTestResult" class="decision-meta">
+              <div>
+                <dt>Provider</dt>
+                <dd>{{ aiTestResult.provider }}</dd>
+              </div>
+              <div>
+                <dt>Modele</dt>
+                <dd>{{ aiTestResult.model }}</dd>
+              </div>
+              <div>
+                <dt>Latence</dt>
+                <dd>{{ aiTestResult.latencyMs }} ms</dd>
+              </div>
+              <div>
+                <dt>Tokens</dt>
+                <dd>{{ aiTestResult.inputTokens }} / {{ aiTestResult.outputTokens }}</dd>
+              </div>
+              <div>
+                <dt>Cout</dt>
+                <dd>{{ aiTestResult.estimatedCost }}</dd>
+              </div>
+              <div>
+                <dt>Fallback</dt>
+                <dd>{{ aiTestResult.fallbackUsed ? 'Oui' : 'Non' }}</dd>
+              </div>
+            </dl>
+            <p v-if="aiTestResult" class="muted">{{ aiTestResult.reply }}</p>
+            <p v-if="aiCostEstimates" class="muted">
+              Estimation: {{ aiCostEstimates.requestCost }} par requete ·
+              {{ aiCostEstimates.monthlyCost }} par mois pour 100 requetes/jour.
+            </p>
           </div>
         </section>
       </section>

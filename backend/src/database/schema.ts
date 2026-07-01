@@ -150,6 +150,37 @@ export async function initializeSchema(database: Database): Promise<void> {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists ai_configurations (
+      organization_id uuid primary key references organizations(id),
+      provider text not null default 'mock',
+      model text not null default 'mock-conversational-v1',
+      temperature numeric(3, 2) not null default 0.20,
+      max_tokens integer not null default 600,
+      top_p numeric(3, 2) not null default 1.00,
+      timeout_ms integer not null default 8000,
+      language text not null default 'fr',
+      system_prompt text not null default '',
+      enabled boolean not null default true,
+      future_cost_limit numeric(12, 6),
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists ai_events (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid not null references sites(id),
+      conversation_id uuid not null references conversations(id),
+      provider text not null,
+      model text not null,
+      latency_ms integer not null,
+      input_tokens integer not null,
+      output_tokens integer not null,
+      estimated_cost numeric(12, 6) not null,
+      fallback_used boolean not null default false,
+      created_at timestamptz not null default now()
+    );
+
     alter table messages add column if not exists response_source text;
     alter table messages add column if not exists response_confidence numeric(4, 3);
     alter table messages add column if not exists should_escalate boolean;
@@ -168,6 +199,10 @@ export async function initializeSchema(database: Database): Promise<void> {
     create index if not exists idx_messages_conversation_created on messages(conversation_id, created_at);
     create index if not exists idx_decision_events_conversation_created
       on decision_events(conversation_id, created_at);
+    create index if not exists idx_ai_events_organization_created
+      on ai_events(organization_id, created_at desc);
+    create index if not exists idx_ai_events_conversation_created
+      on ai_events(conversation_id, created_at);
     create index if not exists idx_prospects_site_updated on prospects(site_id, updated_at desc);
   `);
 }

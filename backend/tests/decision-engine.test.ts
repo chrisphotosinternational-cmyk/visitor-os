@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { AiProvider } from '../src/modules/ai/ai-provider.js';
+import type { AIProvider } from '../src/modules/ai/ai-provider.js';
 import type { BusinessConfig } from '../src/modules/business-config/business-config-schema.js';
 import type {
   BusinessConfigEngine,
@@ -16,6 +16,26 @@ describe('decision engine', () => {
     assert.equal(result.matchedItemId, 'parking');
     assert.equal(result.shouldEscalate, false);
     assert.ok(result.confidence >= 0.7);
+  });
+
+  it('does not call AI when a reliable FAQ answer exists', async () => {
+    let calls = 0;
+    const provider: AIProvider = {
+      providerName: 'mock',
+      async generateReply() {
+        calls += 1;
+        throw new Error('AI should not be called for FAQ matches');
+      },
+      estimateCost() {
+        return 0;
+      }
+    };
+    const result = await createTestDecisionEngine(provider).decide(
+      baseInput('Y a-t-il un parking ?')
+    );
+
+    assert.equal(result.source, 'faq');
+    assert.equal(calls, 0);
   });
 
   it('matches the breakfast FAQ', async () => {
@@ -63,13 +83,20 @@ describe('decision engine', () => {
   });
 
   it('falls back and escalates when provider confidence is too low', async () => {
-    const lowConfidenceProvider: AiProvider = {
-      providerName: 'low-confidence',
+    const lowConfidenceProvider: AIProvider = {
+      providerName: 'mock',
       async generateReply() {
         return {
           reply: 'Je ne suis pas certain.',
           confidence: 0.1,
-          reason: 'test_low_confidence'
+          reason: 'test_low_confidence',
+          provider: 'mock',
+          model: 'test',
+          inputTokens: 10,
+          outputTokens: 5,
+          latencyMs: 1,
+          estimatedCost: 0,
+          fallbackUsed: false
         };
       },
       estimateCost() {
@@ -96,7 +123,7 @@ describe('decision engine', () => {
   });
 });
 
-function createTestDecisionEngine(aiProvider?: AiProvider) {
+function createTestDecisionEngine(aiProvider?: AIProvider) {
   return createDecisionEngine({
     businessConfigEngine: createMemoryBusinessConfigEngine(testConfig),
     ...(aiProvider ? { aiProvider } : {})
@@ -106,6 +133,7 @@ function createTestDecisionEngine(aiProvider?: AiProvider) {
 function baseInput(message: string) {
   return {
     conversationId: '00000000-0000-4000-8000-000000000201',
+    organizationId: '00000000-0000-4000-8000-000000000001',
     siteId: '00000000-0000-4000-8000-000000000101',
     activity: 'test-config',
     message,

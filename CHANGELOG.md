@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.6.0-dev - Sprint 6
+
+- Added AI Provider Engine with provider interface, factory, fallback strategy and mock provider.
+- Prepared OpenAI, Anthropic, Mistral and Ollama provider architecture without coupling the Decision Engine.
+- Added per-organization AI configuration and AI event persistence for provider, model, latency, tokens and estimated cost.
+- Added cost estimation utilities and minimal admin AI configuration/test panel.
+- Kept FAQ, knowledge base and business rules ahead of AI calls.
+
 ## v0.5.0-dev - Sprint 5
 
 - Added admin login, logout and current-user session routes.
