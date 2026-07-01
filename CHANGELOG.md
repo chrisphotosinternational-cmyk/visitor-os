@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.3.0-dev - Sprint 3
+
+- Added Business Configuration Engine with Zod validation, JSON loading, import, export and history.
+- Moved Decision Engine behavior to configurable business rules, FAQ and knowledge base.
+- Added Prompt Builder for future AI provider prompts without external calls.
+- Added active configurations for default, Cherche-Midi, photography and wall decoration examples.
+- Added minimal admin configuration panel for viewing, editing, saving, reloading, importing and exporting JSON.
+
 ## v0.2.0-dev - Sprint 2
 
 - Added conversational decision engine with FAQ, knowledge base, mock AI provider, fallback and human escalation.

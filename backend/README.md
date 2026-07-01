@@ -65,6 +65,7 @@ Useful variables:
 - `ALLOWED_ORIGINS`
 - `SHUTDOWN_TIMEOUT_MS`
 - `OPENAI_API_KEY` optional, unused by default in Sprint 2 unless a real provider is added later.
+- `BUSINESS_CONFIG_DIR` defaults to `../configs`.
 
 The backend validates configuration at startup and fails fast when required variables are missing or invalid.
 
@@ -212,6 +213,21 @@ Decision priority:
 5. fallback.
 
 The admin conversation detail shows the response source, confidence, escalation flag and processing time for assistant messages.
+
+## Business Configuration Engine
+
+The backend now loads active JSON configurations from `BUSINESS_CONFIG_DIR`.
+
+Admin routes:
+
+- `GET /api/admin/configs`
+- `GET /api/admin/configs/:configId`
+- `PUT /api/admin/configs/:configId`
+- `POST /api/admin/configs/import`
+- `POST /api/admin/configs/reload`
+- `GET /api/admin/configs/:configId/export`
+
+The Decision Engine uses configuration data for business rules, FAQ, knowledge base and fallback behavior.
 
 ## PostgreSQL
 

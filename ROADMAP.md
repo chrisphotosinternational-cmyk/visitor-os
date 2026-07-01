@@ -1,5 +1,13 @@
 # Roadmap
 
+## Current Development - v0.3.0-dev
+
+- Business Configuration Engine
+- Multi-business JSON configuration
+- Configurable FAQ, knowledge base and business rules
+- Prompt Builder for future AI providers
+- Admin import/export and configuration history
+
 ## Current Development - v0.2.0-dev
 
 - Conversational decision engine

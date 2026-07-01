@@ -116,7 +116,7 @@ export async function seedFoundationData(database: Database): Promise<void> {
       'Site demo',
       'localhost',
       'demo-site-key',
-      'demo'
+      'default'
     )
     on conflict (widget_public_key) do nothing;
   `);

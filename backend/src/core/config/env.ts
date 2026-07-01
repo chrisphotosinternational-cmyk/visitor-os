@@ -28,7 +28,8 @@ const environmentSchema = z
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
-    OPENAI_API_KEY: z.string().optional()
+    OPENAI_API_KEY: z.string().optional(),
+    BUSINESS_CONFIG_DIR: z.string().trim().min(1).default('../configs')
   })
   .superRefine((env, context) => {
     if (env.NODE_ENV === 'production' && env.ALLOWED_ORIGINS.length === 0) {
@@ -65,6 +66,9 @@ export type AppConfig = {
   };
   ai: {
     openAiApiKey?: string;
+  };
+  businessConfig: {
+    directory: string;
   };
 };
 
@@ -104,7 +108,10 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       rateLimitWindowMs: env.RATE_LIMIT_WINDOW_MS,
       rateLimitMaxRequests: env.RATE_LIMIT_MAX_REQUESTS
     },
-    ai: {}
+    ai: {},
+    businessConfig: {
+      directory: env.BUSINESS_CONFIG_DIR
+    }
   };
 
   if (env.OPENAI_API_KEY) {

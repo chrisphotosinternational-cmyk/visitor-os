@@ -7,8 +7,17 @@ import {
   conversationStatuses
 } from '../conversations/conversation-repository.js';
 import { ProspectRepository, prospectStatuses } from '../prospects/prospect-repository.js';
+import {
+  businessConfigImportPayloadSchema,
+  type BusinessConfigEngine
+} from '../business-config/configuration-loader.js';
+import { buildSystemPrompt } from '../business-config/prompt-builder.js';
 
-export function registerAdminRoutes(app: FastifyInstance, database: Database): void {
+export function registerAdminRoutes(
+  app: FastifyInstance,
+  database: Database,
+  businessConfigEngine: BusinessConfigEngine
+): void {
   const prospects = new ProspectRepository(database);
   const conversations = new ConversationRepository(database);
 
@@ -76,5 +85,68 @@ export function registerAdminRoutes(app: FastifyInstance, database: Database): v
     }
 
     return { prospect };
+  });
+
+  app.get('/api/admin/configs', async () => ({
+    configs: await businessConfigEngine.list()
+  }));
+
+  app.get('/api/admin/configs/:configId', async (request) => {
+    const params = z.object({ configId: z.string().min(1) }).parse(request.params);
+    const config = await businessConfigEngine.getConfig(params.configId);
+
+    return {
+      config,
+      prompt: buildSystemPrompt(config),
+      history: await businessConfigEngine.listHistory(params.configId)
+    };
+  });
+
+  app.put('/api/admin/configs/:configId', async (request) => {
+    const params = z.object({ configId: z.string().min(1) }).parse(request.params);
+    const body = businessConfigImportPayloadSchema.parse(request.body);
+    const config = await businessConfigEngine.saveConfig({
+      id: params.configId,
+      config: body.config,
+      ...(body.author ? { author: body.author } : {}),
+      ...(body.comment ? { comment: body.comment } : {})
+    });
+
+    return {
+      config,
+      prompt: buildSystemPrompt(config),
+      history: await businessConfigEngine.listHistory(params.configId)
+    };
+  });
+
+  app.post('/api/admin/configs/import', async (request) => {
+    const body = businessConfigImportPayloadSchema.parse(request.body);
+    const config = await businessConfigEngine.importConfig({
+      config: body.config,
+      ...(body.author ? { author: body.author } : {}),
+      ...(body.comment ? { comment: body.comment } : {})
+    });
+
+    return {
+      config,
+      prompt: buildSystemPrompt(config),
+      history: await businessConfigEngine.listHistory(config.id)
+    };
+  });
+
+  app.post('/api/admin/configs/reload', async () => {
+    await businessConfigEngine.reload();
+
+    return {
+      configs: await businessConfigEngine.list()
+    };
+  });
+
+  app.get('/api/admin/configs/:configId/export', async (request) => {
+    const params = z.object({ configId: z.string().min(1) }).parse(request.params);
+
+    return {
+      config: await businessConfigEngine.exportConfig(params.configId)
+    };
   });
 }

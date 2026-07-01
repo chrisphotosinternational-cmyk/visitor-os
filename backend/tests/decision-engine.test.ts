@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { AiProvider } from '../src/modules/ai/ai-provider.js';
+import type { BusinessConfig } from '../src/modules/business-config/business-config-schema.js';
+import type {
+  BusinessConfigEngine,
+  BusinessConfigSummary
+} from '../src/modules/business-config/configuration-loader.js';
 import { createDecisionEngine } from '../src/modules/decision-engine/decision-engine.js';
 
 describe('decision engine', () => {
   it('matches the parking FAQ', async () => {
-    const result = await createDecisionEngine().decide(baseInput('Y a-t-il un parking ?'));
+    const result = await createTestDecisionEngine().decide(baseInput('Y a-t-il un parking ?'));
 
     assert.equal(result.source, 'faq');
     assert.equal(result.matchedItemId, 'parking');
@@ -14,7 +19,7 @@ describe('decision engine', () => {
   });
 
   it('matches the breakfast FAQ', async () => {
-    const result = await createDecisionEngine().decide(
+    const result = await createTestDecisionEngine().decide(
       baseInput('Le petit-dejeuner est-il inclus ?')
     );
 
@@ -23,26 +28,27 @@ describe('decision engine', () => {
     assert.ok(result.confidence >= 0.7);
   });
 
-  it('escalates pricing questions instead of inventing a price', async () => {
-    const result = await createDecisionEngine().decide(baseInput('Quels sont vos tarifs ?'));
+  it('escalates pricing questions from configurable business rules', async () => {
+    const result = await createTestDecisionEngine().decide(baseInput('Quels sont vos tarifs ?'));
 
     assert.equal(result.source, 'human_escalation');
     assert.equal(result.shouldEscalate, true);
+    assert.equal(result.matchedItemId, 'pricing');
     assert.match(result.reason ?? '', /pricing/);
   });
 
-  it('escalates availability questions', async () => {
-    const result = await createDecisionEngine().decide(
-      baseInput('Avez-vous une chambre disponible demain ?')
+  it('escalates availability questions from configurable business rules', async () => {
+    const result = await createTestDecisionEngine().decide(
+      baseInput('Avez-vous un creneau disponible demain ?')
     );
 
     assert.equal(result.source, 'human_escalation');
     assert.equal(result.shouldEscalate, true);
-    assert.match(result.reason ?? '', /availability/);
+    assert.equal(result.matchedItemId, 'availability');
   });
 
   it('uses the mock provider for an unknown safe question', async () => {
-    const result = await createDecisionEngine().decide(baseInput('Quelle est votre ambiance ?'));
+    const result = await createTestDecisionEngine().decide(baseInput('Question inconnue simple'));
 
     assert.equal(result.source, 'ai');
     assert.equal(result.shouldEscalate, false);
@@ -50,7 +56,7 @@ describe('decision engine', () => {
   });
 
   it('does not crash when no real AI provider is configured', async () => {
-    const result = await createDecisionEngine().decide(baseInput('Question inconnue simple'));
+    const result = await createTestDecisionEngine().decide(baseInput('Question inconnue simple'));
 
     assert.ok(result.reply.length > 0);
     assert.ok(result.processingTimeMs >= 0);
@@ -71,7 +77,7 @@ describe('decision engine', () => {
       }
     };
 
-    const result = await createDecisionEngine({ aiProvider: lowConfidenceProvider }).decide(
+    const result = await createTestDecisionEngine(lowConfidenceProvider).decide(
       baseInput('Question inconnue simple')
     );
 
@@ -81,7 +87,7 @@ describe('decision engine', () => {
   });
 
   it('matches the air conditioning FAQ with normalized accents', async () => {
-    const result = await createDecisionEngine().decide(
+    const result = await createTestDecisionEngine().decide(
       baseInput('Est-ce qu il y a la climatisation ?')
     );
 
@@ -90,12 +96,145 @@ describe('decision engine', () => {
   });
 });
 
+function createTestDecisionEngine(aiProvider?: AiProvider) {
+  return createDecisionEngine({
+    businessConfigEngine: createMemoryBusinessConfigEngine(testConfig),
+    ...(aiProvider ? { aiProvider } : {})
+  });
+}
+
 function baseInput(message: string) {
   return {
     conversationId: '00000000-0000-4000-8000-000000000201',
     siteId: '00000000-0000-4000-8000-000000000101',
-    activity: 'demo',
+    activity: 'test-config',
     message,
     recentHistory: []
+  };
+}
+
+const testConfig: BusinessConfig = {
+  id: 'test-config',
+  version: '1.0.0',
+  identity: {
+    name: 'Test Business',
+    description: 'Configurable test business',
+    category: 'test',
+    colors: {}
+  },
+  contact: {
+    openingHours: []
+  },
+  personality: {
+    tone: 'professional',
+    style: 'clear',
+    formalityLevel: 'neutral',
+    vocabulary: [],
+    defaultLanguage: 'fr',
+    availableLanguages: ['fr']
+  },
+  goals: ['lead_generation'],
+  restrictions: {
+    never: ['inventer un tarif', 'inventer une disponibilite'],
+    always: ['proposer un contact humain si doute']
+  },
+  faq: [
+    {
+      id: 'parking',
+      category: 'access',
+      question: 'Y a-t-il un parking ?',
+      keywords: ['parking', 'stationnement'],
+      answer: 'Oui, un parking est disponible.',
+      confidence: 0.95,
+      order: 10,
+      enabled: true
+    },
+    {
+      id: 'petit-dejeuner',
+      category: 'service',
+      question: 'Le petit-dejeuner est-il inclus ?',
+      keywords: ['petit dejeuner', 'petit-dejeuner', 'breakfast'],
+      answer: 'Le petit-dejeuner est disponible selon la configuration indiquee.',
+      confidence: 0.9,
+      order: 20,
+      enabled: true
+    },
+    {
+      id: 'climatisation',
+      category: 'comfort',
+      question: 'Y a-t-il la climatisation ?',
+      keywords: ['climatisation', 'clim'],
+      answer: 'Oui, la climatisation est disponible.',
+      confidence: 0.9,
+      order: 30,
+      enabled: true
+    }
+  ],
+  knowledgeBase: [],
+  rules: [
+    {
+      id: 'pricing',
+      label: 'Pricing',
+      enabled: true,
+      order: 10,
+      when: { contains: ['tarif', 'prix'] },
+      then: {
+        action: 'human_escalation',
+        reason: 'pricing_requires_human_confirmation',
+        reply:
+          'Je prefere ne pas vous donner une information approximative. Contactez-nous pour un tarif confirme.'
+      }
+    },
+    {
+      id: 'availability',
+      label: 'Availability',
+      enabled: true,
+      order: 20,
+      when: { contains: ['disponible', 'disponibilite', 'demain'] },
+      then: {
+        action: 'human_escalation',
+        reason: 'availability_requires_human_confirmation'
+      }
+    }
+  ],
+  widget: {
+    welcomeMessage: 'Bonjour.',
+    fallbackMessage: 'Contactez-nous pour une reponse precise.',
+    quickReplies: []
+  }
+};
+
+function createMemoryBusinessConfigEngine(config: BusinessConfig): BusinessConfigEngine {
+  return {
+    async loadAll() {},
+    async reload() {},
+    async list(): Promise<BusinessConfigSummary[]> {
+      return [
+        {
+          id: config.id,
+          version: config.version,
+          name: config.identity.name,
+          category: config.identity.category
+        }
+      ];
+    },
+    async getConfig() {
+      return config;
+    },
+    async resolveConfig() {
+      return config;
+    },
+    async exportConfig() {
+      return config;
+    },
+    async importConfig() {
+      return config;
+    },
+    async saveConfig() {
+      return config;
+    },
+    async listHistory() {
+      return [];
+    }
   };
 }

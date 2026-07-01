@@ -10,11 +10,16 @@ import { registerSecurityHeaders } from './core/security/security-headers.js';
 import { registerSimpleRateLimit } from './core/security/simple-rate-limit.js';
 import { createDefaultAiProvider } from './modules/ai/mock-ai-provider.js';
 import { createDecisionEngine } from './modules/decision-engine/decision-engine.js';
+import {
+  createBusinessConfigEngine,
+  type BusinessConfigEngine
+} from './modules/business-config/configuration-loader.js';
 
 export type AppDependencies = {
   config: AppConfig;
   database: Database;
   logger: AppLogger;
+  businessConfigEngine?: BusinessConfigEngine;
 };
 
 export async function createApp(dependencies: AppDependencies): Promise<FastifyInstance> {
@@ -45,11 +50,16 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     environment: dependencies.config.app.environment
   }));
 
+  const businessConfigEngine =
+    dependencies.businessConfigEngine ??
+    createBusinessConfigEngine({
+      configDirectory: dependencies.config.businessConfig.directory
+    });
   const aiProvider = createDefaultAiProvider(dependencies.config.ai.openAiApiKey);
-  const decisionEngine = createDecisionEngine({ aiProvider });
+  const decisionEngine = createDecisionEngine({ aiProvider, businessConfigEngine });
 
   registerWidgetRoutes(app, dependencies.database, decisionEngine);
-  registerAdminRoutes(app, dependencies.database);
+  registerAdminRoutes(app, dependencies.database, businessConfigEngine);
 
   return app;
 }

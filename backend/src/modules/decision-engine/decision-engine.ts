@@ -1,10 +1,12 @@
 import type { AiProvider } from '../ai/ai-provider.js';
 import { createDefaultAiProvider } from '../ai/mock-ai-provider.js';
-import {
-  type FaqItem,
-  getBusinessConversationConfig,
-  type KnowledgeItem
-} from './business-config.js';
+import { type BusinessConfigEngine } from '../business-config/configuration-loader.js';
+import type {
+  BusinessConfig,
+  BusinessFaq,
+  BusinessRule,
+  KnowledgeBaseItem
+} from '../business-config/business-config-schema.js';
 
 export type DecisionSource = 'faq' | 'knowledge_base' | 'ai' | 'fallback' | 'human_escalation';
 
@@ -33,30 +35,39 @@ export type DecisionEngineResult = {
 
 export type DecisionEngine = {
   decide: (input: DecisionEngineInput) => Promise<DecisionEngineResult>;
+  getBusinessConfig: (configId?: string | null) => Promise<BusinessConfig>;
 };
 
 const FAQ_MIN_CONFIDENCE = 0.7;
 const KNOWLEDGE_BASE_MIN_CONFIDENCE = 0.66;
 const AI_MIN_CONFIDENCE = 0.35;
 
-export function createDecisionEngine(options?: { aiProvider?: AiProvider }): DecisionEngine {
+export function createDecisionEngine(options: {
+  aiProvider?: AiProvider;
+  businessConfigEngine: BusinessConfigEngine;
+}): DecisionEngine {
   const aiProvider = options?.aiProvider ?? createDefaultAiProvider();
+  const businessConfigEngine = options.businessConfigEngine;
 
   return {
+    getBusinessConfig(configId?: string | null): Promise<BusinessConfig> {
+      return businessConfigEngine.resolveConfig(configId);
+    },
+
     async decide(input: DecisionEngineInput): Promise<DecisionEngineResult> {
       const startedAt = performance.now();
-      const config = getBusinessConversationConfig(input.activity);
-      const escalation = detectHumanEscalation(input.message);
+      const config = await businessConfigEngine.resolveConfig(input.activity);
+      const ruleMatch = findMatchingRule(config.rules, input.message);
 
-      if (escalation) {
+      if (ruleMatch) {
         return withProcessingTime(
           {
-            reply:
-              'Je prefere ne pas vous donner une information approximative. Le plus sur est de nous contacter directement pour une reponse precise.',
-            source: 'human_escalation',
+            reply: ruleMatch.then.reply ?? buildEscalationReply(config),
+            source: ruleMatch.then.action,
             confidence: 0.92,
-            shouldEscalate: true,
-            reason: escalation
+            shouldEscalate: ruleMatch.then.action === 'human_escalation',
+            matchedItemId: ruleMatch.id,
+            reason: ruleMatch.then.reason
           },
           startedAt
         );
@@ -77,7 +88,7 @@ export function createDecisionEngine(options?: { aiProvider?: AiProvider }): Dec
         );
       }
 
-      const knowledgeMatch = findBestKnowledgeMatch(config.knowledgeItems, input.message);
+      const knowledgeMatch = findBestKnowledgeMatch(config.knowledgeBase, input.message);
       if (knowledgeMatch && knowledgeMatch.confidence >= KNOWLEDGE_BASE_MIN_CONFIDENCE) {
         return withProcessingTime(
           {
@@ -96,10 +107,10 @@ export function createDecisionEngine(options?: { aiProvider?: AiProvider }): Dec
         question: input.message,
         recentHistory: input.recentHistory,
         businessContext: {
-          brandName: config.brandName,
-          activity: config.activity,
-          rules: config.rules,
-          fallbackMessage: config.fallbackMessage
+          brandName: config.identity.name,
+          activity: config.identity.category,
+          rules: [...config.restrictions.never, ...config.restrictions.always],
+          fallbackMessage: config.widget.fallbackMessage ?? buildEscalationReply(config)
         }
       };
 
@@ -122,7 +133,7 @@ export function createDecisionEngine(options?: { aiProvider?: AiProvider }): Dec
 
       return withProcessingTime(
         {
-          reply: config.fallbackMessage,
+          reply: config.widget.fallbackMessage ?? buildEscalationReply(config),
           source: 'fallback',
           confidence: 0.25,
           shouldEscalate: true,
@@ -135,9 +146,9 @@ export function createDecisionEngine(options?: { aiProvider?: AiProvider }): Dec
 }
 
 function findBestFaqMatch(
-  items: FaqItem[],
+  items: BusinessFaq[],
   message: string
-): { item: FaqItem; confidence: number } | null {
+): { item: BusinessFaq; confidence: number } | null {
   return bestMatch(
     items.filter((item) => item.enabled),
     message,
@@ -147,14 +158,27 @@ function findBestFaqMatch(
 }
 
 function findBestKnowledgeMatch(
-  items: KnowledgeItem[],
+  items: KnowledgeBaseItem[],
   message: string
-): { item: KnowledgeItem; confidence: number } | null {
+): { item: KnowledgeBaseItem; confidence: number } | null {
   return bestMatch(
     items.filter((item) => item.enabled),
     message,
-    (item) => [...item.keywords, item.title],
+    (item) => [...item.keywords, ...item.tags, item.title],
     (_item, score) => Math.min(0.84, score)
+  );
+}
+
+function findMatchingRule(rules: BusinessRule[], message: string): BusinessRule | null {
+  const normalizedMessage = normalizeText(message);
+
+  return (
+    rules
+      .filter((rule) => rule.enabled)
+      .sort((first, second) => first.order - second.order)
+      .find((rule) =>
+        rule.when.contains.some((keyword) => normalizedMessage.includes(normalizeText(keyword)))
+      ) ?? null
   );
 }
 
@@ -191,34 +215,11 @@ function bestMatch<T>(
   return best;
 }
 
-function detectHumanEscalation(message: string): string | null {
-  const normalized = normalizeText(message);
-
-  if (/(tarif|prix|combien|cout|co[uû]t|budget|devis)/.test(normalized)) {
-    return 'pricing_requires_human_confirmation';
-  }
-
-  if (
-    /(disponible|disponibilite|demain|ce soir|date precise|chambre disponible)/.test(normalized)
-  ) {
-    return 'availability_or_booking_requires_human_confirmation';
-  }
-
-  if (/(reserver|reservation).*(demain|ce soir|date|pour le|du )/.test(normalized)) {
-    return 'specific_booking_requires_human_confirmation';
-  }
-
-  if (
-    /(reclamation|plainte|remboursement|litige|mecontent|probleme urgent|urgence)/.test(normalized)
-  ) {
-    return 'complaint_or_urgent_request';
-  }
-
-  if (/(juridique|avocat|legal|medecin|medical|sante|urgence medicale)/.test(normalized)) {
-    return 'sensitive_legal_or_medical_request';
-  }
-
-  return null;
+function buildEscalationReply(config: BusinessConfig): string {
+  return (
+    config.widget.fallbackMessage ??
+    'Je prefere ne pas vous donner une information approximative. Le plus sur est de nous contacter directement pour une reponse precise.'
+  );
 }
 
 function withProcessingTime(

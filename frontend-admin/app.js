@@ -9,8 +9,15 @@ createApp({
       conversationStatuses: [],
       selectedConversation: null,
       prospects: [],
+      configs: [],
+      selectedConfigId: '',
+      selectedConfig: null,
+      configText: '',
+      configPrompt: '',
+      configHistory: [],
       search: '',
       loading: true,
+      configLoading: false,
       error: ''
     };
   },
@@ -31,7 +38,7 @@ createApp({
       this.error = '';
 
       try {
-        await Promise.all([this.loadConversations(), this.loadProspects()]);
+        await Promise.all([this.loadConversations(), this.loadProspects(), this.loadConfigs()]);
       } finally {
         this.loading = false;
       }
@@ -57,6 +64,17 @@ createApp({
       if (!response.ok) throw new Error('Impossible de charger les prospects.');
       const data = await response.json();
       this.prospects = data.prospects;
+    },
+
+    async loadConfigs() {
+      const response = await fetch(`${API_BASE_URL}/api/admin/configs`);
+      if (!response.ok) throw new Error('Impossible de charger les configurations.');
+      const data = await response.json();
+      this.configs = data.configs;
+
+      if (!this.selectedConfigId && this.configs.length > 0) {
+        await this.selectConfig(this.configs[0].id);
+      }
     },
 
     async searchConversations() {
@@ -104,6 +122,106 @@ createApp({
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
       }
+    },
+
+    async selectConfig(id) {
+      this.configLoading = true;
+      this.error = '';
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/admin/configs/${id}`);
+        if (!response.ok) throw new Error('Impossible de charger la configuration.');
+        const data = await response.json();
+        this.selectedConfigId = id;
+        this.selectedConfig = data.config;
+        this.configText = JSON.stringify(data.config, null, 2);
+        this.configPrompt = data.prompt;
+        this.configHistory = data.history;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      } finally {
+        this.configLoading = false;
+      }
+    },
+
+    async saveConfig() {
+      if (!this.selectedConfigId) return;
+      this.error = '';
+
+      try {
+        const parsed = JSON.parse(this.configText);
+        const response = await fetch(`${API_BASE_URL}/api/admin/configs/${this.selectedConfigId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            config: parsed,
+            author: 'admin-placeholder',
+            comment: 'Saved from admin'
+          })
+        });
+
+        if (!response.ok) throw new Error('Configuration invalide ou non sauvegardee.');
+        const data = await response.json();
+        this.selectedConfig = data.config;
+        this.configText = JSON.stringify(data.config, null, 2);
+        this.configPrompt = data.prompt;
+        this.configHistory = data.history;
+        await this.loadConfigs();
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async importConfig() {
+      this.error = '';
+
+      try {
+        const parsed = JSON.parse(this.configText);
+        const response = await fetch(`${API_BASE_URL}/api/admin/configs/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            config: parsed,
+            author: 'admin-placeholder',
+            comment: 'Imported from admin'
+          })
+        });
+
+        if (!response.ok) throw new Error('Import impossible. Verifiez le JSON.');
+        const data = await response.json();
+        await this.loadConfigs();
+        await this.selectConfig(data.config.id);
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async reloadConfigs() {
+      this.error = '';
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/admin/configs/reload`, {
+          method: 'POST'
+        });
+        if (!response.ok) throw new Error('Rechargement impossible.');
+        await this.loadConfigs();
+        if (this.selectedConfigId) await this.selectConfig(this.selectedConfigId);
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    exportConfig() {
+      if (!this.selectedConfig) return;
+
+      const blob = new Blob([`${JSON.stringify(this.selectedConfig, null, 2)}\n`], {
+        type: 'application/json'
+      });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${this.selectedConfig.id}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
     },
 
     formatDate(value) {
@@ -277,6 +395,51 @@ createApp({
               <small>{{ prospect.status }} · score {{ prospect.score_current }}</small>
             </div>
           </aside>
+        </section>
+
+        <section class="panel config-panel">
+          <div class="panel-header config-header">
+            <div>
+              <h2>Configuration</h2>
+              <p class="muted">Moteur metier configurable par JSON.</p>
+            </div>
+            <div class="config-actions">
+              <select
+                :value="selectedConfigId"
+                @change="selectConfig($event.target.value)"
+              >
+                <option v-for="config in configs" :key="config.id" :value="config.id">
+                  {{ config.name }} · {{ config.id }}
+                </option>
+              </select>
+              <button type="button" @click="reloadConfigs">Recharger</button>
+              <button type="button" @click="saveConfig">Sauvegarder</button>
+              <button type="button" @click="importConfig">Importer</button>
+              <button type="button" @click="exportConfig">Exporter</button>
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <label class="config-editor">
+              JSON
+              <textarea v-model="configText" spellcheck="false"></textarea>
+            </label>
+
+            <div class="config-preview">
+              <h3>Prompt Builder</h3>
+              <pre>{{ configPrompt }}</pre>
+
+              <h3>Historique</h3>
+              <p v-if="configHistory.length === 0" class="empty">Aucune version sauvegardee.</p>
+              <ul v-else class="history-list">
+                <li v-for="item in configHistory" :key="item.fileName">
+                  <strong>{{ formatDate(item.createdAt) }}</strong>
+                  <span>{{ item.author }} · {{ item.version }}</span>
+                  <small>{{ item.comment }}</small>
+                </li>
+              </ul>
+            </div>
+          </div>
         </section>
       </section>
     </main>

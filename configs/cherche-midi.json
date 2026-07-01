@@ -1,0 +1,123 @@
+{
+  "id": "cherche-midi",
+  "version": "1.0.0",
+  "identity": {
+    "name": "Le Cherche-Midi",
+    "slogan": "Sejour a Albi",
+    "description": "Chambre d'hotes a Albi avec une communication prudente sur les tarifs, disponibilites et reservations.",
+    "category": "tourisme",
+    "colors": {
+      "primary": "#1F6F5B",
+      "secondary": "#F4E7D3"
+    }
+  },
+  "contact": {
+    "phone": "+33000000000",
+    "email": "contact@example.com",
+    "website": "https://example.com",
+    "address": "Adresse a confirmer, Albi",
+    "googleMapsUrl": "https://maps.google.com",
+    "openingHours": ["Accueil sur confirmation"]
+  },
+  "personality": {
+    "tone": "rassurant",
+    "style": "sobre et premium",
+    "formalityLevel": "formal",
+    "vocabulary": ["sejour", "accueil", "confirmation", "Albi"],
+    "defaultLanguage": "fr",
+    "availableLanguages": ["fr"]
+  },
+  "goals": ["prise_de_contact", "reservation", "generation_de_lead"],
+  "restrictions": {
+    "never": [
+      "annoncer un tarif",
+      "annoncer une disponibilite",
+      "confirmer une reservation",
+      "inventer une information"
+    ],
+    "always": [
+      "proposer un contact humain si la demande concerne une date",
+      "rester courtois",
+      "indiquer que les disponibilites doivent etre confirmees"
+    ]
+  },
+  "faq": [
+    {
+      "id": "parking",
+      "category": "acces",
+      "question": "Y a-t-il un parking ?",
+      "keywords": ["parking", "stationnement", "voiture", "garer"],
+      "answer": "Oui, un parking prive est disponible pour faciliter votre arrivee.",
+      "confidence": 0.95,
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "id": "petit-dejeuner",
+      "category": "service",
+      "question": "Le petit-dejeuner est-il inclus ?",
+      "keywords": ["petit dejeuner", "petit-dejeuner", "breakfast", "matin"],
+      "answer": "Le petit-dejeuner peut etre prepare selon les informations confirmees directement avec l'etablissement.",
+      "confidence": 0.88,
+      "order": 20,
+      "enabled": true
+    },
+    {
+      "id": "climatisation",
+      "category": "confort",
+      "question": "Y a-t-il la climatisation ?",
+      "keywords": ["climatisation", "clim", "air conditionne"],
+      "answer": "Oui, la climatisation est disponible.",
+      "confidence": 0.9,
+      "order": 30,
+      "enabled": true
+    }
+  ],
+  "knowledgeBase": [
+    {
+      "id": "about",
+      "title": "Presentation du Cherche-Midi",
+      "content": "Le Cherche-Midi accueille les visiteurs a Albi avec une information claire, prudente et humaine.",
+      "category": "presentation",
+      "tags": ["albi", "sejour"],
+      "keywords": ["presentation", "maison", "albi", "sejour"],
+      "enabled": true
+    }
+  ],
+  "rules": [
+    {
+      "id": "pricing-escalation",
+      "label": "Tarifs a confirmer",
+      "enabled": true,
+      "order": 10,
+      "when": {
+        "contains": ["prix", "tarif", "budget"]
+      },
+      "then": {
+        "action": "human_escalation",
+        "reason": "pricing_requires_human_confirmation",
+        "reply": "Je prefere ne pas vous donner une information approximative. Contactez directement l'etablissement pour un tarif confirme."
+      }
+    },
+    {
+      "id": "availability-escalation",
+      "label": "Disponibilites a confirmer",
+      "enabled": true,
+      "order": 20,
+      "when": {
+        "contains": ["disponible", "disponibilite", "reservation", "demain"]
+      },
+      "then": {
+        "action": "human_escalation",
+        "reason": "availability_requires_human_confirmation",
+        "reply": "Les disponibilites et reservations doivent etre confirmees directement avec l'etablissement."
+      }
+    }
+  ],
+  "widget": {
+    "welcomeMessage": "Bonjour, je peux vous aider a preparer votre sejour.",
+    "fallbackMessage": "Je n'ai pas encore cette information. Contactez l'etablissement pour une reponse precise.",
+    "quickReplies": ["Parking", "Petit-dejeuner", "Tarifs", "Disponibilites"]
+  }
+}
+

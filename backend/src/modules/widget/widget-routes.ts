@@ -37,16 +37,18 @@ export function registerWidgetRoutes(
     if (!site) {
       throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
     }
+    const businessConfig = await decisionEngine.getBusinessConfig(site.activity);
 
     return {
       siteKey: query.siteKey,
-      brandName: site.name,
-      activity: site.activity,
-      welcomeMessage: 'Bonjour, je peux vous aider. Posez-moi votre question.',
+      brandName: businessConfig.identity.name,
+      activity: businessConfig.identity.category,
+      welcomeMessage: businessConfig.widget.welcomeMessage ?? 'Bonjour, je peux vous aider.',
       fallbackMessage:
-        "Je n'ai pas encore cette information. Laissez vos coordonnees et nous vous repondrons rapidement.",
-      quickReplies: ['Tarifs', 'Disponibilites', 'Reserver', 'Contact'],
-      primaryColor: '#1f6f5b'
+        businessConfig.widget.fallbackMessage ??
+        "Je n'ai pas encore cette information. Contactez-nous pour une reponse precise.",
+      quickReplies: businessConfig.widget.quickReplies,
+      primaryColor: businessConfig.identity.colors.primary ?? '#1f6f5b'
     };
   });
 
