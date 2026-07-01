@@ -65,6 +65,28 @@ createApp({
       aiTestQuestion: 'Bonjour, pouvez-vous aider un visiteur ?',
       aiTestResult: null,
       aiCostEstimates: null,
+      notifications: [],
+      notificationTypes: [],
+      notificationStatuses: [],
+      notificationFilters: {
+        type: '',
+        status: '',
+        provider: ''
+      },
+      notificationSettings: {
+        adminEmails: [],
+        notificationsEnabled: true,
+        frequency: 'instant',
+        language: 'fr',
+        preferredProvider: 'mock',
+        webhookUrl: '',
+        webhookHeaders: {},
+        webhookSecret: '',
+        retryAttempts: 2,
+        timeoutMs: 5000
+      },
+      notificationAdminEmailsText: '',
+      notificationTestResult: null,
       organizationForm: {
         id: '',
         name: '',
@@ -163,6 +185,8 @@ createApp({
           this.loadProspects(),
           this.loadConfigs(),
           this.loadAiConfig(),
+          this.loadNotifications(),
+          this.loadNotificationSettings(),
           this.loadOrganizations(),
           this.loadSites()
         ]);
@@ -370,6 +394,80 @@ createApp({
         const data = await response.json();
         this.aiTestResult = data.result;
         this.aiCostEstimates = data.estimates;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async loadNotifications() {
+      if (!this.can('settings:access')) return;
+
+      const params = new URLSearchParams();
+      Object.entries(this.notificationFilters).forEach(([key, value]) => {
+        if (String(value).trim()) params.set(key, String(value).trim());
+      });
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/notifications?${params.toString()}`);
+      if (!response.ok) throw new Error('Impossible de charger les notifications.');
+      const data = await response.json();
+      this.notifications = data.notifications;
+      this.notificationTypes = data.types;
+      this.notificationStatuses = data.statuses;
+    },
+
+    async loadNotificationSettings() {
+      if (!this.can('settings:access')) return;
+
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/notifications/settings`);
+      if (!response.ok) throw new Error('Impossible de charger les parametres notifications.');
+      const data = await response.json();
+      if (!data.settings) return;
+      this.notificationSettings = {
+        ...data.settings,
+        webhookUrl: data.settings.webhookUrl || '',
+        webhookSecret: data.settings.webhookSecret || ''
+      };
+      this.notificationAdminEmailsText = data.settings.adminEmails.join(', ');
+    },
+
+    async saveNotificationSettings() {
+      this.error = '';
+
+      try {
+        const payload = {
+          ...this.notificationSettings,
+          adminEmails: this.notificationAdminEmailsText
+            .split(',')
+            .map((email) => email.trim())
+            .filter(Boolean),
+          webhookUrl: this.notificationSettings.webhookUrl || null,
+          webhookSecret: this.notificationSettings.webhookSecret || null
+        };
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/notifications/settings`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('Parametres notifications invalides.');
+        await this.loadNotificationSettings();
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async testNotification() {
+      this.error = '';
+      this.notificationTestResult = null;
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/notifications/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (!response.ok) throw new Error('Test notification impossible.');
+        const data = await response.json();
+        this.notificationTestResult = data.result;
+        await this.loadNotifications();
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
       }
@@ -1104,6 +1202,87 @@ createApp({
                   <small>{{ item.comment }}</small>
                 </li>
               </ul>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="can('settings:access')" class="panel notifications-panel">
+          <div class="panel-header config-header">
+            <div>
+              <h2>Notifications</h2>
+              <p class="muted">Email, interne et webhook via le moteur central.</p>
+            </div>
+            <div class="config-actions">
+              <button type="button" @click="saveNotificationSettings">Sauvegarder</button>
+              <button type="button" @click="testNotification">Tester</button>
+              <button type="button" @click="loadNotifications">Actualiser</button>
+            </div>
+          </div>
+
+          <div class="notification-grid">
+            <form class="notification-settings" @submit.prevent="saveNotificationSettings">
+              <label>
+                Emails administrateurs
+                <input v-model="notificationAdminEmailsText" placeholder="admin@example.com, equipe@example.com" />
+              </label>
+              <label>
+                Notifications
+                <select v-model="notificationSettings.notificationsEnabled">
+                  <option :value="true">Activees</option>
+                  <option :value="false">Desactivees</option>
+                </select>
+              </label>
+              <label>
+                Frequence
+                <select v-model="notificationSettings.frequency">
+                  <option value="instant">Instantanee</option>
+                  <option value="daily">Quotidienne</option>
+                  <option value="disabled">Desactivee</option>
+                </select>
+              </label>
+              <label>
+                Provider email
+                <select v-model="notificationSettings.preferredProvider">
+                  <option value="mock">Mock</option>
+                  <option value="resend">Resend</option>
+                </select>
+              </label>
+              <label>
+                Webhook URL
+                <input v-model="notificationSettings.webhookUrl" placeholder="https://..." />
+              </label>
+              <label>
+                Timeout ms
+                <input v-model.number="notificationSettings.timeoutMs" type="number" min="250" max="30000" />
+              </label>
+            </form>
+
+            <div>
+              <form class="crm-filters" @submit.prevent="loadNotifications">
+                <select v-model="notificationFilters.type">
+                  <option value="">Tous types</option>
+                  <option v-for="type in notificationTypes" :key="type" :value="type">{{ type }}</option>
+                </select>
+                <select v-model="notificationFilters.status">
+                  <option value="">Tous statuts</option>
+                  <option v-for="status in notificationStatuses" :key="status" :value="status">{{ status }}</option>
+                </select>
+                <input v-model="notificationFilters.provider" placeholder="Provider" />
+                <button type="submit">Filtrer</button>
+              </form>
+
+              <p v-if="notificationTestResult" class="muted">
+                Test envoye · {{ notificationTestResult.records.length }} entree(s)
+              </p>
+              <p v-if="notifications.length === 0" class="empty">Aucune notification.</p>
+              <div v-for="notification in notifications" :key="notification.id" class="notification-row">
+                <span>
+                  <strong>{{ notification.title }}</strong>
+                  <small>{{ notification.type }} · {{ notification.provider }} · {{ formatDate(notification.created_at) }}</small>
+                  <small>{{ notification.subject }}</small>
+                </span>
+                <span class="badge">{{ notification.status }}</span>
+              </div>
             </div>
           </div>
         </section>

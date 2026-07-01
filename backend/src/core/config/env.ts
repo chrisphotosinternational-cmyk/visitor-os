@@ -29,6 +29,10 @@ const environmentSchema = z
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
     OPENAI_API_KEY: z.string().optional(),
+    RESEND_API_KEY: z.string().optional(),
+    NOTIFICATION_FROM_EMAIL: z.string().email().default('notifications@visitor-os.local'),
+    NOTIFICATION_RETRY_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(2),
+    NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     BUSINESS_CONFIG_DIR: z.string().trim().min(1).default('../configs'),
     ADMIN_SESSION_SECRET: z
       .string()
@@ -89,6 +93,12 @@ export type AppConfig = {
   ai: {
     openAiApiKey?: string;
   };
+  notifications: {
+    resendApiKey?: string;
+    fromEmail: string;
+    retryAttempts: number;
+    timeoutMs: number;
+  };
   businessConfig: {
     directory: string;
   };
@@ -143,6 +153,11 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       rateLimitMaxRequests: env.RATE_LIMIT_MAX_REQUESTS
     },
     ai: {},
+    notifications: {
+      fromEmail: env.NOTIFICATION_FROM_EMAIL,
+      retryAttempts: env.NOTIFICATION_RETRY_ATTEMPTS,
+      timeoutMs: env.NOTIFICATION_TIMEOUT_MS
+    },
     businessConfig: {
       directory: env.BUSINESS_CONFIG_DIR
     },
@@ -155,6 +170,10 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
 
   if (env.OPENAI_API_KEY) {
     config.ai.openAiApiKey = env.OPENAI_API_KEY;
+  }
+
+  if (env.RESEND_API_KEY) {
+    config.notifications.resendApiKey = env.RESEND_API_KEY;
   }
 
   if (env.FIRST_ADMIN_EMAIL && env.FIRST_ADMIN_PASSWORD) {

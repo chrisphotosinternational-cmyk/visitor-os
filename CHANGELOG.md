@@ -2,6 +2,15 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.8.0-dev - Sprint 8
+
+- Added central Notification Engine with internal, email and webhook providers.
+- Added mock email mode so the app works without Resend API credentials.
+- Added notification templates, variables, settings and PostgreSQL history.
+- Added synchronous queue abstraction with retry support for future worker migration.
+- Added minimal admin notification panel with history, filters, settings and test action.
+- Routed widget, CRM, AI, export, organization and site notification triggers through the engine.
+
 ## v0.7.0-dev - Sprint 7
 
 - Added advanced CRM foundation with lead scoring, score history, tags, notes and follow-ups.

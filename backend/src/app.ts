@@ -16,6 +16,8 @@ import {
   type BusinessConfigEngine
 } from './modules/business-config/configuration-loader.js';
 import { AuthService } from './modules/auth/auth-service.js';
+import { NotificationRepository } from './modules/notifications/notification-repository.js';
+import { NotificationEngine } from './modules/notifications/notification-engine.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -63,15 +65,22 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   const aiProvider = aiProviderFactory.createProvider();
   const decisionEngine = createDecisionEngine({ aiProvider, businessConfigEngine });
   const authService = new AuthService(dependencies.database, dependencies.config);
+  const notificationRepository = new NotificationRepository(dependencies.database, {
+    retryAttempts: dependencies.config.notifications.retryAttempts,
+    timeoutMs: dependencies.config.notifications.timeoutMs
+  });
+  const notificationEngine = new NotificationEngine(notificationRepository, dependencies.config);
 
-  registerWidgetRoutes(app, dependencies.database, decisionEngine);
+  registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(
     app,
     dependencies.database,
     businessConfigEngine,
     authService,
     aiConfigurations,
-    aiProviderFactory
+    aiProviderFactory,
+    notificationEngine,
+    notificationRepository
   );
 
   return app;

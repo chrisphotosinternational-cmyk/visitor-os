@@ -120,6 +120,11 @@ function baseAppConfig(): AppConfig {
     },
     security: { allowedOrigins: [], rateLimitWindowMs: 60_000, rateLimitMaxRequests: 120 },
     ai: {},
+    notifications: {
+      fromEmail: 'notifications@example.com',
+      retryAttempts: 2,
+      timeoutMs: 100
+    },
     businessConfig: { directory: '../configs' },
     auth: {
       sessionSecret: 'dev-only-session-secret-change-before-production',

@@ -7,6 +7,7 @@ import { ProspectRepository } from '../prospects/prospect-repository.js';
 import type { Database } from '../../database/client.js';
 import type { DecisionEngine } from '../decision-engine/decision-engine.js';
 import { CrmRepository } from '../crm/crm-repository.js';
+import type { NotificationEngine } from '../notifications/notification-engine.js';
 
 const widgetSiteReferenceSchema = z
   .object({
@@ -33,7 +34,8 @@ const messageSchema = z.object({
 export function registerWidgetRoutes(
   app: FastifyInstance,
   database: Database,
-  decisionEngine: DecisionEngine
+  decisionEngine: DecisionEngine,
+  notificationEngine?: NotificationEngine
 ): void {
   const conversations = new ConversationRepository(database);
   const prospects = new ProspectRepository(database);
@@ -96,6 +98,17 @@ export function registerWidgetRoutes(
       conversationId: conversation.id,
       senderType: 'system',
       content: 'Conversation demarree depuis le widget.'
+    });
+
+    await notificationEngine?.notify({
+      type: 'new_conversation',
+      organizationId: site.organization_id,
+      siteId: site.id,
+      variables: {
+        site: site.name,
+        createdAt: new Date().toISOString(),
+        conversationUrl: `/admin/conversations/${conversation.id}`
+      }
     });
 
     return {
@@ -194,16 +207,44 @@ export function registerWidgetRoutes(
     const prospectId = prospect?.id ?? conversation.prospect_id;
     if (prospectId) {
       const scoringMessages = [...recentHistory.map((message) => message.content), decision.reply];
-      await crm.applyAutomaticTags({
+      const appliedTags = await crm.applyAutomaticTags({
         organizationId: conversation.organization_id,
         prospectId,
         conversationId: conversation.id,
         messages: scoringMessages
       });
-      await crm.recalculateScore({
+      const scoring = await crm.recalculateScore({
         organizationId: conversation.organization_id,
         prospectId
       });
+
+      if (scoring.score >= 70) {
+        await notificationEngine?.notify({
+          type: 'hot_prospect',
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          variables: {
+            site: site?.name ?? conversation.site_id,
+            conversationUrl: `/admin/conversations/${conversation.id}`,
+            score: scoring.score,
+            tags: appliedTags.map((tag) => tag.label).join(', ')
+          }
+        });
+      }
+
+      if (appliedTags.some((tag) => tag.slug === 'reservation')) {
+        await notificationEngine?.notify({
+          type: 'potential_booking',
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          variables: {
+            site: site?.name ?? conversation.site_id,
+            conversationUrl: `/admin/conversations/${conversation.id}`,
+            score: scoring.score,
+            tags: appliedTags.map((tag) => tag.label).join(', ')
+          }
+        });
+      }
     }
 
     return {

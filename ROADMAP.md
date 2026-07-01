@@ -1,5 +1,15 @@
 # Roadmap
 
+## Current Development - v0.8.0-dev
+
+- Notification Engine
+- Internal notifications
+- Email provider abstraction with Resend-ready adapter
+- Mock email provider for local/V1 operation
+- Webhook provider
+- Notification settings and history
+- Queue abstraction for future asynchronous delivery
+
 ## Current Development - v0.7.0-dev
 
 - Advanced CRM

@@ -26,6 +26,9 @@ import { SiteRepository, siteStatuses } from '../sites/site-repository.js';
 import { userRoles } from '../users/user-model.js';
 import type { AuthContext, AuthService } from '../auth/auth-service.js';
 import { permissionsForRole } from '../auth/rbac.js';
+import type { NotificationEngine } from '../notifications/notification-engine.js';
+import type { NotificationRepository } from '../notifications/notification-repository.js';
+import { notificationStatuses, notificationTypes } from '../notifications/notification-types.js';
 
 const organizationInputSchema = z.object({
   name: z.string().min(1),
@@ -88,13 +91,29 @@ const followUpBodySchema = z.object({
   reason: z.string().min(1).max(1000)
 });
 
+const notificationSettingsSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  adminEmails: z.array(z.string().email()).default([]),
+  notificationsEnabled: z.boolean().default(true),
+  frequency: z.enum(['instant', 'daily', 'disabled']).default('instant'),
+  language: z.string().min(2).default('fr'),
+  preferredProvider: z.enum(['mock', 'resend']).default('mock'),
+  webhookUrl: z.string().url().nullable().optional(),
+  webhookHeaders: z.record(z.string(), z.string()).default({}),
+  webhookSecret: z.string().nullable().optional(),
+  retryAttempts: z.number().int().min(0).max(5).default(2),
+  timeoutMs: z.number().int().positive().max(30_000).default(5000)
+});
+
 export function registerAdminRoutes(
   app: FastifyInstance,
   database: Database,
   businessConfigEngine: BusinessConfigEngine,
   auth: AuthService,
   aiConfigurations?: AIConfigurationRepository,
-  providerFactory?: ProviderFactory
+  providerFactory?: ProviderFactory,
+  notificationEngine?: NotificationEngine,
+  notificationRepository?: NotificationRepository
 ): void {
   const prospects = new ProspectRepository(database);
   const crm = new CrmRepository(database);
@@ -194,6 +213,12 @@ export function registerAdminRoutes(
     const provider = providerFactory?.createProviderFor(configuration);
 
     if (!provider) {
+      await notificationEngine?.notify({
+        type: 'ai_provider_unavailable',
+        organizationId,
+        variables: { organization: organizationId },
+        channels: ['internal', 'email']
+      });
       throw new AppError('AI provider factory is not available', {
         statusCode: 503,
         code: 'AI_PROVIDER_UNAVAILABLE'
@@ -222,6 +247,84 @@ export function registerAdminRoutes(
       result,
       prompt: configuration.systemPrompt || buildSystemPrompt(businessConfig),
       estimates: estimateCostFromConfig(configuration, 100)
+    };
+  });
+
+  app.get('/api/admin/notifications', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const query = z
+      .object({
+        organizationId: z.string().uuid().optional(),
+        type: z.enum(notificationTypes).optional(),
+        status: z.enum(notificationStatuses).optional(),
+        provider: z.string().optional()
+      })
+      .parse(request.query);
+    const organizationId = auth.requireOrganizationAccess(context, query.organizationId);
+
+    return {
+      notifications:
+        (await notificationRepository?.list({
+          ...(organizationId ? { organizationId } : {}),
+          ...(query.type ? { type: query.type } : {}),
+          ...(query.status ? { status: query.status } : {}),
+          ...(query.provider ? { provider: query.provider } : {})
+        })) ?? [],
+      types: notificationTypes,
+      statuses: notificationStatuses
+    };
+  });
+
+  app.get('/api/admin/notifications/settings', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId =
+      auth.requireOrganizationAccess(context, query.organizationId) ?? context.user.organizationId;
+
+    return {
+      settings: await notificationRepository?.getSettings(organizationId)
+    };
+  });
+
+  app.put('/api/admin/notifications/settings', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = notificationSettingsSchema.parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+
+    return {
+      settings: await notificationRepository?.saveSettings({
+        organizationId,
+        adminEmails: body.adminEmails,
+        notificationsEnabled: body.notificationsEnabled,
+        frequency: body.frequency,
+        language: body.language,
+        preferredProvider: body.preferredProvider,
+        webhookUrl: body.webhookUrl ?? null,
+        webhookHeaders: body.webhookHeaders,
+        webhookSecret: body.webhookSecret ?? null,
+        retryAttempts: body.retryAttempts,
+        timeoutMs: body.timeoutMs
+      })
+    };
+  });
+
+  app.post('/api/admin/notifications/test', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = z.object({ organizationId: z.string().uuid().optional() }).parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+
+    return {
+      result: await notificationEngine?.notify({
+        type: 'system_error',
+        organizationId,
+        variables: { organization: organizationId }
+      })
     };
   });
 
@@ -320,9 +423,17 @@ export function registerAdminRoutes(
     const context = getAuthContext(authContexts, request);
     auth.requirePermission(context, 'organizations:write');
     const body = organizationInputSchema.parse(request.body);
+    const organization = await organizations.create(toOrganizationInput(body));
+
+    await notificationEngine?.notify({
+      type: 'new_organization',
+      organizationId: organization.id,
+      variables: { organization: organization.name },
+      channels: ['internal']
+    });
 
     return {
-      organization: await organizations.create(toOrganizationInput(body)),
+      organization,
       statuses: organizationStatuses
     };
   });
@@ -406,9 +517,18 @@ export function registerAdminRoutes(
     auth.requirePermission(context, 'sites:write');
     const body = siteInputSchema.parse(request.body);
     auth.requireOrganizationAccess(context, body.organizationId);
+    const site = await sites.create(toSiteInput(body));
+
+    await notificationEngine?.notify({
+      type: 'new_site',
+      organizationId: site.organization_id,
+      siteId: site.id,
+      variables: { site: site.name, organization: site.organization_id },
+      channels: ['internal']
+    });
 
     return {
-      site: await sites.create(toSiteInput(body)),
+      site,
       statuses: siteStatuses
     };
   });
@@ -588,16 +708,36 @@ export function registerAdminRoutes(
     const context = getAuthContext(authContexts, request);
     auth.requirePermission(context, 'prospects:write');
     const body = followUpBodySchema.parse(request.body);
+    const organizationId = auth.requireOrganizationAccess(context) ?? context.user.organizationId;
+    const followUp = await crm.createFollowUp({
+      organizationId,
+      prospectId: body.prospectId,
+      authorUserId: context.user.id,
+      dueAt: body.dueAt,
+      reason: body.reason,
+      ...(body.conversationId ? { conversationId: body.conversationId } : {})
+    });
+    const dueAt = new Date(body.dueAt);
+    const today = new Date();
+    const sameDay =
+      dueAt.getFullYear() === today.getFullYear() &&
+      dueAt.getMonth() === today.getMonth() &&
+      dueAt.getDate() === today.getDate();
+
+    if (sameDay || dueAt.getTime() < Date.now()) {
+      await notificationEngine?.notify({
+        type: dueAt.getTime() < Date.now() ? 'follow_up_overdue' : 'follow_up_today',
+        organizationId,
+        variables: {
+          createdAt: followUp.created_at.toISOString(),
+          status: followUp.status
+        },
+        channels: ['internal', 'email']
+      });
+    }
 
     return {
-      followUp: await crm.createFollowUp({
-        organizationId: auth.requireOrganizationAccess(context) ?? context.user.organizationId,
-        prospectId: body.prospectId,
-        authorUserId: context.user.id,
-        dueAt: body.dueAt,
-        reason: body.reason,
-        ...(body.conversationId ? { conversationId: body.conversationId } : {})
-      })
+      followUp
     };
   });
 
@@ -627,6 +767,18 @@ export function registerAdminRoutes(
     const rows = await crm.exportProspects({
       ...query,
       ...(organizationId ? { organizationId } : {})
+    });
+    const exportOrganizationId = organizationId ?? context.user.organizationId;
+
+    await notificationEngine?.notify({
+      type: 'export_completed',
+      organizationId: exportOrganizationId,
+      variables: {
+        organization: exportOrganizationId,
+        status: `${rows.length} lignes`,
+        createdAt: new Date().toISOString()
+      },
+      channels: ['internal', 'email']
     });
 
     if (query.format === 'xlsx') {

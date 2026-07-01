@@ -504,22 +504,59 @@ select {
   overflow-wrap: anywhere;
 }
 
-.ai-panel {
+.ai-panel,
+.notifications-panel {
   margin-top: 24px;
 }
 
-.ai-grid {
+.ai-grid,
+.notification-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
 .ai-grid label,
-.ai-test label {
+.ai-test label,
+.notification-settings label {
   display: grid;
   gap: 6px;
   color: #6b7280;
   font-size: 13px;
+}
+
+.notification-grid {
+  grid-template-columns: minmax(240px, 360px) minmax(0, 1fr);
+  padding: 18px;
+}
+
+.notification-settings {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.notification-settings input,
+.notification-settings select {
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.notification-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #eef0f3;
+  padding: 12px 0;
+}
+
+.notification-row small {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
 }
 
 .ai-test {
@@ -631,7 +668,8 @@ select {
   }
 
   .config-header,
-  .config-grid {
+  .config-grid,
+  .notification-grid {
     grid-template-columns: 1fr;
   }
 

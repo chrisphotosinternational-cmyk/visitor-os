@@ -17,8 +17,9 @@ This package now contains the first minimal vertical slice:
 - admin authentication, sessions and RBAC;
 - AI Provider Engine with mock/OpenAI abstraction and fallback.
 - advanced CRM with scoring, tags, notes, follow-ups and exports.
+- central Notification Engine with internal, email and webhook providers.
 
-It still contains no notifications, payments, bookings or business-specific hardcoded logic.
+It still contains no payments, bookings or business-specific hardcoded logic.
 
 ## Stack
 
@@ -68,6 +69,8 @@ Useful variables:
 - `ALLOWED_ORIGINS`
 - `SHUTDOWN_TIMEOUT_MS`
 - `OPENAI_API_KEY` optional. If absent, OpenAI requests automatically fall back to the mock provider.
+- `RESEND_API_KEY` optional. If absent, email notifications use the mock provider.
+- `NOTIFICATION_FROM_EMAIL`, `NOTIFICATION_RETRY_ATTEMPTS`, `NOTIFICATION_TIMEOUT_MS`.
 - `BUSINESS_CONFIG_DIR` defaults to `../configs`.
 - `ADMIN_SESSION_SECRET`, `ADMIN_SESSION_TTL_MS`, `ADMIN_SESSION_RENEWAL_MS`.
 - `FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` can bootstrap the first admin user.
@@ -137,6 +140,7 @@ The test suite verifies:
 - admin authentication, sessions, RBAC and organization isolation.
 - AI provider abstraction, mock fallback, OpenAI adapter and cost estimation.
 - CRM scoring, tag detection and export formatting.
+- Notification Engine templates, mock email, webhook abstraction and retry behavior.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -206,6 +210,10 @@ tests/
 - `GET /api/admin/ai/config`
 - `PUT /api/admin/ai/config`
 - `POST /api/admin/ai/test`
+- `GET /api/admin/notifications`
+- `GET /api/admin/notifications/settings`
+- `PUT /api/admin/notifications/settings`
+- `POST /api/admin/notifications/test`
 
 The widget/admin routes are intentionally minimal and exist only to validate the product flow.
 
@@ -249,6 +257,19 @@ Supported architecture:
 - `ProviderFactory`: selects the configured provider and falls back to mock when a provider is unavailable.
 
 AI events are persisted with provider, model, latency, input tokens, output tokens and estimated cost.
+
+## Notification Engine
+
+All outgoing communication goes through the Notification Engine.
+
+Providers:
+
+- `InternalProvider`
+- `MockEmailProvider`
+- `ResendEmailProvider`
+- `WebhookProvider`
+
+The engine resolves templates, organization settings, retry attempts, provider execution and history. It stores notification status without persisting full sensitive message bodies. The current queue is synchronous but behind an interface for future worker migration.
 
 ## Business Configuration Engine
 

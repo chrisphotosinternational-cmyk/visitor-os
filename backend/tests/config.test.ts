@@ -15,6 +15,8 @@ describe('loadConfig', () => {
     assert.equal(config.server.port, 3000);
     assert.equal(config.database.url, baseEnv.DATABASE_URL);
     assert.equal(config.database.ssl, false);
+    assert.equal(config.notifications.fromEmail, 'notifications@visitor-os.local');
+    assert.equal(config.notifications.retryAttempts, 2);
   });
 
   it('parses allowed origins', () => {

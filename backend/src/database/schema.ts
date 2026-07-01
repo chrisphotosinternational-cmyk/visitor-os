@@ -82,6 +82,39 @@ export async function initializeSchema(database: Database): Promise<void> {
     alter table sites add column if not exists status text not null default 'active';
     alter table sites add column if not exists widget_enabled boolean not null default true;
 
+    create table if not exists notification_settings (
+      organization_id uuid primary key references organizations(id),
+      admin_emails text[] not null default '{}',
+      notifications_enabled boolean not null default true,
+      frequency text not null default 'instant',
+      language text not null default 'fr',
+      preferred_provider text not null default 'mock',
+      webhook_url text,
+      webhook_headers jsonb not null default '{}'::jsonb,
+      webhook_secret text,
+      retry_attempts integer not null default 2,
+      timeout_ms integer not null default 5000,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists notification_events (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid references sites(id),
+      type text not null,
+      title text not null,
+      subject text not null,
+      content_preview text,
+      recipient text,
+      provider text not null,
+      status text not null,
+      error_message text,
+      attempt_count integer not null default 0,
+      sent_at timestamptz,
+      created_at timestamptz not null default now()
+    );
+
     create table if not exists visitors (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -262,6 +295,10 @@ export async function initializeSchema(database: Database): Promise<void> {
     create index if not exists idx_admin_sessions_user on admin_sessions(user_id);
     create unique index if not exists idx_sites_organization_slug on sites(organization_id, slug);
     create index if not exists idx_sites_organization on sites(organization_id);
+    create index if not exists idx_notification_events_organization_created
+      on notification_events(organization_id, created_at desc);
+    create index if not exists idx_notification_events_status
+      on notification_events(organization_id, status, created_at desc);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);
     create index if not exists idx_conversations_organization_site on conversations(organization_id, site_id);
     create index if not exists idx_messages_conversation_created on messages(conversation_id, created_at);
