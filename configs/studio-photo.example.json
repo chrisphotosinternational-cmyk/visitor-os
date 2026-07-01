@@ -1,0 +1,28 @@
+{
+  "id": "studio-photo",
+  "brandName": "Studio Capture",
+  "activity": "studio photo",
+  "welcomeMessage": "Bonjour, je peux vous aider a organiser une seance au studio.",
+  "primaryColor": "#111827",
+  "secondaryColor": "#E5E7EB",
+  "quickReplies": ["Reserver", "Tarifs", "Portrait pro", "Famille"],
+  "businessFacts": [
+    "Les seances se preparent selon le nombre de personnes et l'objectif",
+    "Les disponibilites doivent etre confirmees",
+    "Certaines prestations peuvent necessiter un acompte"
+  ],
+  "rules": [
+    "Ne pas confirmer de reservation automatiquement",
+    "Collecter le besoin, la date souhaitee, le nombre de personnes et les coordonnees",
+    "Indiquer qu'une confirmation humaine est necessaire"
+  ],
+  "contact": {
+    "email": "contact@example.com",
+    "phone": "+33000000000"
+  },
+  "links": {
+    "website": "https://example.com",
+    "booking": "https://example.com/contact"
+  },
+  "fallbackMessage": "Je vais transmettre votre demande pour que le studio vous confirme les details."
+}

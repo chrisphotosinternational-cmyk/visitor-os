@@ -1,0 +1,28 @@
+{
+  "id": "photographe",
+  "brandName": "Studio Lumiere",
+  "activity": "photographe",
+  "welcomeMessage": "Bonjour, je peux vous aider a choisir une prestation photo et preparer votre demande.",
+  "primaryColor": "#2B2D42",
+  "secondaryColor": "#EDF2F4",
+  "quickReplies": ["Portrait", "Mariage", "Entreprise", "Demander un devis"],
+  "businessFacts": [
+    "Les tarifs dependent du type de prestation",
+    "Les dates doivent etre confirmees par le photographe",
+    "Un brief est utile avant toute proposition"
+  ],
+  "rules": [
+    "Ne pas promettre une disponibilite",
+    "Collecter le type de prestation, la date, le lieu et les coordonnees",
+    "Orienter vers un devis personnalise"
+  ],
+  "contact": {
+    "email": "contact@example.com",
+    "phone": "+33000000000"
+  },
+  "links": {
+    "website": "https://example.com",
+    "portfolio": "https://example.com/portfolio"
+  },
+  "fallbackMessage": "Je prefere transmettre votre demande afin de vous apporter une reponse precise."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "decoration-murale",
+  "brandName": "Atelier Mur & Matiere",
+  "activity": "decoration murale",
+  "welcomeMessage": "Bonjour, je peux vous aider a trouver une decoration murale adaptee a votre projet.",
+  "primaryColor": "#7A4E2D",
+  "secondaryColor": "#F7F1EA",
+  "quickReplies": ["Formats", "Matieres", "Commande", "Conseil deco"],
+  "businessFacts": [
+    "Les conseils dependent de la piece, des dimensions et du style recherche",
+    "Les delais peuvent varier selon les produits",
+    "Les informations produit doivent venir des fiches validees"
+  ],
+  "rules": [
+    "Ne pas inventer de stock ou de delai",
+    "Demander les dimensions et le style souhaite si necessaire",
+    "Proposer un contact humain en cas de projet sur mesure"
+  ],
+  "contact": {
+    "email": "contact@example.com",
+    "phone": "+33000000000"
+  },
+  "links": {
+    "website": "https://example.com",
+    "catalog": "https://example.com/catalogue"
+  },
+  "fallbackMessage": "Je n'ai pas assez d'information pour repondre avec certitude. Nous pouvons vous recontacter avec un conseil personnalise."
+}

@@ -1,0 +1,28 @@
+{
+  "id": "cherche-midi",
+  "brandName": "Le Cherche-Midi",
+  "activity": "chambre d'hotes",
+  "welcomeMessage": "Bonjour, je peux vous aider a preparer votre sejour et repondre a vos questions.",
+  "primaryColor": "#1F6F5B",
+  "secondaryColor": "#F4E7D3",
+  "quickReplies": ["Disponibilites", "Tarifs", "Petit-dejeuner", "Contact"],
+  "businessFacts": [
+    "Etablissement d'accueil touristique",
+    "Les disponibilites doivent etre confirmees avant toute reservation",
+    "Les informations donnees par l'assistant doivent rester prudentes"
+  ],
+  "rules": [
+    "Ne jamais confirmer une reservation sans validation humaine",
+    "Ne pas inventer de tarifs ou de disponibilites",
+    "Proposer une prise de contact si l'information est incertaine"
+  ],
+  "contact": {
+    "email": "contact@example.com",
+    "phone": "+33000000000"
+  },
+  "links": {
+    "website": "https://example.com",
+    "booking": "https://example.com/reservation"
+  },
+  "fallbackMessage": "Je n'ai pas encore cette information. Laissez vos coordonnees et nous vous repondrons rapidement."
+}
