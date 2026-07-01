@@ -32,4 +32,15 @@ describe('loadConfig', () => {
   it('rejects missing database url', () => {
     assert.throws(() => loadConfig({}), /DATABASE_URL/);
   });
+
+  it('requires explicit allowed origins in production', () => {
+    assert.throws(
+      () =>
+        loadConfig({
+          ...baseEnv,
+          NODE_ENV: 'production'
+        }),
+      /ALLOWED_ORIGINS/
+    );
+  });
 });

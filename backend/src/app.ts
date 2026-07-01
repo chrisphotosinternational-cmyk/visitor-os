@@ -6,6 +6,8 @@ import type { AppLogger } from './core/logger/logger.js';
 import type { Database } from './database/client.js';
 import { registerAdminRoutes } from './modules/admin/admin-routes.js';
 import { registerWidgetRoutes } from './modules/widget/widget-routes.js';
+import { registerSecurityHeaders } from './core/security/security-headers.js';
+import { registerSimpleRateLimit } from './core/security/simple-rate-limit.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -22,7 +24,15 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     origin:
       dependencies.config.security.allowedOrigins.length > 0
         ? dependencies.config.security.allowedOrigins
-        : true
+        : dependencies.config.app.environment === 'production'
+          ? false
+          : true
+  });
+
+  registerSecurityHeaders(app);
+  registerSimpleRateLimit(app, {
+    windowMs: dependencies.config.security.rateLimitWindowMs,
+    maxRequests: dependencies.config.security.rateLimitMaxRequests
   });
 
   registerErrorHandler(app);

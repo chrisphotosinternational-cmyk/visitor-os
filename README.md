@@ -6,9 +6,16 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Repository initialized. No business feature is implemented yet.
+Release candidate: `v0.1.0`.
 
-This phase defines the project structure, documentation areas, configuration examples, and future development boundaries.
+The first working MVP is available:
+
+- embeddable demo widget;
+- backend message handling;
+- PostgreSQL persistence;
+- temporary non-AI replies;
+- minimal admin dashboard;
+- conversation search and status update.
 
 ## Planned Modules
 
@@ -54,6 +61,38 @@ This phase defines the project structure, documentation areas, configuration exa
 8. CRM foundations
 9. AI integration
 10. Analytics, exports, and notifications
+
+## Quick Start
+
+Backend:
+
+```bash
+cd backend
+pnpm install
+cp .env.example .env
+pnpm check
+pnpm dev
+```
+
+The backend requires a PostgreSQL database configured through `DATABASE_URL`.
+
+Widget demo:
+
+```bash
+cd widget
+python3 -m http.server 4173
+```
+
+Open `http://localhost:4173/demo.html`.
+
+Admin demo:
+
+```bash
+cd frontend-admin
+python3 -m http.server 5173
+```
+
+Open `http://localhost:5173`.
 
 ## Development Rule
 

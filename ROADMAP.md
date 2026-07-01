@@ -1,5 +1,15 @@
 # Roadmap
 
+## Current Release - v0.1.0 RC
+
+- MVP widget demo
+- Backend conversation/message persistence
+- Temporary non-AI reply
+- Minimal admin dashboard
+- Conversation search
+- Conversation status update
+- Hardening pass and release documentation
+
 ## V1 - Foundation
 
 - Repository structure

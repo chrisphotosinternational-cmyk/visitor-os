@@ -1,29 +1,43 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-const environmentSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  APP_NAME: z.string().min(1).default('VISITOR-OS'),
-  HOST: z.string().min(1).default('0.0.0.0'),
-  PORT: z.coerce.number().int().positive().max(65535).default(3000),
-  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  DATABASE_URL: z.string().url().startsWith('postgresql://'),
-  DATABASE_SSL: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((value) => value === 'true'),
-  DATABASE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-  ALLOWED_ORIGINS: z
-    .string()
-    .default('')
-    .transform((value) =>
-      value
-        .split(',')
-        .map((origin) => origin.trim())
-        .filter(Boolean)
-    ),
-  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000)
-});
+const environmentSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    APP_NAME: z.string().min(1).default('VISITOR-OS'),
+    HOST: z.string().min(1).default('0.0.0.0'),
+    PORT: z.coerce.number().int().positive().max(65535).default(3000),
+    LOG_LEVEL: z
+      .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
+      .default('info'),
+    DATABASE_URL: z.string().url().startsWith('postgresql://'),
+    DATABASE_SSL: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+    DATABASE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+    ALLOWED_ORIGINS: z
+      .string()
+      .default('')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean)
+      ),
+    SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+    RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120)
+  })
+  .superRefine((env, context) => {
+    if (env.NODE_ENV === 'production' && env.ALLOWED_ORIGINS.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ALLOWED_ORIGINS'],
+        message: 'must be set in production'
+      });
+    }
+  });
 
 export type AppConfig = {
   app: {
@@ -45,6 +59,8 @@ export type AppConfig = {
   };
   security: {
     allowedOrigins: string[];
+    rateLimitWindowMs: number;
+    rateLimitMaxRequests: number;
   };
 };
 
@@ -80,7 +96,9 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       connectionTimeoutMs: env.DATABASE_CONNECTION_TIMEOUT_MS
     },
     security: {
-      allowedOrigins: env.ALLOWED_ORIGINS
+      allowedOrigins: env.ALLOWED_ORIGINS,
+      rateLimitWindowMs: env.RATE_LIMIT_WINDOW_MS,
+      rateLimitMaxRequests: env.RATE_LIMIT_MAX_REQUESTS
     }
   };
 }

@@ -1,4 +1,5 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { ZodError } from 'zod';
 import { AppError } from './app-error.js';
 
 type ErrorResponse = {
@@ -40,6 +41,13 @@ export function registerErrorHandler(app: FastifyInstance): void {
 function normalizeError(error: FastifyError | AppError): AppError {
   if (error instanceof AppError) {
     return error;
+  }
+
+  if (error instanceof ZodError) {
+    return new AppError('Invalid request payload', {
+      statusCode: 400,
+      code: 'VALIDATION_ERROR'
+    });
   }
 
   const statusCode = error.statusCode ?? 500;

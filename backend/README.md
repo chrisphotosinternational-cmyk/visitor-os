@@ -75,6 +75,37 @@ pnpm dev
 
 The application validates configuration, checks PostgreSQL connectivity, then starts the Fastify server.
 
+## Five-Minute Local Run
+
+1. Install dependencies:
+
+   ```bash
+   cd backend
+   pnpm install
+   ```
+
+2. Configure PostgreSQL:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit `DATABASE_URL` in `.env`.
+
+4. Validate the backend:
+
+   ```bash
+   pnpm check
+   ```
+
+5. Start:
+
+   ```bash
+   pnpm dev
+   ```
+
+The app initializes the minimal schema and demo site at startup.
+
 ## Production Start
 
 ```bash
@@ -153,6 +184,14 @@ tests/
 - `PATCH /api/admin/prospects/:prospectId/status`
 
 The widget/admin routes are intentionally minimal and exist only to validate the first product flow.
+
+## Security Notes
+
+- Zod validation errors return `400 VALIDATION_ERROR`.
+- Production requires explicit `ALLOWED_ORIGINS`.
+- Basic security headers are sent on responses.
+- A simple in-memory rate limiter protects the MVP.
+- Authentication is intentionally not present yet and must be added before public production usage.
 
 ## PostgreSQL
 
