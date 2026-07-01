@@ -254,6 +254,29 @@ Admin routes:
 
 The widget accepts `siteId`, `siteSlug` or `siteKey` and loads the associated business configuration.
 
+## Admin Authentication
+
+Sprint 5 protects admin routes with signed httpOnly sessions.
+
+Auth routes:
+
+- `POST /api/admin/auth/login`
+- `POST /api/admin/auth/logout`
+- `GET /api/admin/auth/me`
+
+Environment variables:
+
+- `ADMIN_SESSION_SECRET`
+- `ADMIN_SESSION_TTL_MS`
+- `ADMIN_SESSION_RENEWAL_MS`
+- `FIRST_ADMIN_EMAIL`
+- `FIRST_ADMIN_PASSWORD`
+- `FIRST_ADMIN_FIRST_NAME`
+- `FIRST_ADMIN_LAST_NAME`
+- `FIRST_ADMIN_ORGANIZATION_ID`
+
+Passwords are hashed with bcrypt. Session tokens are signed in cookies and stored as hashes server-side.
+
 ## PostgreSQL
 
 The startup process calls a PostgreSQL connection check before listening for requests.

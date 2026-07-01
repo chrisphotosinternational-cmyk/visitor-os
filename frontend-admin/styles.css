@@ -16,6 +16,50 @@ select {
   font: inherit;
 }
 
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-panel {
+  display: grid;
+  width: min(100%, 380px);
+  gap: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 24px;
+  background: #fff;
+}
+
+.login-panel h1,
+.login-panel p {
+  margin: 0;
+}
+
+.login-panel label {
+  display: grid;
+  gap: 6px;
+  color: #374151;
+}
+
+.login-panel input {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.login-panel button,
+.topbar-actions button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: #fff;
+  background: #1f6f5b;
+  cursor: pointer;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -64,6 +108,23 @@ select {
   color: #fff;
   background: #1f6f5b;
   cursor: pointer;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-chip {
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 8px 10px;
+  color: #374151;
+  background: #fff;
+  font-size: 13px;
 }
 
 .metrics {

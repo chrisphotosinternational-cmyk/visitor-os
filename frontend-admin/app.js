@@ -2,9 +2,23 @@ import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js'
 
 const API_BASE_URL = window.VISITOR_OS_API_URL ?? 'http://localhost:3000';
 
+function apiFetch(url, options = {}) {
+  return fetch(url, {
+    credentials: 'include',
+    ...options
+  });
+}
+
 createApp({
   data() {
     return {
+      authenticated: false,
+      currentUser: null,
+      permissions: [],
+      loginForm: {
+        email: '',
+        password: ''
+      },
       conversations: [],
       conversationStatuses: [],
       selectedConversation: null,
@@ -55,10 +69,56 @@ createApp({
   },
 
   async mounted() {
-    await this.refreshDashboard();
+    await this.checkSession();
   },
 
   methods: {
+    async checkSession() {
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/auth/me`);
+        if (!response.ok) {
+          this.authenticated = false;
+          return;
+        }
+        const data = await response.json();
+        this.authenticated = true;
+        this.currentUser = data.user;
+        this.permissions = data.permissions;
+        await this.refreshDashboard();
+      } catch {
+        this.authenticated = false;
+      }
+    },
+
+    async login() {
+      this.error = '';
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.loginForm)
+        });
+        if (!response.ok) throw new Error('Identifiants invalides.');
+        const data = await response.json();
+        this.authenticated = true;
+        this.currentUser = data.user;
+        this.permissions = data.permissions;
+        this.loginForm.password = '';
+        await this.refreshDashboard();
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async logout() {
+      await apiFetch(`${API_BASE_URL}/api/admin/auth/logout`, { method: 'POST' });
+      this.authenticated = false;
+      this.currentUser = null;
+      this.permissions = [];
+      this.selectedConversation = null;
+    },
+
     async refreshDashboard() {
       this.loading = true;
       this.error = '';
@@ -80,7 +140,7 @@ createApp({
       const params = new URLSearchParams();
       if (this.search.trim()) params.set('search', this.search.trim());
 
-      const response = await fetch(`${API_BASE_URL}/api/admin/conversations?${params.toString()}`);
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/conversations?${params.toString()}`);
       if (!response.ok) throw new Error('Impossible de charger les conversations.');
       const data = await response.json();
       this.conversations = data.conversations;
@@ -92,14 +152,14 @@ createApp({
     },
 
     async loadProspects() {
-      const response = await fetch(`${API_BASE_URL}/api/admin/prospects`);
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/prospects`);
       if (!response.ok) throw new Error('Impossible de charger les prospects.');
       const data = await response.json();
       this.prospects = data.prospects;
     },
 
     async loadConfigs() {
-      const response = await fetch(`${API_BASE_URL}/api/admin/configs`);
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/configs`);
       if (!response.ok) throw new Error('Impossible de charger les configurations.');
       const data = await response.json();
       this.configs = data.configs;
@@ -110,7 +170,7 @@ createApp({
     },
 
     async loadOrganizations() {
-      const response = await fetch(`${API_BASE_URL}/api/admin/organizations`);
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/organizations`);
       if (!response.ok) throw new Error('Impossible de charger les organisations.');
       const data = await response.json();
       this.organizations = data.organizations;
@@ -121,7 +181,7 @@ createApp({
     },
 
     async loadSites() {
-      const response = await fetch(`${API_BASE_URL}/api/admin/sites`);
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/sites`);
       if (!response.ok) throw new Error('Impossible de charger les sites.');
       const data = await response.json();
       this.sites = data.sites;
@@ -142,7 +202,7 @@ createApp({
       this.error = '';
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/admin/conversations/${id}`);
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/conversations/${id}`);
         if (!response.ok) throw new Error('Impossible de charger la conversation.');
         const data = await response.json();
         this.selectedConversation = data.conversation;
@@ -156,7 +216,7 @@ createApp({
       if (!this.selectedConversation) return;
 
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `${API_BASE_URL}/api/admin/conversations/${this.selectedConversation.id}/status`,
           {
             method: 'PATCH',
@@ -179,7 +239,7 @@ createApp({
       this.error = '';
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/admin/configs/${id}`);
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/configs/${id}`);
         if (!response.ok) throw new Error('Impossible de charger la configuration.');
         const data = await response.json();
         this.selectedConfigId = id;
@@ -200,7 +260,7 @@ createApp({
 
       try {
         const parsed = JSON.parse(this.configText);
-        const response = await fetch(`${API_BASE_URL}/api/admin/configs/${this.selectedConfigId}`, {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/configs/${this.selectedConfigId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -227,7 +287,7 @@ createApp({
 
       try {
         const parsed = JSON.parse(this.configText);
-        const response = await fetch(`${API_BASE_URL}/api/admin/configs/import`, {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/configs/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -250,7 +310,7 @@ createApp({
       this.error = '';
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/admin/configs/reload`, {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/configs/reload`, {
           method: 'POST'
         });
         if (!response.ok) throw new Error('Rechargement impossible.');
@@ -322,7 +382,7 @@ createApp({
       const url = this.organizationForm.id
         ? `${API_BASE_URL}/api/admin/organizations/${this.organizationForm.id}`
         : `${API_BASE_URL}/api/admin/organizations`;
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: this.organizationForm.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -334,7 +394,7 @@ createApp({
     },
 
     async toggleOrganization(organization) {
-      const response = await fetch(`${API_BASE_URL}/api/admin/organizations/${organization.id}/status`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/organizations/${organization.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: organization.status === 'active' ? 'inactive' : 'active' })
@@ -345,7 +405,7 @@ createApp({
     },
 
     async deleteOrganization(organization) {
-      const response = await fetch(`${API_BASE_URL}/api/admin/organizations/${organization.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/organizations/${organization.id}`, {
         method: 'DELETE'
       });
 
@@ -396,7 +456,7 @@ createApp({
       const url = this.siteForm.id
         ? `${API_BASE_URL}/api/admin/sites/${this.siteForm.id}`
         : `${API_BASE_URL}/api/admin/sites`;
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method: this.siteForm.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -408,7 +468,7 @@ createApp({
     },
 
     async toggleSite(site) {
-      const response = await fetch(`${API_BASE_URL}/api/admin/sites/${site.id}/status`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/sites/${site.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: site.status === 'active' ? 'inactive' : 'active' })
@@ -419,7 +479,7 @@ createApp({
     },
 
     async deleteSite(site) {
-      const response = await fetch(`${API_BASE_URL}/api/admin/sites/${site.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/sites/${site.id}`, {
         method: 'DELETE'
       });
 
@@ -461,23 +521,55 @@ createApp({
           human_escalation: 'Escalade humaine'
         }[source] ?? source
       );
+    },
+
+    can(permission) {
+      return this.permissions.includes(permission);
     }
   },
 
   template: `
-    <main class="app-shell">
+    <main v-if="!authenticated" class="login-shell">
+      <form class="login-panel" @submit.prevent="login">
+        <strong>VISITOR-OS</strong>
+        <h1>Connexion admin</h1>
+        <p v-if="error" class="alert">{{ error }}</p>
+        <label>
+          Email
+          <input v-model="loginForm.email" type="email" autocomplete="email" required />
+        </label>
+        <label>
+          Mot de passe
+          <input
+            v-model="loginForm.password"
+            type="password"
+            autocomplete="current-password"
+            required
+          />
+        </label>
+        <button type="submit">Se connecter</button>
+      </form>
+    </main>
+
+    <main v-else class="app-shell">
       <aside class="sidebar">
         <strong>VISITOR-OS</strong>
-        <span>Dashboard MVP</span>
+        <span>Admin sécurisé</span>
       </aside>
 
-      <section class="content">
+      <section v-if="authenticated" class="content">
         <header class="topbar">
           <div>
             <h1>Dashboard</h1>
             <p>Conversations, prospects et suivi minimal.</p>
           </div>
-          <button type="button" @click="refreshDashboard">Actualiser</button>
+          <div class="topbar-actions">
+            <span v-if="currentUser" class="user-chip">
+              {{ currentUser.firstName }} {{ currentUser.lastName }} · {{ currentUser.role }}
+            </span>
+            <button type="button" @click="refreshDashboard">Actualiser</button>
+            <button type="button" @click="logout">Deconnexion</button>
+          </div>
         </header>
 
         <p v-if="error" class="alert">{{ error }}</p>
@@ -502,7 +594,7 @@ createApp({
             <div class="panel-header">
               <h2>Organisations</h2>
             </div>
-            <form class="tenant-form" @submit.prevent="saveOrganization">
+            <form v-if="can('organizations:write')" class="tenant-form" @submit.prevent="saveOrganization">
               <input v-model="organizationForm.name" placeholder="Nom" required />
               <input v-model="organizationForm.slug" placeholder="Slug" required />
               <input v-model="organizationForm.email" placeholder="Email" />
@@ -516,11 +608,11 @@ createApp({
                 <small>{{ organization.slug }} · {{ organization.status }}</small>
               </span>
               <span class="tenant-actions">
-                <button type="button" @click="editOrganization(organization)">Editer</button>
-                <button type="button" @click="toggleOrganization(organization)">
+                <button v-if="can('organizations:write')" type="button" @click="editOrganization(organization)">Editer</button>
+                <button v-if="can('organizations:write')" type="button" @click="toggleOrganization(organization)">
                   {{ organization.status === 'active' ? 'Desactiver' : 'Activer' }}
                 </button>
-                <button type="button" @click="deleteOrganization(organization)">Supprimer</button>
+                <button v-if="can('organizations:write')" type="button" @click="deleteOrganization(organization)">Supprimer</button>
               </span>
             </div>
           </article>
@@ -529,7 +621,7 @@ createApp({
             <div class="panel-header">
               <h2>Sites</h2>
             </div>
-            <form class="tenant-form" @submit.prevent="saveSite">
+            <form v-if="can('sites:write')" class="tenant-form" @submit.prevent="saveSite">
               <select v-model="siteForm.organizationId" required>
                 <option v-for="organization in organizations" :key="organization.id" :value="organization.id">
                   {{ organization.name }}
@@ -551,11 +643,11 @@ createApp({
                 <small>{{ site.slug }} · {{ site.business_config_id }} · {{ site.status }}</small>
               </span>
               <span class="tenant-actions">
-                <button type="button" @click="editSite(site)">Editer</button>
-                <button type="button" @click="toggleSite(site)">
+                <button v-if="can('sites:write')" type="button" @click="editSite(site)">Editer</button>
+                <button v-if="can('sites:write')" type="button" @click="toggleSite(site)">
                   {{ site.status === 'active' ? 'Desactiver' : 'Activer' }}
                 </button>
-                <button type="button" @click="deleteSite(site)">Supprimer</button>
+                <button v-if="can('sites:write')" type="button" @click="deleteSite(site)">Supprimer</button>
               </span>
             </div>
           </article>
@@ -680,9 +772,9 @@ createApp({
                 </option>
               </select>
               <button type="button" @click="reloadConfigs">Recharger</button>
-              <button type="button" @click="saveConfig">Sauvegarder</button>
-              <button type="button" @click="importConfig">Importer</button>
-              <button type="button" @click="exportConfig">Exporter</button>
+              <button v-if="can('settings:access')" type="button" @click="saveConfig">Sauvegarder</button>
+              <button v-if="can('settings:access')" type="button" @click="importConfig">Importer</button>
+              <button v-if="can('data:export')" type="button" @click="exportConfig">Exporter</button>
             </div>
           </div>
 

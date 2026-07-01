@@ -4,6 +4,7 @@ import { createLogger } from './core/logger/logger.js';
 import { createDatabase } from './database/client.js';
 import { initializeSchema, seedFoundationData } from './database/schema.js';
 import { registerShutdownHooks } from './core/lifecycle/shutdown.js';
+import { seedFirstAdmin } from './modules/auth/bootstrap.js';
 
 const logger = createLogger();
 
@@ -15,6 +16,7 @@ async function bootstrap(): Promise<void> {
   await database.checkConnection();
   await initializeSchema(database);
   await seedFoundationData(database);
+  await seedFirstAdmin(database, config);
 
   registerShutdownHooks({
     app,

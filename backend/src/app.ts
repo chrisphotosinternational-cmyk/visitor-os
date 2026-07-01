@@ -14,6 +14,7 @@ import {
   createBusinessConfigEngine,
   type BusinessConfigEngine
 } from './modules/business-config/configuration-loader.js';
+import { AuthService } from './modules/auth/auth-service.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -28,6 +29,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   });
 
   await app.register(cors, {
+    credentials: true,
     origin:
       dependencies.config.security.allowedOrigins.length > 0
         ? dependencies.config.security.allowedOrigins
@@ -57,9 +59,10 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     });
   const aiProvider = createDefaultAiProvider(dependencies.config.ai.openAiApiKey);
   const decisionEngine = createDecisionEngine({ aiProvider, businessConfigEngine });
+  const authService = new AuthService(dependencies.database, dependencies.config);
 
   registerWidgetRoutes(app, dependencies.database, decisionEngine);
-  registerAdminRoutes(app, dependencies.database, businessConfigEngine);
+  registerAdminRoutes(app, dependencies.database, businessConfigEngine, authService);
 
   return app;
 }

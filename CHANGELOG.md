@@ -2,6 +2,15 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.5.0-dev - Sprint 5
+
+- Added admin login, logout and current-user session routes.
+- Added bcrypt password hashing and first-admin bootstrap from environment variables.
+- Added signed httpOnly session cookies with expiration, revocation and controlled renewal.
+- Added RBAC permissions for organizations, sites, conversations, prospects, exports and settings.
+- Protected admin routes and enforced organization access for non-SuperAdmin users.
+- Added minimal admin login screen, logout button and current user display.
+
 ## v0.4.0-dev - Sprint 4
 
 - Added multi-tenant foundation with organizations, sites and prepared users/roles.

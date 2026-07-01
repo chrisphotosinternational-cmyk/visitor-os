@@ -36,6 +36,17 @@ export async function initializeSchema(database: Database): Promise<void> {
       unique (organization_id, email)
     );
 
+    create table if not exists admin_sessions (
+      id uuid primary key,
+      user_id uuid not null references users(id),
+      organization_id uuid not null references organizations(id),
+      token_hash text not null unique,
+      expires_at timestamptz not null,
+      created_at timestamptz not null default now(),
+      renewed_at timestamptz not null default now(),
+      revoked_at timestamptz
+    );
+
     create table if not exists sites (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -147,6 +158,9 @@ export async function initializeSchema(database: Database): Promise<void> {
     alter table messages add column if not exists decision_reason text;
 
     create index if not exists idx_sites_widget_public_key on sites(widget_public_key);
+    create index if not exists idx_users_email on users(email);
+    create index if not exists idx_admin_sessions_token_hash on admin_sessions(token_hash);
+    create index if not exists idx_admin_sessions_user on admin_sessions(user_id);
     create unique index if not exists idx_sites_organization_slug on sites(organization_id, slug);
     create index if not exists idx_sites_organization on sites(organization_id);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);

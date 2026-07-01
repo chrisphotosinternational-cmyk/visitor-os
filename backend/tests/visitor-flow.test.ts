@@ -5,11 +5,12 @@ import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/core/config/env.js';
 import { createLogger } from '../src/core/logger/logger.js';
 import type { Database } from '../src/database/client.js';
+import { hashPassword } from '../src/modules/auth/password.js';
 import type pg from 'pg';
 
 describe('visitor to admin flow', () => {
   it('records a widget conversation and exposes the prospect in admin', async () => {
-    const database = createMemoryDatabase();
+    const database = await createMemoryDatabase();
     const app = await createApp({
       config: loadConfig({
         NODE_ENV: 'test',
@@ -51,9 +52,22 @@ describe('visitor to admin flow', () => {
     assert.equal(message.shouldEscalate, true);
     assert.match(message.reply, /information approximative/i);
 
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/login',
+      payload: {
+        email: 'admin@example.com',
+        password: 'test-password-123'
+      }
+    });
+    assert.equal(loginResponse.statusCode, 200);
+    const cookie = loginResponse.headers['set-cookie'];
+    assert.ok(cookie);
+
     const prospectsResponse = await app.inject({
       method: 'GET',
-      url: '/api/admin/prospects'
+      url: '/api/admin/prospects',
+      headers: { cookie }
     });
     assert.equal(prospectsResponse.statusCode, 200);
     const prospectsList = prospectsResponse.json() as { prospects: Array<{ id: string }> };
@@ -61,7 +75,8 @@ describe('visitor to admin flow', () => {
 
     const conversationsResponse = await app.inject({
       method: 'GET',
-      url: '/api/admin/conversations?search=tarifs'
+      url: '/api/admin/conversations?search=tarifs',
+      headers: { cookie }
     });
     assert.equal(conversationsResponse.statusCode, 200);
     const conversationsList = conversationsResponse.json() as {
@@ -72,7 +87,8 @@ describe('visitor to admin flow', () => {
 
     const detailResponse = await app.inject({
       method: 'GET',
-      url: `/api/admin/prospects/${message.prospectId}`
+      url: `/api/admin/prospects/${message.prospectId}`,
+      headers: { cookie }
     });
     assert.equal(detailResponse.statusCode, 200);
     const detail = detailResponse.json() as {
@@ -82,7 +98,8 @@ describe('visitor to admin flow', () => {
 
     const conversationDetailResponse = await app.inject({
       method: 'GET',
-      url: `/api/admin/conversations/${started.conversationId}`
+      url: `/api/admin/conversations/${started.conversationId}`,
+      headers: { cookie }
     });
     assert.equal(conversationDetailResponse.statusCode, 200);
     const conversationDetail = conversationDetailResponse.json() as {
@@ -98,6 +115,7 @@ describe('visitor to admin flow', () => {
     const statusResponse = await app.inject({
       method: 'PATCH',
       url: `/api/admin/prospects/${message.prospectId}/status`,
+      headers: { cookie },
       payload: {
         status: 'A rappeler'
       }
@@ -111,6 +129,7 @@ describe('visitor to admin flow', () => {
     const conversationStatusResponse = await app.inject({
       method: 'PATCH',
       url: `/api/admin/conversations/${started.conversationId}/status`,
+      headers: { cookie },
       payload: {
         status: 'qualified'
       }
@@ -126,7 +145,7 @@ describe('visitor to admin flow', () => {
   });
 });
 
-function createMemoryDatabase(): Database {
+async function createMemoryDatabase(): Promise<Database> {
   const site = {
     id: '00000000-0000-4000-8000-000000000101',
     organization_id: '00000000-0000-4000-8000-000000000001',
@@ -142,6 +161,21 @@ function createMemoryDatabase(): Database {
   const conversations = new Map<string, Record<string, unknown>>();
   const prospects = new Map<string, Record<string, unknown>>();
   const messages = new Map<string, Array<Record<string, unknown>>>();
+  const users = new Map<string, Record<string, unknown>>();
+  const sessions = new Map<string, Record<string, unknown>>();
+  const user = {
+    id: '00000000-0000-4000-8000-000000000901',
+    organization_id: '00000000-0000-4000-8000-000000000001',
+    first_name: 'Admin',
+    last_name: 'Test',
+    email: 'admin@example.com',
+    password_hash: await hashPassword('test-password-123'),
+    role: 'SuperAdmin',
+    status: 'active',
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+  users.set(String(user.id), user);
 
   return {
     async checkConnection() {},
@@ -154,6 +188,55 @@ function createMemoryDatabase(): Database {
 
       if (sql.includes('from sites where widget_public_key')) {
         return result([site]);
+      }
+
+      if (sql.includes('from users where lower(email)')) {
+        return result(
+          [...users.values()].filter(
+            (row) => String(row.email).toLowerCase() === String(values[0]).toLowerCase()
+          )
+        );
+      }
+
+      if (sql.includes('from users where id')) {
+        return result(optional(users.get(String(values[0]))));
+      }
+
+      if (sql.includes('insert into admin_sessions')) {
+        const row = {
+          id: values[0],
+          user_id: values[1],
+          organization_id: values[2],
+          token_hash: values[3],
+          expires_at: values[4],
+          created_at: new Date(),
+          renewed_at: new Date(),
+          revoked_at: null
+        };
+        sessions.set(String(row.token_hash), row);
+        return result([row]);
+      }
+
+      if (sql.includes('from admin_sessions')) {
+        const session = sessions.get(String(values[0]));
+        if (!session || session.revoked_at) return result([]);
+
+        return result([session]);
+      }
+
+      if (sql.includes('update admin_sessions set revoked_at')) {
+        const session = sessions.get(String(values[0]));
+        if (session) session.revoked_at = new Date();
+        return result([]);
+      }
+
+      if (sql.includes('update admin_sessions set expires_at')) {
+        const session = [...sessions.values()].find((row) => row.id === values[1]);
+        if (session) {
+          session.expires_at = values[0];
+          session.renewed_at = new Date();
+        }
+        return result([]);
       }
 
       if (sql.includes('from sites where id')) {

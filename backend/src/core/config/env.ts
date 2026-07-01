@@ -29,7 +29,18 @@ const environmentSchema = z
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
     OPENAI_API_KEY: z.string().optional(),
-    BUSINESS_CONFIG_DIR: z.string().trim().min(1).default('../configs')
+    BUSINESS_CONFIG_DIR: z.string().trim().min(1).default('../configs'),
+    ADMIN_SESSION_SECRET: z
+      .string()
+      .min(32)
+      .default('dev-only-session-secret-change-before-production'),
+    ADMIN_SESSION_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
+    ADMIN_SESSION_RENEWAL_MS: z.coerce.number().int().positive().default(3_600_000),
+    FIRST_ADMIN_EMAIL: z.string().email().optional(),
+    FIRST_ADMIN_PASSWORD: z.string().min(12).optional(),
+    FIRST_ADMIN_FIRST_NAME: z.string().min(1).default('VISITOR'),
+    FIRST_ADMIN_LAST_NAME: z.string().min(1).default('Admin'),
+    FIRST_ADMIN_ORGANIZATION_ID: z.string().uuid().optional()
   })
   .superRefine((env, context) => {
     if (env.NODE_ENV === 'production' && env.ALLOWED_ORIGINS.length === 0) {
@@ -37,6 +48,17 @@ const environmentSchema = z
         code: 'custom',
         path: ['ALLOWED_ORIGINS'],
         message: 'must be set in production'
+      });
+    }
+
+    if (
+      env.NODE_ENV === 'production' &&
+      env.ADMIN_SESSION_SECRET === 'dev-only-session-secret-change-before-production'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['ADMIN_SESSION_SECRET'],
+        message: 'must be changed in production'
       });
     }
   });
@@ -69,6 +91,18 @@ export type AppConfig = {
   };
   businessConfig: {
     directory: string;
+  };
+  auth: {
+    sessionSecret: string;
+    sessionTtlMs: number;
+    sessionRenewalMs: number;
+    firstAdmin?: {
+      email: string;
+      password: string;
+      firstName: string;
+      lastName: string;
+      organizationId?: string;
+    };
   };
 };
 
@@ -111,11 +145,28 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     ai: {},
     businessConfig: {
       directory: env.BUSINESS_CONFIG_DIR
+    },
+    auth: {
+      sessionSecret: env.ADMIN_SESSION_SECRET,
+      sessionTtlMs: env.ADMIN_SESSION_TTL_MS,
+      sessionRenewalMs: env.ADMIN_SESSION_RENEWAL_MS
     }
   };
 
   if (env.OPENAI_API_KEY) {
     config.ai.openAiApiKey = env.OPENAI_API_KEY;
+  }
+
+  if (env.FIRST_ADMIN_EMAIL && env.FIRST_ADMIN_PASSWORD) {
+    config.auth.firstAdmin = {
+      email: env.FIRST_ADMIN_EMAIL,
+      password: env.FIRST_ADMIN_PASSWORD,
+      firstName: env.FIRST_ADMIN_FIRST_NAME,
+      lastName: env.FIRST_ADMIN_LAST_NAME,
+      ...(env.FIRST_ADMIN_ORGANIZATION_ID
+        ? { organizationId: env.FIRST_ADMIN_ORGANIZATION_ID }
+        : {})
+    };
   }
 
   return config;

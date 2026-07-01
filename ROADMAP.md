@@ -1,5 +1,13 @@
 # Roadmap
 
+## Current Development - v0.5.0-dev
+
+- Admin authentication
+- Signed httpOnly sessions
+- RBAC permissions
+- Organization access control
+- Protected admin UI
+
 ## Current Development - v0.4.0-dev
 
 - Organizations and sites

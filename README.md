@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Development version: `v0.4.0-dev`.
+Development version: `v0.5.0-dev`.
 
 The first working MVP is available:
 
@@ -18,6 +18,7 @@ The first working MVP is available:
 - conversation search and status update.
 - multi-tenant foundation with organizations and sites;
 - configurable business engine per site.
+- protected admin authentication and RBAC.
 
 ## Planned Modules
 
