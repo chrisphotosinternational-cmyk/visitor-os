@@ -16,8 +16,9 @@ This package now contains the first minimal vertical slice:
 - prospect status update.
 - admin authentication, sessions and RBAC;
 - AI Provider Engine with mock/OpenAI abstraction and fallback.
+- advanced CRM with scoring, tags, notes, follow-ups and exports.
 
-It still contains no advanced CRM, notifications, payments or business-specific hardcoded logic.
+It still contains no notifications, payments, bookings or business-specific hardcoded logic.
 
 ## Stack
 
@@ -135,6 +136,7 @@ The test suite verifies:
 - full MVP visitor-to-admin flow.
 - admin authentication, sessions, RBAC and organization isolation.
 - AI provider abstraction, mock fallback, OpenAI adapter and cost estimation.
+- CRM scoring, tag detection and export formatting.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -188,8 +190,19 @@ tests/
 - `GET /api/admin/conversations/:conversationId`
 - `PATCH /api/admin/conversations/:conversationId/status`
 - `GET /api/admin/prospects`
+- `GET /api/admin/prospects/export`
 - `GET /api/admin/prospects/:prospectId`
 - `PATCH /api/admin/prospects/:prospectId/status`
+- `POST /api/admin/prospects/:prospectId/recalculate-score`
+- `POST /api/admin/prospects/:prospectId/tags`
+- `DELETE /api/admin/prospects/:prospectId/tags/:tagId`
+- `GET /api/admin/crm/tags`
+- `POST /api/admin/crm/notes`
+- `PUT /api/admin/crm/notes/:noteId`
+- `DELETE /api/admin/crm/notes/:noteId`
+- `GET /api/admin/crm/follow-ups`
+- `POST /api/admin/crm/follow-ups`
+- `PATCH /api/admin/crm/follow-ups/:followUpId/complete`
 - `GET /api/admin/ai/config`
 - `PUT /api/admin/ai/config`
 - `POST /api/admin/ai/test`

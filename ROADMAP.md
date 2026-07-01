@@ -1,5 +1,14 @@
 # Roadmap
 
+## Current Development - v0.7.0-dev
+
+- Advanced CRM
+- Lead scoring and score history
+- Automatic and manual tags
+- Internal notes
+- Follow-ups
+- Filtered CSV/XLSX exports
+
 ## Current Development - v0.6.0-dev
 
 - AI Provider Engine

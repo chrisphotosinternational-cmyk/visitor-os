@@ -6,6 +6,7 @@ import { ConversationRepository } from '../conversations/conversation-repository
 import { ProspectRepository } from '../prospects/prospect-repository.js';
 import type { Database } from '../../database/client.js';
 import type { DecisionEngine } from '../decision-engine/decision-engine.js';
+import { CrmRepository } from '../crm/crm-repository.js';
 
 const widgetSiteReferenceSchema = z
   .object({
@@ -36,6 +37,7 @@ export function registerWidgetRoutes(
 ): void {
   const conversations = new ConversationRepository(database);
   const prospects = new ProspectRepository(database);
+  const crm = new CrmRepository(database);
 
   app.get('/api/widget/config', async (request) => {
     const query = siteKeyQuerySchema.parse(request.query);
@@ -186,6 +188,21 @@ export function registerWidgetRoutes(
         siteId: conversation.site_id,
         conversationId: conversation.id,
         ...decision.aiEvent
+      });
+    }
+
+    const prospectId = prospect?.id ?? conversation.prospect_id;
+    if (prospectId) {
+      const scoringMessages = [...recentHistory.map((message) => message.content), decision.reply];
+      await crm.applyAutomaticTags({
+        organizationId: conversation.organization_id,
+        prospectId,
+        conversationId: conversation.id,
+        messages: scoringMessages
+      });
+      await crm.recalculateScore({
+        organizationId: conversation.organization_id,
+        prospectId
       });
     }
 

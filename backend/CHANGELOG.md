@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added advanced CRM scoring, tags, notes, follow-ups and exports.
+- Added CRM schema tables for score history, tags, notes and follow-ups.
+- Added CRM admin endpoints protected by RBAC and organization isolation.
 - Added AI Provider Engine with mock, OpenAI-ready adapter, provider factory and fallback.
 - Added AI configuration and AI event database tables.
 - Added admin AI configuration and provider test routes.

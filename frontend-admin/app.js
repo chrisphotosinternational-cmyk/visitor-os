@@ -23,6 +23,24 @@ createApp({
       conversationStatuses: [],
       selectedConversation: null,
       prospects: [],
+      prospectStatuses: [],
+      selectedProspect: null,
+      crmTags: [],
+      followUps: [],
+      prospectFilters: {
+        status: '',
+        scoreMin: '',
+        tag: '',
+        siteId: '',
+        search: ''
+      },
+      noteForm: {
+        content: ''
+      },
+      followUpForm: {
+        dueAt: '',
+        reason: ''
+      },
       organizations: [],
       sites: [],
       configs: [],
@@ -169,10 +187,130 @@ createApp({
     },
 
     async loadProspects() {
-      const response = await apiFetch(`${API_BASE_URL}/api/admin/prospects`);
+      const params = new URLSearchParams();
+      Object.entries(this.prospectFilters).forEach(([key, value]) => {
+        if (String(value).trim()) params.set(key, String(value).trim());
+      });
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/prospects?${params.toString()}`);
       if (!response.ok) throw new Error('Impossible de charger les prospects.');
       const data = await response.json();
       this.prospects = data.prospects;
+      this.prospectStatuses = data.statuses;
+      this.crmTags = data.tags;
+
+      if (!this.selectedProspect && this.prospects.length > 0) {
+        await this.selectProspect(this.prospects[0].id);
+      }
+    },
+
+    async selectProspect(id) {
+      this.error = '';
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/prospects/${id}`);
+        if (!response.ok) throw new Error('Impossible de charger le prospect.');
+        const data = await response.json();
+        this.selectedProspect = data.prospect;
+        this.prospectStatuses = data.statuses;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async updateProspectStatus(status) {
+      if (!this.selectedProspect) return;
+      const response = await apiFetch(
+        `${API_BASE_URL}/api/admin/prospects/${this.selectedProspect.id}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status })
+        }
+      );
+      if (!response.ok) throw new Error('Impossible de modifier le prospect.');
+      await this.loadProspects();
+      await this.selectProspect(this.selectedProspect.id);
+    },
+
+    async recalculateProspectScore() {
+      if (!this.selectedProspect) return;
+      const response = await apiFetch(
+        `${API_BASE_URL}/api/admin/prospects/${this.selectedProspect.id}/recalculate-score`,
+        { method: 'POST' }
+      );
+      if (!response.ok) throw new Error('Recalcul impossible.');
+      const data = await response.json();
+      this.selectedProspect = data.prospect;
+      await this.loadProspects();
+    },
+
+    async addProspectTag(tagId) {
+      if (!this.selectedProspect || !tagId) return;
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/prospects/${this.selectedProspect.id}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tagId })
+      });
+      if (!response.ok) throw new Error('Tag impossible.');
+      await this.selectProspect(this.selectedProspect.id);
+    },
+
+    async removeProspectTag(tagId) {
+      if (!this.selectedProspect) return;
+      const response = await apiFetch(
+        `${API_BASE_URL}/api/admin/prospects/${this.selectedProspect.id}/tags/${tagId}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) throw new Error('Suppression tag impossible.');
+      await this.selectProspect(this.selectedProspect.id);
+    },
+
+    async createNote() {
+      if (!this.selectedProspect || !this.noteForm.content.trim()) return;
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/crm/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospectId: this.selectedProspect.id,
+          content: this.noteForm.content
+        })
+      });
+      if (!response.ok) throw new Error('Note impossible.');
+      this.noteForm.content = '';
+      await this.selectProspect(this.selectedProspect.id);
+    },
+
+    async createFollowUp() {
+      if (!this.selectedProspect || !this.followUpForm.dueAt || !this.followUpForm.reason.trim()) return;
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/crm/follow-ups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prospectId: this.selectedProspect.id,
+          dueAt: new Date(this.followUpForm.dueAt).toISOString(),
+          reason: this.followUpForm.reason
+        })
+      });
+      if (!response.ok) throw new Error('Relance impossible.');
+      this.followUpForm.dueAt = '';
+      this.followUpForm.reason = '';
+      await this.selectProspect(this.selectedProspect.id);
+    },
+
+    async completeFollowUp(id) {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/crm/follow-ups/${id}/complete`, {
+        method: 'PATCH'
+      });
+      if (!response.ok) throw new Error('Relance non traitee.');
+      if (this.selectedProspect) await this.selectProspect(this.selectedProspect.id);
+    },
+
+    exportProspects(format = 'csv') {
+      const params = new URLSearchParams({ format });
+      Object.entries(this.prospectFilters).forEach(([key, value]) => {
+        if (String(value).trim()) params.set(key, String(value).trim());
+      });
+      window.location.href = `${API_BASE_URL}/api/admin/prospects/export?${params.toString()}`;
     },
 
     async loadConfigs() {
@@ -815,12 +953,113 @@ createApp({
           </article>
 
           <aside class="panel prospects-panel">
-            <h2>Prospects</h2>
+            <div class="panel-header">
+              <h2>CRM</h2>
+              <span class="badge">{{ prospects.length }}</span>
+            </div>
+            <form class="crm-filters" @submit.prevent="loadProspects">
+              <input v-model="prospectFilters.search" placeholder="Recherche" />
+              <select v-model="prospectFilters.status">
+                <option value="">Tous statuts</option>
+                <option v-for="status in prospectStatuses" :key="status" :value="status">
+                  {{ status }}
+                </option>
+              </select>
+              <input v-model="prospectFilters.scoreMin" type="number" min="0" max="100" placeholder="Score min" />
+              <select v-model="prospectFilters.tag">
+                <option value="">Tous tags</option>
+                <option v-for="tag in crmTags" :key="tag.id" :value="tag.slug">
+                  {{ tag.label }}
+                </option>
+              </select>
+              <select v-model="prospectFilters.siteId">
+                <option value="">Tous sites</option>
+                <option v-for="site in sites" :key="site.id" :value="site.id">
+                  {{ site.name }}
+                </option>
+              </select>
+              <button type="submit">Filtrer</button>
+              <button v-if="can('data:export')" type="button" @click="exportProspects('csv')">CSV</button>
+              <button v-if="can('data:export')" type="button" @click="exportProspects('xlsx')">XLSX</button>
+            </form>
             <p v-if="prospects.length === 0" class="empty">Aucun prospect.</p>
-            <div v-for="prospect in prospects" :key="prospect.id" class="prospect-card">
+            <button
+              v-for="prospect in prospects"
+              :key="prospect.id"
+              type="button"
+              class="prospect-card"
+              :class="{ active: selectedProspect?.id === prospect.id }"
+              @click="selectProspect(prospect.id)"
+            >
               <strong>{{ prospect.display_name }}</strong>
               <small>{{ prospect.status }} · score {{ prospect.score_current }}</small>
-            </div>
+            </button>
+
+            <section v-if="selectedProspect" class="crm-detail">
+              <div class="detail-header">
+                <div>
+                  <h3>{{ selectedProspect.display_name }}</h3>
+                  <p class="muted">Score {{ selectedProspect.score_current }} · {{ selectedProspect.temperature }}</p>
+                </div>
+                <button v-if="can('prospects:write')" type="button" @click="recalculateProspectScore">Recalculer</button>
+              </div>
+              <label>
+                Statut
+                <select
+                  :value="selectedProspect.status"
+                  @change="updateProspectStatus($event.target.value)"
+                >
+                  <option v-for="status in prospectStatuses" :key="status" :value="status">
+                    {{ status }}
+                  </option>
+                </select>
+              </label>
+
+              <div class="tag-list">
+                <span v-for="tag in selectedProspect.tags" :key="tag.id" class="tag-chip">
+                  {{ tag.label }}
+                  <button v-if="can('prospects:write')" type="button" @click="removeProspectTag(tag.id)">x</button>
+                </span>
+              </div>
+              <select v-if="can('prospects:write')" @change="addProspectTag($event.target.value); $event.target.value = ''">
+                <option value="">Ajouter tag</option>
+                <option v-for="tag in crmTags" :key="tag.id" :value="tag.id">{{ tag.label }}</option>
+              </select>
+
+              <form v-if="can('prospects:write')" class="crm-form" @submit.prevent="createNote">
+                <textarea v-model="noteForm.content" placeholder="Note interne"></textarea>
+                <button type="submit">Ajouter note</button>
+              </form>
+              <div v-for="note in selectedProspect.notes" :key="note.id" class="timeline-item">
+                <small>{{ formatDate(note.created_at) }}</small>
+                <p>{{ note.content }}</p>
+              </div>
+
+              <form v-if="can('prospects:write')" class="crm-form" @submit.prevent="createFollowUp">
+                <input v-model="followUpForm.dueAt" type="datetime-local" />
+                <input v-model="followUpForm.reason" placeholder="Motif relance" />
+                <button type="submit">Ajouter relance</button>
+              </form>
+              <div v-for="followUp in selectedProspect.followUps" :key="followUp.id" class="timeline-item">
+                <small>{{ formatDate(followUp.due_at) }} · {{ followUp.status }}</small>
+                <p>{{ followUp.reason }}</p>
+                <button
+                  v-if="can('prospects:write') && followUp.status === 'pending'"
+                  type="button"
+                  @click="completeFollowUp(followUp.id)"
+                >
+                  Traitee
+                </button>
+              </div>
+
+              <h3>Timeline</h3>
+              <div v-for="conversation in selectedProspect.conversations" :key="conversation.id" class="timeline-item">
+                <strong>{{ formatDate(conversation.created_at) }}</strong>
+                <p v-for="message in conversation.messages" :key="message.id">
+                  {{ message.sender_type }} · {{ message.content }}
+                </p>
+              </div>
+            </section>
           </aside>
         </section>
 

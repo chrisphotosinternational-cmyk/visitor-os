@@ -97,6 +97,8 @@ export async function initializeSchema(database: Database): Promise<void> {
       organization_id uuid not null references organizations(id),
       site_id uuid not null references sites(id),
       visitor_id uuid references visitors(id),
+      first_name text,
+      last_name text,
       display_name text not null,
       email text,
       phone text,
@@ -108,6 +110,38 @@ export async function initializeSchema(database: Database): Promise<void> {
       updated_at timestamptz not null default now()
     );
 
+    alter table prospects add column if not exists first_name text;
+    alter table prospects add column if not exists last_name text;
+
+    create table if not exists lead_score_history (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      prospect_id uuid not null references prospects(id),
+      score integer not null,
+      previous_score integer,
+      reasons jsonb not null default '[]'::jsonb,
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists crm_tags (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid references sites(id),
+      label text not null,
+      slug text not null,
+      color text,
+      created_at timestamptz not null default now(),
+      unique (organization_id, slug)
+    );
+
+    create table if not exists prospect_tags (
+      prospect_id uuid not null references prospects(id) on delete cascade,
+      tag_id uuid not null references crm_tags(id) on delete cascade,
+      source text not null default 'manual',
+      created_at timestamptz not null default now(),
+      primary key (prospect_id, tag_id)
+    );
+
     create table if not exists conversations (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -117,6 +151,40 @@ export async function initializeSchema(database: Database): Promise<void> {
       status text not null default 'open',
       page_url text,
       referrer text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists conversation_tags (
+      conversation_id uuid not null references conversations(id) on delete cascade,
+      tag_id uuid not null references crm_tags(id) on delete cascade,
+      source text not null default 'manual',
+      created_at timestamptz not null default now(),
+      primary key (conversation_id, tag_id)
+    );
+
+    create table if not exists internal_notes (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      prospect_id uuid references prospects(id) on delete cascade,
+      conversation_id uuid references conversations(id) on delete cascade,
+      author_user_id uuid references users(id),
+      content text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      check (prospect_id is not null or conversation_id is not null)
+    );
+
+    create table if not exists follow_ups (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      prospect_id uuid not null references prospects(id) on delete cascade,
+      conversation_id uuid references conversations(id) on delete set null,
+      author_user_id uuid references users(id),
+      due_at timestamptz not null,
+      reason text not null,
+      status text not null default 'pending',
+      completed_at timestamptz,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
@@ -204,6 +272,14 @@ export async function initializeSchema(database: Database): Promise<void> {
     create index if not exists idx_ai_events_conversation_created
       on ai_events(conversation_id, created_at);
     create index if not exists idx_prospects_site_updated on prospects(site_id, updated_at desc);
+    create index if not exists idx_prospects_organization_score on prospects(organization_id, score_current desc);
+    create index if not exists idx_lead_score_history_prospect_created
+      on lead_score_history(prospect_id, created_at desc);
+    create index if not exists idx_crm_tags_organization_slug on crm_tags(organization_id, slug);
+    create index if not exists idx_prospect_tags_tag on prospect_tags(tag_id);
+    create index if not exists idx_internal_notes_prospect_created
+      on internal_notes(prospect_id, created_at desc);
+    create index if not exists idx_follow_ups_due on follow_ups(organization_id, status, due_at);
   `);
 }
 

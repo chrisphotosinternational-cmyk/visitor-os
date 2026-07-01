@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.7.0-dev - Sprint 7
+
+- Added advanced CRM foundation with lead scoring, score history, tags, notes and follow-ups.
+- Added automatic tag detection and manual prospect tag management.
+- Added CRM filters and CSV/XLSX-compatible exports with RBAC and organization isolation.
+- Added minimal admin CRM panel for prospect detail, timeline, notes, follow-ups and status updates.
+- Added CRM tests for scoring, automatic tags and exports.
+
 ## v0.6.0-dev - Sprint 6
 
 - Added AI Provider Engine with provider interface, factory, fallback strategy and mock provider.

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../../database/client.js';
+import { calculateLeadScore } from '../crm/lead-scoring.js';
+import { statusFromScore, type CrmFilters } from '../crm/crm-repository.js';
 
 export type ProspectStatus =
   | 'Nouveau'
@@ -38,6 +40,7 @@ export type ProspectRecord = {
   source: string;
   created_at: Date;
   updated_at: Date;
+  tags?: Array<{ id: string; label: string; slug: string; source: string }>;
 };
 
 export type ProspectDetail = ProspectRecord & {
@@ -53,6 +56,28 @@ export type ProspectDetail = ProspectRecord & {
       created_at: Date;
     }>;
   }>;
+  tags: Array<{ id: string; label: string; slug: string; source: string }>;
+  notes: Array<{
+    id: string;
+    content: string;
+    author_user_id: string | null;
+    created_at: Date;
+    updated_at: Date;
+  }>;
+  followUps: Array<{
+    id: string;
+    due_at: Date;
+    reason: string;
+    status: string;
+    completed_at: Date | null;
+  }>;
+  scoreHistory: Array<{
+    id: string;
+    score: number;
+    previous_score: number | null;
+    reasons: unknown;
+    created_at: Date;
+  }>;
 };
 
 export class ProspectRepository {
@@ -64,9 +89,8 @@ export class ProspectRepository {
     visitorId: string;
     question: string;
   }): Promise<ProspectRecord> {
-    const score = calculateInitialScore(input.question);
-    const temperature = score >= 70 ? 'chaude' : score >= 40 ? 'tiede' : 'froide';
-    const status: ProspectStatus = score >= 70 ? 'Interesse' : 'Nouveau';
+    const scoring = calculateLeadScore({ messages: [input.question] });
+    const status = statusFromScore(scoring.score);
 
     const result = await this.database.query<ProspectRecord>(
       `
@@ -91,23 +115,51 @@ export class ProspectRepository {
         input.visitorId,
         deriveDisplayName(input.question),
         status,
-        temperature,
-        score
+        scoring.temperature,
+        scoring.score
       ]
     );
 
     return requireRow(result.rows[0], 'Prospect was not created');
   }
 
-  async list(organizationId?: string): Promise<ProspectRecord[]> {
-    const result = organizationId
-      ? await this.database.query<ProspectRecord>(
-          `select * from prospects where organization_id = $1 order by updated_at desc, created_at desc limit 100`,
-          [organizationId]
-        )
-      : await this.database.query<ProspectRecord>(
-          `select * from prospects order by updated_at desc, created_at desc limit 100`
-        );
+  async list(filters: string | CrmFilters = {}): Promise<ProspectRecord[]> {
+    const normalizedFilters: CrmFilters =
+      typeof filters === 'string' ? { organizationId: filters } : filters;
+    const result = await this.database.query<ProspectRecord>(
+      `
+      select p.*
+      from prospects p
+      where
+        ($1::uuid is null or p.organization_id = $1)
+        and ($2::uuid is null or p.site_id = $2)
+        and ($3::text is null or p.status = $3)
+        and ($4::integer is null or p.score_current >= $4)
+        and ($5::integer is null or p.score_current <= $5)
+        and ($6::text is null or exists (
+          select 1
+          from prospect_tags pt
+          join crm_tags t on t.id = pt.tag_id
+          where pt.prospect_id = p.id and t.slug = $6
+        ))
+        and ($7::text is null or (
+          p.display_name ilike $7
+          or p.email ilike $7
+          or p.phone ilike $7
+        ))
+      order by p.updated_at desc, p.created_at desc
+      limit 100
+      `,
+      [
+        normalizedFilters.organizationId ?? null,
+        normalizedFilters.siteId ?? null,
+        normalizedFilters.status ?? null,
+        normalizedFilters.scoreMin ?? null,
+        normalizedFilters.scoreMax ?? null,
+        normalizedFilters.tag ?? null,
+        normalizedFilters.search ? `%${normalizedFilters.search}%` : null
+      ]
+    );
 
     return result.rows;
   }
@@ -173,9 +225,74 @@ export class ProspectRepository {
       })
     );
 
+    const tagsResult = await this.database.query<{
+      id: string;
+      label: string;
+      slug: string;
+      source: string;
+    }>(
+      `
+      select t.id, t.label, t.slug, pt.source
+      from prospect_tags pt
+      join crm_tags t on t.id = pt.tag_id
+      where pt.prospect_id = $1
+      order by t.label asc
+      `,
+      [id]
+    );
+    const notesResult = await this.database.query<{
+      id: string;
+      content: string;
+      author_user_id: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      `
+      select id, content, author_user_id, created_at, updated_at
+      from internal_notes
+      where prospect_id = $1 and ($2::uuid is null or organization_id = $2)
+      order by created_at desc
+      `,
+      [id, organizationId ?? null]
+    );
+    const followUpsResult = await this.database.query<{
+      id: string;
+      due_at: Date;
+      reason: string;
+      status: string;
+      completed_at: Date | null;
+    }>(
+      `
+      select id, due_at, reason, status, completed_at
+      from follow_ups
+      where prospect_id = $1 and ($2::uuid is null or organization_id = $2)
+      order by due_at asc
+      `,
+      [id, organizationId ?? null]
+    );
+    const scoreHistoryResult = await this.database.query<{
+      id: string;
+      score: number;
+      previous_score: number | null;
+      reasons: unknown;
+      created_at: Date;
+    }>(
+      `
+      select id, score, previous_score, reasons, created_at
+      from lead_score_history
+      where prospect_id = $1 and ($2::uuid is null or organization_id = $2)
+      order by created_at desc
+      `,
+      [id, organizationId ?? null]
+    );
+
     return {
       ...prospect,
-      conversations
+      conversations,
+      tags: tagsResult.rows,
+      notes: notesResult.rows,
+      followUps: followUpsResult.rows,
+      scoreHistory: scoreHistoryResult.rows
     };
   }
 
@@ -187,19 +304,6 @@ export class ProspectRepository {
 
     return result.rows[0] ?? null;
   }
-}
-
-function calculateInitialScore(question: string): number {
-  const normalized = question.toLowerCase();
-  let score = 35;
-
-  if (/(prix|tarif|devis|budget)/.test(normalized)) score += 15;
-  if (/(disponible|disponibilite|réserver|reserver|reservation|réservation)/.test(normalized)) {
-    score += 25;
-  }
-  if (/(urgent|aujourd'hui|demain|vite)/.test(normalized)) score += 15;
-
-  return Math.min(score, 100);
 }
 
 function deriveDisplayName(question: string): string {

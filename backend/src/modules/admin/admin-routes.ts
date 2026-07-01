@@ -16,6 +16,8 @@ import type { AIConfigurationRepository } from '../ai/ai-configuration-repositor
 import { aiConfigurationSchema, defaultModelForProvider } from '../ai/ai-config.js';
 import { estimateCostFromConfig } from '../ai/cost-estimator.js';
 import type { ProviderFactory } from '../ai/provider-factory.js';
+import { CrmRepository } from '../crm/crm-repository.js';
+import { toCsv, toSpreadsheetXml } from '../crm/csv-export.js';
 import {
   OrganizationRepository,
   organizationStatuses
@@ -60,6 +62,32 @@ const aiConfigPayloadSchema = aiConfigurationSchema.extend({
   organizationId: z.string().uuid().optional()
 });
 
+const prospectFilterSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  siteId: z.string().uuid().optional(),
+  status: z.string().optional(),
+  tag: z.string().optional(),
+  search: z.string().optional(),
+  scoreMin: z.coerce.number().int().min(0).max(100).optional(),
+  scoreMax: z.coerce.number().int().min(0).max(100).optional(),
+  periodFrom: z.string().datetime().optional(),
+  periodTo: z.string().datetime().optional(),
+  followUp: z.enum(['today', 'overdue', 'pending', 'completed']).optional()
+});
+
+const noteBodySchema = z.object({
+  prospectId: z.string().uuid().optional(),
+  conversationId: z.string().uuid().optional(),
+  content: z.string().min(1).max(5000)
+});
+
+const followUpBodySchema = z.object({
+  prospectId: z.string().uuid(),
+  conversationId: z.string().uuid().optional(),
+  dueAt: z.string().datetime(),
+  reason: z.string().min(1).max(1000)
+});
+
 export function registerAdminRoutes(
   app: FastifyInstance,
   database: Database,
@@ -69,6 +97,7 @@ export function registerAdminRoutes(
   providerFactory?: ProviderFactory
 ): void {
   const prospects = new ProspectRepository(database);
+  const crm = new CrmRepository(database);
   const conversations = new ConversationRepository(database);
   const organizations = new OrganizationRepository(database);
   const sites = new SiteRepository(database);
@@ -260,12 +289,16 @@ export function registerAdminRoutes(
   app.get('/api/admin/prospects', async (request) => {
     const context = getAuthContext(authContexts, request);
     auth.requirePermission(context, 'prospects:read');
-    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const query = prospectFilterSchema.parse(request.query);
     const organizationId = auth.requireOrganizationAccess(context, query.organizationId);
 
     return {
-      prospects: await prospects.list(organizationId),
-      statuses: prospectStatuses
+      prospects: await prospects.list({
+        ...query,
+        ...(organizationId ? { organizationId } : {})
+      }),
+      statuses: prospectStatuses,
+      tags: organizationId ? await crm.listTags(organizationId) : []
     };
   });
 
@@ -441,6 +474,195 @@ export function registerAdminRoutes(
     auth.requireOrganizationAccess(context, site.organization_id);
 
     return { deleted: await sites.delete(params.siteId) };
+  });
+
+  app.get('/api/admin/crm/tags', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:read');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId =
+      auth.requireOrganizationAccess(context, query.organizationId) ?? context.user.organizationId;
+
+    return { tags: await crm.listTags(organizationId) };
+  });
+
+  app.post('/api/admin/prospects/:prospectId/tags', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const body = z.object({ tagId: z.string().uuid() }).parse(request.body);
+    const prospect = await prospects.findDetail(
+      params.prospectId,
+      auth.requireOrganizationAccess(context)
+    );
+    if (!prospect) {
+      throw new AppError('Prospect not found', { statusCode: 404, code: 'PROSPECT_NOT_FOUND' });
+    }
+    await crm.addProspectTag(params.prospectId, body.tagId, 'manual');
+
+    return { prospect: await prospects.findDetail(params.prospectId, prospect.organization_id) };
+  });
+
+  app.delete('/api/admin/prospects/:prospectId/tags/:tagId', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const params = z
+      .object({ prospectId: z.string().uuid(), tagId: z.string().uuid() })
+      .parse(request.params);
+    const prospect = await prospects.findDetail(
+      params.prospectId,
+      auth.requireOrganizationAccess(context)
+    );
+    if (!prospect) {
+      throw new AppError('Prospect not found', { statusCode: 404, code: 'PROSPECT_NOT_FOUND' });
+    }
+    await crm.removeProspectTag(params.prospectId, params.tagId);
+
+    return { prospect: await prospects.findDetail(params.prospectId, prospect.organization_id) };
+  });
+
+  app.post('/api/admin/crm/notes', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const body = noteBodySchema.parse(request.body);
+    const organizationId = auth.requireOrganizationAccess(context) ?? context.user.organizationId;
+
+    return {
+      note: await crm.createNote({
+        organizationId,
+        authorUserId: context.user.id,
+        content: body.content,
+        ...(body.prospectId ? { prospectId: body.prospectId } : {}),
+        ...(body.conversationId ? { conversationId: body.conversationId } : {})
+      })
+    };
+  });
+
+  app.put('/api/admin/crm/notes/:noteId', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const params = z.object({ noteId: z.string().uuid() }).parse(request.params);
+    const body = z.object({ content: z.string().min(1).max(5000) }).parse(request.body);
+    const note = await crm.updateNote(
+      params.noteId,
+      auth.requireOrganizationAccess(context) ?? context.user.organizationId,
+      body.content
+    );
+
+    if (!note) {
+      throw new AppError('Note not found', { statusCode: 404, code: 'NOTE_NOT_FOUND' });
+    }
+
+    return { note };
+  });
+
+  app.delete('/api/admin/crm/notes/:noteId', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const params = z.object({ noteId: z.string().uuid() }).parse(request.params);
+
+    return {
+      deleted: await crm.deleteNote(
+        params.noteId,
+        auth.requireOrganizationAccess(context) ?? context.user.organizationId
+      )
+    };
+  });
+
+  app.get('/api/admin/crm/follow-ups', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:read');
+    const query = z
+      .object({ mode: z.enum(['today', 'overdue', 'pending', 'completed']).optional() })
+      .parse(request.query);
+
+    return {
+      followUps: await crm.listFollowUps(
+        auth.requireOrganizationAccess(context) ?? context.user.organizationId,
+        query.mode
+      )
+    };
+  });
+
+  app.post('/api/admin/crm/follow-ups', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const body = followUpBodySchema.parse(request.body);
+
+    return {
+      followUp: await crm.createFollowUp({
+        organizationId: auth.requireOrganizationAccess(context) ?? context.user.organizationId,
+        prospectId: body.prospectId,
+        authorUserId: context.user.id,
+        dueAt: body.dueAt,
+        reason: body.reason,
+        ...(body.conversationId ? { conversationId: body.conversationId } : {})
+      })
+    };
+  });
+
+  app.patch('/api/admin/crm/follow-ups/:followUpId/complete', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const params = z.object({ followUpId: z.string().uuid() }).parse(request.params);
+    const followUp = await crm.completeFollowUp(
+      params.followUpId,
+      auth.requireOrganizationAccess(context) ?? context.user.organizationId
+    );
+
+    if (!followUp) {
+      throw new AppError('Follow-up not found', { statusCode: 404, code: 'FOLLOW_UP_NOT_FOUND' });
+    }
+
+    return { followUp };
+  });
+
+  app.get('/api/admin/prospects/export', async (request, reply) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'data:export');
+    const query = prospectFilterSchema
+      .extend({ format: z.enum(['csv', 'xlsx']).default('csv') })
+      .parse(request.query);
+    const organizationId = auth.requireOrganizationAccess(context, query.organizationId);
+    const rows = await crm.exportProspects({
+      ...query,
+      ...(organizationId ? { organizationId } : {})
+    });
+
+    if (query.format === 'xlsx') {
+      reply.type('application/vnd.ms-excel');
+      reply.header('Content-Disposition', 'attachment; filename="visitor-os-prospects.xls"');
+
+      return toSpreadsheetXml(rows);
+    }
+
+    reply.type('text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="visitor-os-prospects.csv"');
+
+    return toCsv(rows);
+  });
+
+  app.post('/api/admin/prospects/:prospectId/recalculate-score', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId = auth.requireOrganizationAccess(context) ?? context.user.organizationId;
+    const prospect = await prospects.findDetail(params.prospectId, organizationId);
+
+    if (!prospect) {
+      throw new AppError('Prospect not found', { statusCode: 404, code: 'PROSPECT_NOT_FOUND' });
+    }
+
+    const scoring = await crm.recalculateScore({
+      organizationId,
+      prospectId: params.prospectId,
+      previousScore: prospect.score_current
+    });
+
+    return {
+      scoring,
+      prospect: await prospects.findDetail(params.prospectId, organizationId)
+    };
   });
 
   app.get('/api/admin/prospects/:prospectId', async (request) => {

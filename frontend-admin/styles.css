@@ -528,6 +528,65 @@ select {
   margin-top: 18px;
 }
 
+.crm-filters,
+.crm-form,
+.crm-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.crm-filters {
+  margin-bottom: 14px;
+}
+
+.prospect-card {
+  width: 100%;
+  text-align: left;
+}
+
+.prospect-card.active {
+  border-color: #059669;
+  background: #ecfdf5;
+}
+
+.crm-detail {
+  margin-top: 18px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 18px;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #065f46;
+  background: #d1fae5;
+  font-size: 12px;
+}
+
+.tag-chip button {
+  padding: 0 4px;
+}
+
+.timeline-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.timeline-item p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .alert {
   border-radius: 6px;
   padding: 12px;
