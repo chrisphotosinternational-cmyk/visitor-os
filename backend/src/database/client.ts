@@ -2,11 +2,16 @@ import pg from 'pg';
 import type { AppConfig } from '../core/config/env.js';
 
 const { Pool } = pg;
+type QueryResultRow = pg.QueryResultRow;
 
 export type DatabaseConfig = AppConfig['database'];
 
 export type Database = {
   checkConnection: () => Promise<void>;
+  query: <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: unknown[]
+  ) => Promise<pg.QueryResult<T>>;
   close: () => Promise<void>;
 };
 
@@ -26,6 +31,13 @@ export function createDatabase(config: DatabaseConfig): Database {
       } finally {
         client.release();
       }
+    },
+
+    async query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: unknown[]
+    ): Promise<pg.QueryResult<T>> {
+      return pool.query<T>(text, values);
     },
 
     async close(): Promise<void> {

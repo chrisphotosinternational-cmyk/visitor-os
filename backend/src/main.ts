@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './core/config/env.js';
 import { createLogger } from './core/logger/logger.js';
 import { createDatabase } from './database/client.js';
+import { initializeSchema, seedFoundationData } from './database/schema.js';
 import { registerShutdownHooks } from './core/lifecycle/shutdown.js';
 
 const logger = createLogger();
@@ -12,6 +13,8 @@ async function bootstrap(): Promise<void> {
   const app = await createApp({ config, database, logger });
 
   await database.checkConnection();
+  await initializeSchema(database);
+  await seedFoundationData(database);
 
   registerShutdownHooks({
     app,

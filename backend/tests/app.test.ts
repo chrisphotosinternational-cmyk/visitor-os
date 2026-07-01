@@ -9,6 +9,7 @@ describe('createApp', () => {
   it('starts technical health route without business endpoints', async () => {
     const database: Database = {
       checkConnection: mock.fn(async () => undefined),
+      query: mock.fn(async () => ({ rows: [] }) as never),
       close: mock.fn(async () => undefined)
     };
     const app = await createApp({

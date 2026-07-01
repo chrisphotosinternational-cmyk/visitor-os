@@ -4,6 +4,8 @@ import { registerErrorHandler } from './core/errors/error-handler.js';
 import type { AppConfig } from './core/config/env.js';
 import type { AppLogger } from './core/logger/logger.js';
 import type { Database } from './database/client.js';
+import { registerAdminRoutes } from './modules/admin/admin-routes.js';
+import { registerWidgetRoutes } from './modules/widget/widget-routes.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -27,6 +29,9 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     app: dependencies.config.app.name,
     environment: dependencies.config.app.environment
   }));
+
+  registerWidgetRoutes(app, dependencies.database);
+  registerAdminRoutes(app, dependencies.database);
 
   return app;
 }

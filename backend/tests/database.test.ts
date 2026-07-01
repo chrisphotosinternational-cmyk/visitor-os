@@ -7,6 +7,7 @@ describe('database contract', () => {
     const checkConnection = mock.fn(async () => undefined);
     const database: Database = {
       checkConnection,
+      query: mock.fn(async () => ({ rows: [] }) as never),
       close: mock.fn(async () => undefined)
     };
 

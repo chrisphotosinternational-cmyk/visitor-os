@@ -2,7 +2,17 @@
 
 Technical foundation for the VISITOR-OS backend.
 
-This package intentionally contains no business feature yet: no chatbot, no CRM API, no AI logic, no authentication, and no business endpoints.
+This package now contains the first minimal vertical slice:
+
+- widget conversation creation;
+- temporary backend reply;
+- conversation/message persistence;
+- automatic prospect creation;
+- admin prospect listing;
+- prospect detail with conversation history;
+- prospect status update.
+
+It still contains no chatbot AI, no authentication, no advanced CRM, and no business-specific logic.
 
 ## Stack
 
@@ -125,17 +135,29 @@ src/
 tests/
 ```
 
-## Current Technical Routes
+## Current Routes
 
 - `GET /health`: technical health check only.
+- `GET /api/widget/config`
+- `POST /api/widget/conversations`
+- `POST /api/widget/conversations/:conversationId/messages`
+- `GET /api/admin/prospects`
+- `GET /api/admin/prospects/:prospectId`
+- `PATCH /api/admin/prospects/:prospectId/status`
 
-This is not a business API endpoint.
+The widget/admin routes are intentionally minimal and exist only to validate the first product flow.
 
 ## PostgreSQL
 
 The startup process calls a PostgreSQL connection check before listening for requests.
 
 If PostgreSQL is unreachable, the backend fails to start instead of running in a degraded unclear state.
+
+The backend also initializes the minimal MVP schema and seeds a demo organization/site with:
+
+```text
+siteKey: demo-site-key
+```
 
 ## Logging
 

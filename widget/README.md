@@ -1,14 +1,29 @@
-# Widget
+# VISITOR-OS Widget MVP
 
-Future lightweight JavaScript widget embedded into Moto CMS 4 websites.
+Minimal embeddable widget for the first vertical slice.
 
-Planned responsibilities:
+It can be installed on a Moto CMS page with:
 
-- Load asynchronously
-- Display visitor assistant UI
-- Fetch public site configuration
-- Send messages to the VISITOR-OS API
-- Collect consent where required
-- Avoid exposing secrets
+```html
+<script
+  src="https://your-cdn.example.com/visitor-os-widget.js"
+  data-api-url="https://your-api.example.com"
+  data-site-key="demo-site-key"
+></script>
+```
 
-The widget must stay small, isolated, and safe to embed on external websites.
+Local demo:
+
+1. Start the backend.
+2. Serve the `widget` folder statically.
+3. Open `demo.html`.
+
+This MVP widget:
+
+- opens and closes;
+- starts a conversation;
+- sends a visitor message;
+- displays the backend temporary response;
+- creates a prospect through the backend.
+
+It does not include AI, authentication, attachments, or advanced configuration yet.
