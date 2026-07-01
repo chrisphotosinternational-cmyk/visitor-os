@@ -19,7 +19,10 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   });
 
   await app.register(cors, {
-    origin: dependencies.config.security.allowedOrigins
+    origin:
+      dependencies.config.security.allowedOrigins.length > 0
+        ? dependencies.config.security.allowedOrigins
+        : true
   });
 
   registerErrorHandler(app);

@@ -17,6 +17,8 @@ Local demo:
 1. Start the backend.
 2. Serve the `widget` folder statically.
 3. Open `demo.html`.
+4. Send a message.
+5. Open the admin dashboard to see the conversation immediately.
 
 This MVP widget:
 
@@ -25,5 +27,6 @@ This MVP widget:
 - sends a visitor message;
 - displays the backend temporary response;
 - creates a prospect through the backend.
+- feeds the admin conversation dashboard.
 
 It does not include AI, authentication, attachments, or advanced configuration yet.

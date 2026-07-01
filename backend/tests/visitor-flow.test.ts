@@ -52,6 +52,17 @@ describe('visitor to admin flow', () => {
     const prospectsList = prospectsResponse.json() as { prospects: Array<{ id: string }> };
     assert.equal(prospectsList.prospects.length, 1);
 
+    const conversationsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/admin/conversations?search=tarifs'
+    });
+    assert.equal(conversationsResponse.statusCode, 200);
+    const conversationsList = conversationsResponse.json() as {
+      conversations: Array<{ id: string; status: string; last_message: string }>;
+    };
+    assert.equal(conversationsList.conversations.length, 1);
+    assert.equal(conversationsList.conversations[0]?.id, started.conversationId);
+
     const detailResponse = await app.inject({
       method: 'GET',
       url: `/api/admin/prospects/${message.prospectId}`
@@ -61,6 +72,17 @@ describe('visitor to admin flow', () => {
       prospect: { conversations: Array<{ messages: Array<{ content: string }> }> };
     };
     assert.equal(detail.prospect.conversations[0]?.messages.length, 3);
+
+    const conversationDetailResponse = await app.inject({
+      method: 'GET',
+      url: `/api/admin/conversations/${started.conversationId}`
+    });
+    assert.equal(conversationDetailResponse.statusCode, 200);
+    const conversationDetail = conversationDetailResponse.json() as {
+      conversation: { messages: Array<{ content: string }>; status: string };
+    };
+    assert.equal(conversationDetail.conversation.messages.length, 3);
+    assert.equal(conversationDetail.conversation.status, 'open');
 
     const statusResponse = await app.inject({
       method: 'PATCH',
@@ -73,6 +95,20 @@ describe('visitor to admin flow', () => {
     assert.equal(
       (statusResponse.json() as { prospect: { status: string } }).prospect.status,
       'A rappeler'
+    );
+
+    const conversationStatusResponse = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/conversations/${started.conversationId}/status`,
+      payload: {
+        status: 'qualified'
+      }
+    });
+    assert.equal(conversationStatusResponse.statusCode, 200);
+    assert.equal(
+      (conversationStatusResponse.json() as { conversation: { status: string } }).conversation
+        .status,
+      'qualified'
     );
 
     await app.close();
@@ -175,6 +211,70 @@ function createMemoryDatabase(): Database {
         return result([]);
       }
 
+      if (sql.includes('update conversations set status')) {
+        const conversation = conversations.get(String(values[1]));
+        if (conversation) {
+          conversation.status = values[0];
+          conversation.updated_at = new Date();
+        }
+        return result([]);
+      }
+
+      if (sql.includes('from conversations c') && sql.includes('where c.id = $1')) {
+        const conversation = conversations.get(String(values[0]));
+        if (!conversation) return result([]);
+        const prospect = prospects.get(String(conversation.prospect_id));
+        const conversationMessages = messages.get(String(conversation.id)) ?? [];
+        const lastMessage = conversationMessages.at(-1);
+
+        return result([
+          {
+            id: conversation.id,
+            status: conversation.status,
+            created_at: conversation.created_at,
+            updated_at: conversation.updated_at,
+            page_url: conversation.page_url,
+            prospect_id: conversation.prospect_id,
+            display_name: prospect?.display_name ?? null,
+            prospect_status: prospect?.status ?? null,
+            last_message: lastMessage?.content ?? null
+          }
+        ]);
+      }
+
+      if (sql.includes('from conversations c') && sql.includes('left join prospects')) {
+        const search =
+          typeof values[0] === 'string' ? values[0].replaceAll('%', '').toLowerCase() : '';
+        const rows = [...conversations.values()]
+          .map((conversation) => {
+            const prospect = prospects.get(String(conversation.prospect_id));
+            const conversationMessages = messages.get(String(conversation.id)) ?? [];
+            const lastMessage = conversationMessages.at(-1);
+
+            return {
+              id: conversation.id,
+              status: conversation.status,
+              created_at: conversation.created_at,
+              updated_at: conversation.updated_at,
+              page_url: conversation.page_url,
+              prospect_id: conversation.prospect_id,
+              display_name: prospect?.display_name ?? null,
+              prospect_status: prospect?.status ?? null,
+              last_message: lastMessage?.content ?? null
+            };
+          })
+          .filter((conversation) => {
+            if (!search) return true;
+
+            return (
+              toSearchText(conversation.display_name).includes(search) ||
+              toSearchText(conversation.last_message).includes(search)
+            );
+          });
+
+        return result(rows);
+      }
+
       if (sql.includes('select * from prospects order by')) {
         return result([...prospects.values()]);
       }
@@ -210,6 +310,10 @@ function createMemoryDatabase(): Database {
 
 function optional<T>(value: T | undefined): T[] {
   return value ? [value] : [];
+}
+
+function toSearchText(value: unknown): string {
+  return typeof value === 'string' ? value.toLowerCase() : '';
 }
 
 function result<T extends pg.QueryResultRow = pg.QueryResultRow>(

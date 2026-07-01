@@ -21,6 +21,15 @@ export type ConversationRecord = {
   updated_at: Date;
 };
 
+export type ConversationStatus = 'open' | 'in_review' | 'qualified' | 'closed';
+
+export const conversationStatuses: readonly ConversationStatus[] = [
+  'open',
+  'in_review',
+  'qualified',
+  'closed'
+] as const;
+
 export type MessageRecord = {
   id: string;
   organization_id: string;
@@ -28,6 +37,22 @@ export type MessageRecord = {
   sender_type: 'visitor' | 'assistant' | 'system';
   content: string;
   created_at: Date;
+};
+
+export type AdminConversationListItem = {
+  id: string;
+  status: ConversationStatus;
+  created_at: Date;
+  updated_at: Date;
+  page_url: string | null;
+  prospect_id: string | null;
+  display_name: string | null;
+  prospect_status: string | null;
+  last_message: string | null;
+};
+
+export type AdminConversationDetail = AdminConversationListItem & {
+  messages: MessageRecord[];
 };
 
 export class ConversationRepository {
@@ -129,6 +154,123 @@ export class ConversationRepository {
     );
 
     return result.rows;
+  }
+
+  async listAdminConversations(search?: string): Promise<AdminConversationListItem[]> {
+    const searchValue = search?.trim();
+
+    if (searchValue) {
+      const result = await this.database.query<AdminConversationListItem>(
+        `
+        select
+          c.id,
+          c.status,
+          c.created_at,
+          c.updated_at,
+          c.page_url,
+          c.prospect_id,
+          p.display_name,
+          p.status as prospect_status,
+          (
+            select m.content
+            from messages m
+            where m.conversation_id = c.id
+            order by m.created_at desc
+            limit 1
+          ) as last_message
+        from conversations c
+        left join prospects p on p.id = c.prospect_id
+        where
+          p.display_name ilike $1
+          or exists (
+            select 1
+            from messages m
+            where m.conversation_id = c.id and m.content ilike $1
+          )
+        order by c.updated_at desc, c.created_at desc
+        limit 100
+        `,
+        [`%${searchValue}%`]
+      );
+
+      return result.rows;
+    }
+
+    const result = await this.database.query<AdminConversationListItem>(
+      `
+      select
+        c.id,
+        c.status,
+        c.created_at,
+        c.updated_at,
+        c.page_url,
+        c.prospect_id,
+        p.display_name,
+        p.status as prospect_status,
+        (
+          select m.content
+          from messages m
+          where m.conversation_id = c.id
+          order by m.created_at desc
+          limit 1
+        ) as last_message
+      from conversations c
+      left join prospects p on p.id = c.prospect_id
+      order by c.updated_at desc, c.created_at desc
+      limit 100
+      `
+    );
+
+    return result.rows;
+  }
+
+  async findAdminConversation(id: string): Promise<AdminConversationDetail | null> {
+    const result = await this.database.query<AdminConversationListItem>(
+      `
+      select
+        c.id,
+        c.status,
+        c.created_at,
+        c.updated_at,
+        c.page_url,
+        c.prospect_id,
+        p.display_name,
+        p.status as prospect_status,
+        (
+          select m.content
+          from messages m
+          where m.conversation_id = c.id
+          order by m.created_at desc
+          limit 1
+        ) as last_message
+      from conversations c
+      left join prospects p on p.id = c.prospect_id
+      where c.id = $1
+      `,
+      [id]
+    );
+    const conversation = result.rows[0];
+
+    if (!conversation) {
+      return null;
+    }
+
+    return {
+      ...conversation,
+      messages: await this.listMessages(id)
+    };
+  }
+
+  async updateStatus(
+    id: string,
+    status: ConversationStatus
+  ): Promise<AdminConversationDetail | null> {
+    await this.database.query(
+      `update conversations set status = $1, updated_at = now() where id = $2`,
+      [status, id]
+    );
+
+    return this.findAdminConversation(id);
   }
 }
 

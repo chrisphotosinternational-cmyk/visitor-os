@@ -8,6 +8,9 @@ This package now contains the first minimal vertical slice:
 - temporary backend reply;
 - conversation/message persistence;
 - automatic prospect creation;
+- admin conversation listing and search;
+- admin conversation detail with full message history;
+- conversation status update;
 - admin prospect listing;
 - prospect detail with conversation history;
 - prospect status update.
@@ -92,6 +95,7 @@ The test suite verifies:
 - application startup shell;
 - technical health route;
 - database startup check contract.
+- full MVP visitor-to-admin flow.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -141,6 +145,9 @@ tests/
 - `GET /api/widget/config`
 - `POST /api/widget/conversations`
 - `POST /api/widget/conversations/:conversationId/messages`
+- `GET /api/admin/conversations`
+- `GET /api/admin/conversations/:conversationId`
+- `PATCH /api/admin/conversations/:conversationId/status`
 - `GET /api/admin/prospects`
 - `GET /api/admin/prospects/:prospectId`
 - `PATCH /api/admin/prospects/:prospectId/status`

@@ -1,13 +1,16 @@
 # VISITOR-OS Admin MVP
 
-Minimal admin interface for the first VISITOR-OS vertical slice.
+Minimal dashboard for the first VISITOR-OS MVP.
 
-This is intentionally small:
+It is intentionally small:
 
-- list prospects;
-- open a prospect;
-- read the full conversation;
-- update the prospect status.
+- list conversations;
+- search conversations;
+- open a conversation;
+- read the full message history;
+- see conversation date and status;
+- update conversation status;
+- see created prospects.
 
 It uses Vue 3 from a CDN for this MVP slice. A dedicated Vue/Vite setup can replace it later when the admin grows.
 
@@ -28,3 +31,13 @@ Override it before loading `app.js` if needed:
   window.VISITOR_OS_API_URL = 'https://your-api.example.com';
 </script>
 ```
+
+## MVP Test Flow
+
+1. Start the backend.
+2. Open the widget demo.
+3. Send a visitor message.
+4. Open the admin dashboard.
+5. Search or select the conversation.
+6. Read the messages.
+7. Change the conversation status.

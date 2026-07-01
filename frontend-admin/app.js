@@ -5,59 +5,91 @@ const API_BASE_URL = window.VISITOR_OS_API_URL ?? 'http://localhost:3000';
 createApp({
   data() {
     return {
+      conversations: [],
+      conversationStatuses: [],
+      selectedConversation: null,
       prospects: [],
-      statuses: [],
-      selectedProspect: null,
+      search: '',
       loading: true,
       error: ''
     };
   },
 
+  computed: {
+    openConversationsCount() {
+      return this.conversations.filter((conversation) => conversation.status === 'open').length;
+    }
+  },
+
   async mounted() {
-    await this.loadProspects();
+    await this.refreshDashboard();
   },
 
   methods: {
-    async loadProspects() {
+    async refreshDashboard() {
       this.loading = true;
       this.error = '';
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/admin/prospects`);
-        if (!response.ok) throw new Error('Impossible de charger les prospects.');
-        const data = await response.json();
-        this.prospects = data.prospects;
-        this.statuses = data.statuses;
-        if (!this.selectedProspect && this.prospects.length > 0) {
-          await this.selectProspect(this.prospects[0].id);
-        }
-      } catch (error) {
-        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+        await Promise.all([this.loadConversations(), this.loadProspects()]);
       } finally {
         this.loading = false;
       }
     },
 
-    async selectProspect(id) {
+    async loadConversations() {
+      const params = new URLSearchParams();
+      if (this.search.trim()) params.set('search', this.search.trim());
+
+      const response = await fetch(`${API_BASE_URL}/api/admin/conversations?${params.toString()}`);
+      if (!response.ok) throw new Error('Impossible de charger les conversations.');
+      const data = await response.json();
+      this.conversations = data.conversations;
+      this.conversationStatuses = data.statuses;
+
+      if (!this.selectedConversation && this.conversations.length > 0) {
+        await this.selectConversation(this.conversations[0].id);
+      }
+    },
+
+    async loadProspects() {
+      const response = await fetch(`${API_BASE_URL}/api/admin/prospects`);
+      if (!response.ok) throw new Error('Impossible de charger les prospects.');
+      const data = await response.json();
+      this.prospects = data.prospects;
+    },
+
+    async searchConversations() {
       this.error = '';
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/admin/prospects/${id}`);
-        if (!response.ok) throw new Error('Impossible de charger la fiche prospect.');
-        const data = await response.json();
-        this.selectedProspect = data.prospect;
-        this.statuses = data.statuses;
+        this.selectedConversation = null;
+        await this.loadConversations();
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
       }
     },
 
-    async updateStatus(status) {
-      if (!this.selectedProspect) return;
+    async selectConversation(id) {
+      this.error = '';
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/admin/conversations/${id}`);
+        if (!response.ok) throw new Error('Impossible de charger la conversation.');
+        const data = await response.json();
+        this.selectedConversation = data.conversation;
+        this.conversationStatuses = data.statuses;
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async updateConversationStatus(status) {
+      if (!this.selectedConversation) return;
 
       try {
         const response = await fetch(
-          `${API_BASE_URL}/api/admin/prospects/${this.selectedProspect.id}/status`,
+          `${API_BASE_URL}/api/admin/conversations/${this.selectedConversation.id}/status`,
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -67,12 +99,8 @@ createApp({
 
         if (!response.ok) throw new Error('Impossible de modifier le statut.');
         const data = await response.json();
-        this.selectedProspect = {
-          ...this.selectedProspect,
-          ...data.prospect
-        };
-        await this.loadProspects();
-        await this.selectProspect(data.prospect.id);
+        this.selectedConversation = data.conversation;
+        await this.loadConversations();
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
       }
@@ -83,6 +111,17 @@ createApp({
         dateStyle: 'short',
         timeStyle: 'short'
       }).format(new Date(value));
+    },
+
+    statusLabel(status) {
+      return (
+        {
+          open: 'Ouverte',
+          in_review: 'A traiter',
+          qualified: 'Qualifiee',
+          closed: 'Fermee'
+        }[status] ?? status
+      );
     }
   },
 
@@ -90,85 +129,118 @@ createApp({
     <main class="app-shell">
       <aside class="sidebar">
         <strong>VISITOR-OS</strong>
-        <span>Admin MVP</span>
+        <span>Dashboard MVP</span>
       </aside>
 
       <section class="content">
         <header class="topbar">
           <div>
-            <h1>Prospects</h1>
-            <p>Relire les conversations et modifier les statuts.</p>
+            <h1>Dashboard</h1>
+            <p>Conversations, prospects et suivi minimal.</p>
           </div>
-          <button type="button" @click="loadProspects">Actualiser</button>
+          <button type="button" @click="refreshDashboard">Actualiser</button>
         </header>
 
         <p v-if="error" class="alert">{{ error }}</p>
 
+        <section class="metrics">
+          <article class="metric">
+            <span>Conversations</span>
+            <strong>{{ conversations.length }}</strong>
+          </article>
+          <article class="metric">
+            <span>Ouvertes</span>
+            <strong>{{ openConversationsCount }}</strong>
+          </article>
+          <article class="metric">
+            <span>Prospects</span>
+            <strong>{{ prospects.length }}</strong>
+          </article>
+        </section>
+
         <section class="layout">
           <div class="panel list-panel">
-            <h2>Prospects</h2>
+            <div class="panel-header">
+              <h2>Conversations</h2>
+              <form class="search-form" @submit.prevent="searchConversations">
+                <input v-model="search" placeholder="Rechercher..." />
+                <button type="submit">OK</button>
+              </form>
+            </div>
+
             <p v-if="loading">Chargement...</p>
-            <p v-else-if="prospects.length === 0" class="empty">
-              Aucun prospect pour l'instant. Envoyez un message depuis le widget.
+            <p v-else-if="conversations.length === 0" class="empty">
+              Aucune conversation. Envoyez un message depuis la page demo.
             </p>
 
             <button
-              v-for="prospect in prospects"
-              :key="prospect.id"
+              v-for="conversation in conversations"
+              :key="conversation.id"
               type="button"
-              class="prospect-row"
-              :class="{ active: selectedProspect?.id === prospect.id }"
-              @click="selectProspect(prospect.id)"
+              class="conversation-row"
+              :class="{ active: selectedConversation?.id === conversation.id }"
+              @click="selectConversation(conversation.id)"
             >
               <span>
-                <strong>{{ prospect.display_name }}</strong>
-                <small>{{ prospect.status }} · score {{ prospect.score_current }}</small>
+                <strong>{{ conversation.display_name || 'Visiteur anonyme' }}</strong>
+                <small>{{ formatDate(conversation.created_at) }}</small>
+                <small>{{ conversation.last_message || 'Conversation demarree' }}</small>
               </span>
-              <span class="badge">{{ prospect.temperature }}</span>
+              <span class="badge">{{ statusLabel(conversation.status) }}</span>
             </button>
           </div>
 
           <article class="panel detail-panel">
-            <template v-if="selectedProspect">
+            <template v-if="selectedConversation">
               <div class="detail-header">
                 <div>
-                  <h2>{{ selectedProspect.display_name }}</h2>
-                  <p>Score {{ selectedProspect.score_current }} · {{ selectedProspect.temperature }}</p>
+                  <h2>{{ selectedConversation.display_name || 'Conversation visiteur' }}</h2>
+                  <p>{{ formatDate(selectedConversation.created_at) }}</p>
+                  <p v-if="selectedConversation.page_url" class="muted">
+                    {{ selectedConversation.page_url }}
+                  </p>
                 </div>
                 <label>
-                  Statut
+                  Statut conversation
                   <select
-                    :value="selectedProspect.status"
-                    @change="updateStatus($event.target.value)"
+                    :value="selectedConversation.status"
+                    @change="updateConversationStatus($event.target.value)"
                   >
-                    <option v-for="status in statuses" :key="status" :value="status">
-                      {{ status }}
+                    <option
+                      v-for="status in conversationStatuses"
+                      :key="status"
+                      :value="status"
+                    >
+                      {{ statusLabel(status) }}
                     </option>
                   </select>
                 </label>
               </div>
 
-              <section
-                v-for="conversation in selectedProspect.conversations"
-                :key="conversation.id"
-                class="conversation"
-              >
-                <h3>Conversation du {{ formatDate(conversation.created_at) }}</h3>
-                <p v-if="conversation.page_url" class="muted">{{ conversation.page_url }}</p>
+              <section class="conversation">
                 <div
-                  v-for="message in conversation.messages"
+                  v-for="message in selectedConversation.messages"
                   :key="message.id"
                   class="message"
                   :class="message.sender_type"
                 >
-                  <small>{{ message.sender_type }}</small>
+                  <small>{{ message.sender_type }} · {{ formatDate(message.created_at) }}</small>
                   <p>{{ message.content }}</p>
                 </div>
               </section>
             </template>
 
-            <p v-else class="empty">Selectionnez un prospect pour lire sa conversation.</p>
+            <p v-else class="empty">Selectionnez une conversation.</p>
           </article>
+
+          <aside class="panel prospects-panel">
+            <h2>Prospects</h2>
+            <p v-if="prospects.length === 0" class="empty">Aucun prospect.</p>
+            <div v-for="prospect in prospects" :key="prospect.id" class="prospect-card">
+              <strong>{{ prospect.display_name }}</strong>
+              <small>{{ prospect.status }} · score {{ prospect.score_current }}</small>
+            </div>
+          </aside>
         </section>
       </section>
     </main>
