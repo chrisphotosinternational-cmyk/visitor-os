@@ -2,6 +2,15 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.15.0-auth-production
+
+- Sprint 3 authentication validated in production.
+- Added JWT login flow for `POST /login`.
+- Added protected identity route `GET /me`.
+- Added protected dashboard route `GET /dashboard`.
+- Confirmed authentication deployment on Railway.
+- Preserved `/live`, `/health` and `/ready` production healthchecks.
+
 ## v0.13.0-beta-backend-stable
 
 - Backend deploye sur Railway
