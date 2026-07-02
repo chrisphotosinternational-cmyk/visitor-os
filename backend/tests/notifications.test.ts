@@ -215,7 +215,8 @@ function baseAppConfig(): AppConfig {
     auth: {
       sessionSecret: 'dev-only-session-secret-change-before-production',
       sessionTtlMs: 1,
-      sessionRenewalMs: 1
+      sessionRenewalMs: 1,
+      jwtTtlSeconds: 3_600
     }
   };
 }

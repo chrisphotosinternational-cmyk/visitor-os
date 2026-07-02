@@ -53,6 +53,7 @@ const environmentSchema = z
       .default(DEV_SESSION_SECRET),
     ADMIN_SESSION_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
     ADMIN_SESSION_RENEWAL_MS: z.coerce.number().int().positive().default(3_600_000),
+    JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
     FIRST_ADMIN_EMAIL: z.string().email().optional(),
     FIRST_ADMIN_PASSWORD: z.string().min(12).optional(),
     FIRST_ADMIN_FIRST_NAME: z.string().min(1).default('VISITOR'),
@@ -99,6 +100,7 @@ export type AppConfig = {
     sessionSecret: string;
     sessionTtlMs: number;
     sessionRenewalMs: number;
+    jwtTtlSeconds: number;
     firstAdmin?: {
       email: string;
       password: string;
@@ -157,7 +159,8 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     auth: {
       sessionSecret: resolveSessionSecret(env.NODE_ENV, env.ADMIN_SESSION_SECRET),
       sessionTtlMs: env.ADMIN_SESSION_TTL_MS,
-      sessionRenewalMs: env.ADMIN_SESSION_RENEWAL_MS
+      sessionRenewalMs: env.ADMIN_SESSION_RENEWAL_MS,
+      jwtTtlSeconds: env.JWT_TTL_SECONDS
     }
   };
 

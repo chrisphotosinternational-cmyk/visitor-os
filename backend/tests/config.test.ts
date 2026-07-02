@@ -17,6 +17,7 @@ describe('loadConfig', () => {
     assert.equal(config.database.ssl, false);
     assert.equal(config.notifications.fromEmail, 'notifications@visitor-os.local');
     assert.equal(config.notifications.retryAttempts, 2);
+    assert.equal(config.auth.jwtTtlSeconds, 3_600);
   });
 
   it('parses allowed origins', () => {

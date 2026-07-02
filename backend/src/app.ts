@@ -16,6 +16,7 @@ import {
   type BusinessConfigEngine
 } from './modules/business-config/configuration-loader.js';
 import { AuthService } from './modules/auth/auth-service.js';
+import { registerJwtAuthRoutes } from './modules/auth/jwt-auth-routes.js';
 import { NotificationRepository } from './modules/notifications/notification-repository.js';
 import { NotificationEngine } from './modules/notifications/notification-engine.js';
 import { KnowledgeRepository } from './modules/kms/knowledge-repository.js';
@@ -96,6 +97,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   });
   const notificationEngine = new NotificationEngine(notificationRepository, dependencies.config);
 
+  registerJwtAuthRoutes(app, dependencies.database, dependencies.config);
   registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(
     app,

@@ -4,6 +4,7 @@ import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/core/config/env.js';
 import { createLogger } from '../src/core/logger/logger.js';
 import type { Database } from '../src/database/client.js';
+import { signJwt } from '../src/modules/auth/jwt.js';
 import { hashPassword } from '../src/modules/auth/password.js';
 import type { UserRole } from '../src/modules/users/user-model.js';
 import type pg from 'pg';
@@ -12,6 +13,109 @@ const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
 
 describe('admin authentication and RBAC', () => {
+  it('logs in with valid JWT credentials and reads /me', async () => {
+    const app = await createAuthTestApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/login',
+      payload: {
+        email: 'admin@example.com',
+        password: 'test-password-123'
+      }
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = response.json() as { token: string; user: { email: string } };
+    assert.equal(body.user.email, 'admin@example.com');
+    assert.ok(body.token);
+
+    const me = await app.inject({
+      method: 'GET',
+      url: '/me',
+      headers: { authorization: `Bearer ${body.token}` }
+    });
+
+    assert.equal(me.statusCode, 200);
+    assert.equal((me.json() as { user: { email: string } }).user.email, 'admin@example.com');
+    await app.close();
+  });
+
+  it('rejects invalid JWT login credentials', async () => {
+    const app = await createAuthTestApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/login',
+      payload: {
+        email: 'admin@example.com',
+        password: 'wrong-password'
+      }
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.equal(
+      (response.json() as { error: { code: string } }).error.code,
+      'INVALID_CREDENTIALS'
+    );
+    await app.close();
+  });
+
+  it('rejects expired JWT tokens', async () => {
+    const app = await createAuthTestApp();
+    const token = signJwt(
+      {
+        sub: 'user-admin',
+        organizationId: ORG_A,
+        email: 'admin@example.com',
+        role: 'Admin'
+      },
+      'test-session-secret-with-more-than-32-characters',
+      -1
+    );
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.equal((response.json() as { error: { code: string } }).error.code, 'TOKEN_EXPIRED');
+    await app.close();
+  });
+
+  it('blocks /dashboard without JWT', async () => {
+    const app = await createAuthTestApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard'
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.equal((response.json() as { error: { code: string } }).error.code, 'JWT_REQUIRED');
+    await app.close();
+  });
+
+  it('allows /dashboard with JWT', async () => {
+    const app = await createAuthTestApp();
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/login',
+      payload: {
+        email: 'admin@example.com',
+        password: 'test-password-123'
+      }
+    });
+    const token = (loginResponse.json() as { token: string }).token;
+    const response = await app.inject({
+      method: 'GET',
+      url: '/dashboard',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal((response.json() as { status: string }).status, 'ok');
+    await app.close();
+  });
+
   it('logs in with valid credentials and exposes current user', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'admin@example.com', 'test-password-123');
