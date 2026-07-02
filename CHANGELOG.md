@@ -2,6 +2,16 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.13.0-beta-backend-stable
+
+- Backend deploye sur Railway
+- Service Online
+- Healthcheck `/live` OK
+- Healthcheck `/health` OK
+- Healthcheck `/ready` OK
+- Demarrage stable sans `DATABASE_URL`
+- Railway valide
+
 ## v0.12.0-beta-prep - Prompt 19
 
 - Added backend and frontend Dockerfiles.
