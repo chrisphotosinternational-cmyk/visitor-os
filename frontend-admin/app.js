@@ -94,6 +94,26 @@ createApp({
         from: '',
         to: ''
       },
+      knowledgeDocuments: [],
+      knowledgeTypes: [],
+      knowledgeStatuses: [],
+      knowledgeStatistics: null,
+      knowledgeResults: [],
+      knowledgeFilters: {
+        search: '',
+        category: '',
+        status: 'active',
+        siteId: ''
+      },
+      knowledgeImportForm: {
+        title: '',
+        category: 'general',
+        type: 'markdown',
+        language: 'fr',
+        tags: '',
+        content: ''
+      },
+      knowledgeSearchQuery: '',
       organizationForm: {
         id: '',
         name: '',
@@ -195,6 +215,7 @@ createApp({
           this.loadNotifications(),
           this.loadNotificationSettings(),
           this.loadAnalytics(),
+          this.loadKnowledge(),
           this.loadOrganizations(),
           this.loadSites()
         ]);
@@ -513,6 +534,77 @@ createApp({
         }
       }
       window.location.href = `${API_BASE_URL}/api/admin/analytics/export?${params.toString()}`;
+    },
+
+    async loadKnowledge() {
+      if (!this.can('settings:access')) return;
+
+      const params = new URLSearchParams();
+      Object.entries(this.knowledgeFilters).forEach(([key, value]) => {
+        if (String(value).trim()) params.set(key, String(value).trim());
+      });
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/knowledge?${params.toString()}`);
+      if (!response.ok) throw new Error('Impossible de charger la connaissance.');
+      const data = await response.json();
+      this.knowledgeDocuments = data.documents;
+      this.knowledgeTypes = data.types;
+      this.knowledgeStatuses = data.statuses;
+      this.knowledgeStatistics = data.statistics;
+    },
+
+    async importKnowledge() {
+      this.error = '';
+
+      try {
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/knowledge/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...this.knowledgeImportForm,
+            siteId: this.knowledgeFilters.siteId || undefined,
+            tags: this.knowledgeImportForm.tags
+              .split(',')
+              .map((tag) => tag.trim())
+              .filter(Boolean),
+            source: 'admin'
+          })
+        });
+        if (!response.ok) throw new Error('Import knowledge impossible.');
+        this.knowledgeImportForm.title = '';
+        this.knowledgeImportForm.tags = '';
+        this.knowledgeImportForm.content = '';
+        await this.loadKnowledge();
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    async searchKnowledge() {
+      if (!this.knowledgeSearchQuery.trim()) return;
+
+      const params = new URLSearchParams({ q: this.knowledgeSearchQuery.trim() });
+      if (this.knowledgeFilters.siteId) params.set('siteId', this.knowledgeFilters.siteId);
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/knowledge/search?${params.toString()}`);
+      if (!response.ok) throw new Error('Recherche knowledge impossible.');
+      const data = await response.json();
+      this.knowledgeResults = data.results;
+      await this.loadKnowledge();
+    },
+
+    async archiveKnowledge(id) {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/knowledge/${id}/archive`, {
+        method: 'PATCH'
+      });
+      if (!response.ok) throw new Error('Archivage impossible.');
+      await this.loadKnowledge();
+    },
+
+    async deleteKnowledge(id) {
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/knowledge/${id}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error('Suppression impossible.');
+      await this.loadKnowledge();
     },
 
     async loadOrganizations() {
@@ -861,6 +953,7 @@ createApp({
       return (
         {
           faq: 'FAQ',
+          knowledge_search: 'Documents',
           knowledge_base: 'Base de connaissance',
           ai: 'IA mock',
           fallback: 'Fallback',
@@ -1064,6 +1157,76 @@ createApp({
                 <div><dt>Escalade humaine</dt><dd>{{ analytics.kpis.humanEscalationRate }} %</dd></div>
               </dl>
             </section>
+          </div>
+        </section>
+
+        <section v-if="can('settings:access')" class="panel knowledge-panel">
+          <div class="panel-header config-header">
+            <div>
+              <h2>Knowledge</h2>
+              <p class="muted">Documents, recherche et base RAG-ready.</p>
+            </div>
+            <div class="config-actions">
+              <button type="button" @click="loadKnowledge">Actualiser</button>
+              <button type="button" @click="importKnowledge">Importer</button>
+            </div>
+          </div>
+
+          <div class="knowledge-grid">
+            <form class="knowledge-form" @submit.prevent="importKnowledge">
+              <input v-model="knowledgeImportForm.title" placeholder="Titre document" required />
+              <input v-model="knowledgeImportForm.category" placeholder="Categorie" required />
+              <select v-model="knowledgeImportForm.type">
+                <option v-for="type in knowledgeTypes" :key="type" :value="type">{{ type }}</option>
+              </select>
+              <input v-model="knowledgeImportForm.language" placeholder="Langue" />
+              <input v-model="knowledgeImportForm.tags" placeholder="Tags separes par virgules" />
+              <textarea v-model="knowledgeImportForm.content" placeholder="Contenu extrait du document" required></textarea>
+              <button type="submit">Indexer</button>
+            </form>
+
+            <div>
+              <form class="crm-filters" @submit.prevent="loadKnowledge">
+                <input v-model="knowledgeFilters.search" placeholder="Filtrer documents" />
+                <input v-model="knowledgeFilters.category" placeholder="Categorie" />
+                <select v-model="knowledgeFilters.status">
+                  <option value="">Tous statuts</option>
+                  <option v-for="status in knowledgeStatuses" :key="status" :value="status">{{ status }}</option>
+                </select>
+                <select v-model="knowledgeFilters.siteId">
+                  <option value="">Tous sites</option>
+                  <option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option>
+                </select>
+                <button type="submit">Filtrer</button>
+              </form>
+
+              <form class="crm-filters" @submit.prevent="searchKnowledge">
+                <input v-model="knowledgeSearchQuery" placeholder="Rechercher dans la connaissance" />
+                <button type="submit">Rechercher</button>
+              </form>
+
+              <div v-if="knowledgeStatistics" class="knowledge-stats">
+                <span>{{ knowledgeStatistics.documents }} documents</span>
+                <span>{{ knowledgeStatistics.searches }} recherches</span>
+                <span>{{ knowledgeStatistics.neverUsedDocuments }} jamais utilises</span>
+              </div>
+
+              <div v-for="result in knowledgeResults" :key="result.documentId" class="knowledge-result">
+                <strong>{{ result.title }} · {{ Math.round(result.score * 100) }} %</strong>
+                <p>{{ result.content }}</p>
+              </div>
+
+              <div v-for="document in knowledgeDocuments" :key="document.id" class="knowledge-row">
+                <span>
+                  <strong>{{ document.title }}</strong>
+                  <small>{{ document.category }} · v{{ document.version }} · {{ document.type }} · {{ document.status }}</small>
+                </span>
+                <span class="tenant-actions">
+                  <button type="button" @click="archiveKnowledge(document.id)">Archiver</button>
+                  <button type="button" @click="deleteKnowledge(document.id)">Supprimer</button>
+                </span>
+              </div>
+            </div>
           </div>
         </section>
 

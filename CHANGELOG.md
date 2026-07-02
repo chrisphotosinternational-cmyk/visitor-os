@@ -2,6 +2,15 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.10.0-rc1 - Prompt 18
+
+- Added Knowledge Management System with documents, versions, chunks, search events and statistics.
+- Added document import, validation, versioning and simple paragraph/token indexing.
+- Added admin Knowledge panel for import, filtering, search, archive and delete.
+- Integrated Knowledge Search into the Decision Engine before legacy Knowledge Base and AI.
+- Added RAG-ready interfaces for embeddings, vector providers, retrievers and context builders.
+- Added KMS documentation and tests.
+
 ## v0.9.0-dev - Sprint 9
 
 - Added Analytics Engine for conversations, prospects, scores, tags, AI, notifications, follow-ups and sites.

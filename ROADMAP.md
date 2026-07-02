@@ -1,5 +1,15 @@
 # Roadmap
 
+## Current Development - v0.10.0-rc1
+
+- Knowledge Management System
+- Document import and validation
+- Simple indexation and search
+- Document versioning
+- Knowledge statistics
+- Decision Engine document priority
+- RAG-ready interfaces
+
 ## Current Development - v0.9.0-dev
 
 - Analytics Engine

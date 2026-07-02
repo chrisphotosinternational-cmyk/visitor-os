@@ -127,6 +127,61 @@ export async function initializeSchema(database: Database): Promise<void> {
       unique (organization_id, site_id, period_type, period_start)
     );
 
+    create table if not exists knowledge_documents (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid references sites(id),
+      title text not null,
+      description text,
+      category text not null,
+      type text not null,
+      language text not null default 'fr',
+      version integer not null default 1,
+      size_bytes integer not null default 0,
+      hash text not null,
+      status text not null default 'active',
+      tags text[] not null default '{}',
+      author text,
+      source text not null default 'manual',
+      usage_count integer not null default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists knowledge_versions (
+      id uuid primary key,
+      document_id uuid not null references knowledge_documents(id) on delete cascade,
+      organization_id uuid not null references organizations(id),
+      version integer not null,
+      title text not null,
+      content text not null,
+      hash text not null,
+      author text,
+      created_at timestamptz not null default now(),
+      unique (document_id, version)
+    );
+
+    create table if not exists knowledge_chunks (
+      id text primary key,
+      document_id uuid not null references knowledge_documents(id) on delete cascade,
+      organization_id uuid not null references organizations(id),
+      site_id uuid references sites(id),
+      content text not null,
+      position integer not null,
+      tokens text[] not null default '{}',
+      metadata jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists knowledge_search_events (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid references sites(id),
+      query text not null,
+      result_count integer not null default 0,
+      created_at timestamptz not null default now()
+    );
+
     create table if not exists visitors (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -313,6 +368,16 @@ export async function initializeSchema(database: Database): Promise<void> {
       on notification_events(organization_id, status, created_at desc);
     create index if not exists idx_analytics_snapshots_period
       on analytics_snapshots(organization_id, period_type, period_start desc);
+    create index if not exists idx_knowledge_documents_organization_status
+      on knowledge_documents(organization_id, status, updated_at desc);
+    create index if not exists idx_knowledge_documents_site
+      on knowledge_documents(site_id, status, updated_at desc);
+    create index if not exists idx_knowledge_chunks_document
+      on knowledge_chunks(document_id, position);
+    create index if not exists idx_knowledge_chunks_tokens
+      on knowledge_chunks using gin(tokens);
+    create index if not exists idx_knowledge_search_events_organization
+      on knowledge_search_events(organization_id, created_at desc);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);
     create index if not exists idx_conversations_organization_site on conversations(organization_id, site_id);
     create index if not exists idx_messages_conversation_created on messages(conversation_id, created_at);

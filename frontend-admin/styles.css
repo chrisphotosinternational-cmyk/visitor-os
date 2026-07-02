@@ -506,6 +506,7 @@ select {
 
 .analytics-panel,
 .ai-panel,
+.knowledge-panel,
 .notifications-panel {
   margin-top: 24px;
 }
@@ -582,6 +583,67 @@ select {
 .analytics-alerts dt,
 .analytics-alerts dd {
   margin: 0;
+}
+
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.knowledge-form {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.knowledge-form input,
+.knowledge-form select,
+.knowledge-form textarea {
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.knowledge-form textarea {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.knowledge-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.knowledge-stats span,
+.knowledge-result,
+.knowledge-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.knowledge-result,
+.knowledge-row {
+  margin-top: 8px;
+}
+
+.knowledge-result p,
+.knowledge-row small {
+  display: block;
+  margin: 4px 0 0;
+  color: #6b7280;
+}
+
+.knowledge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .ai-grid,
@@ -727,6 +789,7 @@ select {
   .metrics,
   .analytics-kpis,
   .analytics-grid,
+  .knowledge-grid,
   .tenant-layout {
     grid-template-columns: 1fr;
   }

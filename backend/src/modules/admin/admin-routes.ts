@@ -32,6 +32,11 @@ import { notificationStatuses, notificationTypes } from '../notifications/notifi
 import { AnalyticsRepository } from '../analytics/analytics-repository.js';
 import { analyticsPeriodPresets } from '../analytics/analytics-types.js';
 import { resolveAnalyticsPeriod } from '../analytics/analytics-period.js';
+import type { KnowledgeRepository } from '../kms/knowledge-repository.js';
+import { KnowledgeImporter } from '../kms/knowledge-importer.js';
+import { RepositoryKnowledgeSearch } from '../kms/knowledge-search.js';
+import { KnowledgeStatisticsService } from '../kms/knowledge-statistics.js';
+import { knowledgeDocumentTypes, knowledgeStatuses } from '../kms/knowledge-types.js';
 
 const organizationInputSchema = z.object({
   name: z.string().min(1),
@@ -124,6 +129,28 @@ const analyticsSnapshotSchema = analyticsQuerySchema.extend({
   periodType: z.enum(['daily', 'weekly', 'monthly']).default('daily')
 });
 
+const knowledgeImportBodySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  siteId: z.string().uuid().optional(),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  category: z.string().min(1).default('general'),
+  type: z.enum(knowledgeDocumentTypes),
+  language: z.string().min(2).default('fr'),
+  content: z.string().min(1),
+  tags: z.array(z.string()).default([]),
+  author: z.string().optional(),
+  source: z.string().default('manual')
+});
+
+const knowledgeQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  siteId: z.string().uuid().optional(),
+  search: z.string().optional(),
+  category: z.string().optional(),
+  status: z.enum(knowledgeStatuses).optional()
+});
+
 export function registerAdminRoutes(
   app: FastifyInstance,
   database: Database,
@@ -132,7 +159,8 @@ export function registerAdminRoutes(
   aiConfigurations?: AIConfigurationRepository,
   providerFactory?: ProviderFactory,
   notificationEngine?: NotificationEngine,
-  notificationRepository?: NotificationRepository
+  notificationRepository?: NotificationRepository,
+  knowledgeRepository?: KnowledgeRepository
 ): void {
   const prospects = new ProspectRepository(database);
   const crm = new CrmRepository(database);
@@ -140,6 +168,10 @@ export function registerAdminRoutes(
   const organizations = new OrganizationRepository(database);
   const sites = new SiteRepository(database);
   const analytics = new AnalyticsRepository(database);
+  const knowledge = knowledgeRepository;
+  const knowledgeImporter = knowledge ? new KnowledgeImporter(knowledge) : null;
+  const knowledgeSearch = knowledge ? new RepositoryKnowledgeSearch(knowledge) : null;
+  const knowledgeStatistics = knowledge ? new KnowledgeStatisticsService(knowledge) : null;
   const authContexts = new WeakMap<object, AuthContext>();
 
   app.post('/api/admin/auth/login', async (request, reply) => {
@@ -422,6 +454,130 @@ export function registerAdminRoutes(
     return {
       ok: true,
       snapshots: await analytics.countSnapshots(organizationId)
+    };
+  });
+
+  app.get('/api/admin/knowledge', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const query = knowledgeQuerySchema.parse(request.query);
+    const organizationId =
+      auth.requireOrganizationAccess(context, query.organizationId) ?? context.user.organizationId;
+
+    if (!knowledge) {
+      throw new AppError('Knowledge repository is not available', {
+        statusCode: 503,
+        code: 'KNOWLEDGE_UNAVAILABLE'
+      });
+    }
+
+    return {
+      documents: await knowledge.list({
+        organizationId,
+        ...(query.siteId ? { siteId: query.siteId } : {}),
+        ...(query.search ? { search: query.search } : {}),
+        ...(query.category ? { category: query.category } : {}),
+        ...(query.status ? { status: query.status } : {})
+      }),
+      types: knowledgeDocumentTypes,
+      statuses: knowledgeStatuses,
+      statistics: await knowledgeStatistics?.get(organizationId, query.siteId)
+    };
+  });
+
+  app.post('/api/admin/knowledge/import', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = knowledgeImportBodySchema.parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+
+    if (!knowledgeImporter) {
+      throw new AppError('Knowledge importer is not available', {
+        statusCode: 503,
+        code: 'KNOWLEDGE_UNAVAILABLE'
+      });
+    }
+
+    return {
+      document: await knowledgeImporter.import({
+        organizationId,
+        ...(body.siteId ? { siteId: body.siteId } : {}),
+        title: body.title,
+        ...(body.description ? { description: body.description } : {}),
+        category: body.category,
+        type: body.type,
+        language: body.language,
+        content: body.content,
+        tags: body.tags,
+        ...(body.author ? { author: body.author } : {}),
+        source: body.source
+      })
+    };
+  });
+
+  app.get('/api/admin/knowledge/search', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const query = z
+      .object({
+        organizationId: z.string().uuid().optional(),
+        siteId: z.string().uuid().optional(),
+        q: z.string().min(1),
+        language: z.string().min(2).optional()
+      })
+      .parse(request.query);
+    const organizationId =
+      auth.requireOrganizationAccess(context, query.organizationId) ?? context.user.organizationId;
+
+    return {
+      results:
+        (await knowledgeSearch?.search({
+          organizationId,
+          ...(query.siteId ? { siteId: query.siteId } : {}),
+          query: query.q,
+          ...(query.language ? { language: query.language } : {}),
+          limit: 10
+        })) ?? []
+    };
+  });
+
+  app.get('/api/admin/knowledge/:documentId/versions', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const params = z.object({ documentId: z.string().uuid() }).parse(request.params);
+    const organizationId = auth.requireOrganizationAccess(context) ?? context.user.organizationId;
+
+    return {
+      versions: (await knowledge?.versions(params.documentId, organizationId)) ?? []
+    };
+  });
+
+  app.patch('/api/admin/knowledge/:documentId/archive', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const params = z.object({ documentId: z.string().uuid() }).parse(request.params);
+    const organizationId = auth.requireOrganizationAccess(context) ?? context.user.organizationId;
+    const document = await knowledge?.archive(params.documentId, organizationId);
+
+    if (!document) {
+      throw new AppError('Knowledge document not found', {
+        statusCode: 404,
+        code: 'KNOWLEDGE_DOCUMENT_NOT_FOUND'
+      });
+    }
+
+    return { document };
+  });
+
+  app.delete('/api/admin/knowledge/:documentId', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const params = z.object({ documentId: z.string().uuid() }).parse(request.params);
+    const organizationId = auth.requireOrganizationAccess(context) ?? context.user.organizationId;
+
+    return {
+      deleted: (await knowledge?.delete(params.documentId, organizationId)) ?? false
     };
   });
 

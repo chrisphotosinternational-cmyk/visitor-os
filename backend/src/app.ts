@@ -18,6 +18,8 @@ import {
 import { AuthService } from './modules/auth/auth-service.js';
 import { NotificationRepository } from './modules/notifications/notification-repository.js';
 import { NotificationEngine } from './modules/notifications/notification-engine.js';
+import { KnowledgeRepository } from './modules/kms/knowledge-repository.js';
+import { RepositoryKnowledgeSearch } from './modules/kms/knowledge-search.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -63,7 +65,13 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   const aiConfigurations = new AIConfigurationRepository(dependencies.database);
   const aiProviderFactory = new ProviderFactory(dependencies.config, aiConfigurations);
   const aiProvider = aiProviderFactory.createProvider();
-  const decisionEngine = createDecisionEngine({ aiProvider, businessConfigEngine });
+  const knowledgeRepository = new KnowledgeRepository(dependencies.database);
+  const knowledgeSearch = new RepositoryKnowledgeSearch(knowledgeRepository);
+  const decisionEngine = createDecisionEngine({
+    aiProvider,
+    businessConfigEngine,
+    knowledgeSearch
+  });
   const authService = new AuthService(dependencies.database, dependencies.config);
   const notificationRepository = new NotificationRepository(dependencies.database, {
     retryAttempts: dependencies.config.notifications.retryAttempts,
@@ -80,7 +88,8 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     aiConfigurations,
     aiProviderFactory,
     notificationEngine,
-    notificationRepository
+    notificationRepository,
+    knowledgeRepository
   );
 
   return app;

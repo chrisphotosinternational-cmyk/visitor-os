@@ -9,8 +9,10 @@ import type {
   BusinessRule,
   KnowledgeBaseItem
 } from '../business-config/business-config-schema.js';
+import type { KnowledgeSearch } from '../kms/knowledge-search.js';
 
-export type DecisionSource = 'faq' | 'knowledge_base' | 'ai' | 'fallback' | 'human_escalation';
+export type DecisionSource =
+  'faq' | 'knowledge_search' | 'knowledge_base' | 'ai' | 'fallback' | 'human_escalation';
 
 export type DecisionEngineInput = {
   organizationId: string;
@@ -51,15 +53,18 @@ export type DecisionEngine = {
 };
 
 const FAQ_MIN_CONFIDENCE = 0.7;
+const KNOWLEDGE_SEARCH_MIN_CONFIDENCE = 0.58;
 const KNOWLEDGE_BASE_MIN_CONFIDENCE = 0.66;
 const AI_MIN_CONFIDENCE = 0.35;
 
 export function createDecisionEngine(options: {
   aiProvider?: AIProvider;
   businessConfigEngine: BusinessConfigEngine;
+  knowledgeSearch?: KnowledgeSearch;
 }): DecisionEngine {
   const aiProvider = options?.aiProvider ?? createDefaultAiProvider();
   const businessConfigEngine = options.businessConfigEngine;
+  const knowledgeSearch = options.knowledgeSearch;
 
   return {
     getBusinessConfig(configId?: string | null): Promise<BusinessConfig> {
@@ -95,6 +100,29 @@ export function createDecisionEngine(options: {
             shouldEscalate: false,
             matchedItemId: faqMatch.item.id,
             reason: 'faq_keyword_match'
+          },
+          startedAt
+        );
+      }
+
+      const documentMatches = await knowledgeSearch?.search({
+        organizationId: input.organizationId,
+        siteId: input.siteId,
+        query: input.message,
+        ...(input.language ? { language: input.language } : {}),
+        limit: 1
+      });
+      const documentMatch = documentMatches?.[0];
+
+      if (documentMatch && documentMatch.score >= KNOWLEDGE_SEARCH_MIN_CONFIDENCE) {
+        return withProcessingTime(
+          {
+            reply: documentMatch.content,
+            source: 'knowledge_search',
+            confidence: clampConfidence(documentMatch.score),
+            shouldEscalate: false,
+            matchedItemId: documentMatch.documentId,
+            reason: `knowledge_document:${documentMatch.title}`
           },
           startedAt
         );

@@ -19,6 +19,7 @@ This package now contains the first minimal vertical slice:
 - advanced CRM with scoring, tags, notes, follow-ups and exports.
 - central Notification Engine with internal, email and webhook providers.
 - Analytics Engine with KPI dashboard, exports and snapshot foundation.
+- Knowledge Management System with document import, search, versioning and RAG-ready interfaces.
 
 It still contains no payments, bookings or business-specific hardcoded logic.
 
@@ -143,6 +144,7 @@ The test suite verifies:
 - CRM scoring, tag detection and export formatting.
 - Notification Engine templates, mock email, webhook abstraction and retry behavior.
 - Analytics calculations, period filters, exports and snapshots.
+- KMS validation, indexing, search, versioning and Decision Engine priority.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -219,6 +221,12 @@ tests/
 - `GET /api/admin/analytics`
 - `GET /api/admin/analytics/export`
 - `POST /api/admin/analytics/snapshots`
+- `GET /api/admin/knowledge`
+- `POST /api/admin/knowledge/import`
+- `GET /api/admin/knowledge/search`
+- `GET /api/admin/knowledge/:documentId/versions`
+- `PATCH /api/admin/knowledge/:documentId/archive`
+- `DELETE /api/admin/knowledge/:documentId`
 
 The widget/admin routes are intentionally minimal and exist only to validate the product flow.
 
