@@ -8,6 +8,7 @@ import { registerAdminRoutes } from './modules/admin/admin-routes.js';
 import { registerWidgetRoutes } from './modules/widget/widget-routes.js';
 import { registerSecurityHeaders } from './core/security/security-headers.js';
 import { registerSimpleRateLimit } from './core/security/simple-rate-limit.js';
+import { registerFrontendAdmin } from './core/static/frontend-admin.js';
 import { AIConfigurationRepository } from './modules/ai/ai-configuration-repository.js';
 import { ProviderFactory } from './modules/ai/provider-factory.js';
 import { createDecisionEngine } from './modules/decision-engine/decision-engine.js';
@@ -54,6 +55,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   });
 
   registerErrorHandler(app);
+  registerFrontendAdmin(app);
 
   app.get('/health', () => ({
     status: 'ok',

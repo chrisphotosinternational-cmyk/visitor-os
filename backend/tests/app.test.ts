@@ -6,6 +6,62 @@ import { createLogger } from '../src/core/logger/logger.js';
 import type { Database } from '../src/database/client.js';
 
 describe('createApp', () => {
+  it('serves the admin login page from the root route', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent'
+      }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/'
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'] ?? '', /text\/html/);
+    assert.match(response.body, /Connexion admin VISITOR-OS/);
+
+    await app.close();
+  });
+
+  it('serves admin static assets and falls back SPA routes to index.html', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent'
+      }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+
+    const script = await app.inject({ method: 'GET', url: '/app.js' });
+    const spaRoute = await app.inject({ method: 'GET', url: '/admin/settings' });
+    const apiRoute = await app.inject({ method: 'GET', url: '/api/unknown' });
+
+    assert.equal(script.statusCode, 200);
+    assert.match(script.headers['content-type'] ?? '', /application\/javascript/);
+    assert.match(script.body, /POST/);
+    assert.equal(spaRoute.statusCode, 200);
+    assert.match(spaRoute.body, /Connexion admin VISITOR-OS/);
+    assert.equal(apiRoute.statusCode, 404);
+
+    await app.close();
+  });
+
   it('starts technical health route without business endpoints', async () => {
     const database: Database = {
       isConfigured: mock.fn(() => true),
