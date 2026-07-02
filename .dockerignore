@@ -1,0 +1,12 @@
+.git
+.agents
+.codex
+backend/dist
+backend/dist-test
+backend/node_modules
+backups
+*.log
+.DS_Store
+deployment/.env.production
+node_modules
+

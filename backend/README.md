@@ -192,6 +192,8 @@ tests/
 ## Current Routes
 
 - `GET /health`: technical health check only.
+- `GET /live`: liveness probe without external dependency.
+- `GET /ready`: readiness probe with PostgreSQL connectivity check.
 - `GET /api/widget/config`
 - `POST /api/widget/conversations`
 - `POST /api/widget/conversations/:conversationId/messages`
@@ -373,6 +375,8 @@ Passwords are hashed with bcrypt. Session tokens are signed in cookies and store
 The startup process calls a PostgreSQL connection check before listening for requests.
 
 If PostgreSQL is unreachable, the backend fails to start instead of running in a degraded unclear state.
+
+The `/ready` endpoint also checks PostgreSQL connectivity for production orchestration and reverse proxy checks.
 
 The backend also initializes the minimal MVP schema and seeds a demo organization/site with:
 

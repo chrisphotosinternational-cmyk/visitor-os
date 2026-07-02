@@ -1,6 +1,6 @@
 {
   "name": "@visitor-os/backend",
-  "version": "0.11.0-rc2",
+  "version": "0.12.0-beta-prep",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.7.0",

@@ -70,6 +70,37 @@ describe('createApp', () => {
     await app.close();
   });
 
+  it('exposes liveness and readiness probes', async () => {
+    let connectionChecks = 0;
+    const database: Database = {
+      async checkConnection() {
+        connectionChecks += 1;
+      },
+      query: mock.fn(async () => ({ rows: [] }) as never),
+      close: mock.fn(async () => undefined)
+    };
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent',
+        DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
+      }),
+      database,
+      logger: createLogger()
+    });
+
+    const live = await app.inject({ method: 'GET', url: '/live' });
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+
+    assert.equal(live.statusCode, 200);
+    assert.equal((live.json() as { status: string }).status, 'alive');
+    assert.equal(ready.statusCode, 200);
+    assert.equal((ready.json() as { status: string; database: string }).database, 'ok');
+    assert.equal(connectionChecks, 1);
+
+    await app.close();
+  });
+
   it('returns validation errors as bad requests', async () => {
     const app = await createApp({
       config: loadConfig({

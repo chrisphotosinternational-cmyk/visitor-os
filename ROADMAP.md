@@ -1,5 +1,16 @@
 # Roadmap
 
+## Current Development - v0.12.0-beta-prep
+
+- Production deployment preparation
+- Docker backend image
+- Docker frontend image
+- Docker Compose stack
+- Production environment template
+- Health, readiness and liveness endpoints
+- Backup and restore scripts
+- Installation, update and troubleshooting documentation
+
 ## Current Development - v0.11.0-rc2
 
 - Document Intelligence

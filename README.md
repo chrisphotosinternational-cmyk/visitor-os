@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Development version: `v0.11.0-rc2`.
+Development version: `v0.12.0-beta-prep`.
 
 The first working MVP is available:
 
@@ -25,6 +25,7 @@ The first working MVP is available:
 - Analytics Engine with KPI dashboard, reporting exports and snapshot foundation.
 - Knowledge Management System with document import, search, versioning and RAG-ready interfaces.
 - Document Intelligence RC2 with real file extraction, configurable chunking and indexing queue.
+- Production deployment preparation with Docker Compose, health checks, backup and restore scripts.
 
 ## Planned Modules
 
@@ -74,7 +75,8 @@ The first working MVP is available:
 11. Analytics
 12. Knowledge Management System
 13. Document Intelligence
-14. Future automations
+14. Production deployment preparation
+15. Future automations
 
 Current architecture:
 
@@ -113,6 +115,14 @@ python3 -m http.server 5173
 ```
 
 Open `http://localhost:5173`.
+
+Production preparation:
+
+```bash
+cp deployment/.env.production.example deployment/.env.production
+scripts/install.sh
+scripts/healthcheck.sh
+```
 
 ## Development Rule
 

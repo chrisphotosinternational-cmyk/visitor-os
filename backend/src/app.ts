@@ -57,6 +57,22 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     environment: dependencies.config.app.environment
   }));
 
+  app.get('/live', () => ({
+    status: 'alive',
+    app: dependencies.config.app.name,
+    environment: dependencies.config.app.environment
+  }));
+
+  app.get('/ready', async () => {
+    await dependencies.database.checkConnection();
+
+    return {
+      status: 'ready',
+      app: dependencies.config.app.name,
+      database: 'ok'
+    };
+  });
+
   const businessConfigEngine =
     dependencies.businessConfigEngine ??
     createBusinessConfigEngine({

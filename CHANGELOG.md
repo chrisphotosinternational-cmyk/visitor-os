@@ -2,6 +2,15 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.12.0-beta-prep - Prompt 19
+
+- Added backend and frontend Dockerfiles.
+- Added Docker Compose production stack and environment template.
+- Added `/live` and `/ready` health endpoints alongside `/health`.
+- Added installation, update, backup, restore and healthcheck scripts.
+- Added production deployment documentation, reverse proxy examples and checklist.
+- Added minimal static admin runtime configuration for production API URL.
+
 ## v0.11.0-rc2 - Document Intelligence
 
 - Added real KMS file import for PDF, DOCX, TXT, Markdown, HTML, CSV and JSON.
