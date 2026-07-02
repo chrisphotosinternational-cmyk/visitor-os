@@ -51,6 +51,26 @@ describe('loadConfig', () => {
     assert.notEqual(config.auth.sessionSecret, 'dev-only-session-secret-change-before-production');
   });
 
+  it('ignores generic host variables in production', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'production',
+      HOST: 'railway-internal-host.example'
+    });
+
+    assert.equal(config.server.host, '0.0.0.0');
+  });
+
+  it('allows explicit app host override', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'production',
+      APP_HOST: '127.0.0.1'
+    });
+
+    assert.equal(config.server.host, '127.0.0.1');
+  });
+
   it('accepts postgres connection strings from managed providers', () => {
     const config = loadConfig({
       DATABASE_URL: 'postgres://visitor_os:visitor_os@localhost:5432/visitor_os'

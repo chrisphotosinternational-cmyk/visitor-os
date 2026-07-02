@@ -97,6 +97,30 @@ function getDatabaseUrlHost(databaseUrl?: string): string | null {
 }
 
 bootstrap().catch((error: unknown) => {
-  logger.error({ error }, 'Backend failed to start');
+  logger.error({ error: serializeStartupError(error) }, 'Backend failed to start');
   process.exitCode = 1;
 });
+
+function serializeStartupError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const details: Record<string, unknown> = {
+      name: error.name,
+      message: error.message
+    };
+    const networkError = error as NodeJS.ErrnoException & {
+      address?: string;
+      port?: number;
+    };
+
+    if (networkError.code) details.code = networkError.code;
+    if (networkError.syscall) details.syscall = networkError.syscall;
+    if (networkError.address) details.address = networkError.address;
+    if (networkError.port) details.port = networkError.port;
+
+    return details;
+  }
+
+  return {
+    value: String(error)
+  };
+}
