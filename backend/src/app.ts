@@ -27,7 +27,7 @@ export type AppDependencies = {
   logger: AppLogger;
   businessConfigEngine?: BusinessConfigEngine;
   readiness?: {
-    database: 'pending' | 'ok' | 'error';
+    database: 'disabled' | 'pending' | 'ok' | 'error';
   };
 };
 

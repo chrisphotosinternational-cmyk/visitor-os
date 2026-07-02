@@ -178,6 +178,7 @@ async function createMemoryDatabase(): Promise<Database> {
   users.set(String(user.id), user);
 
   return {
+    isConfigured: () => true,
     async checkConnection() {},
     async close() {},
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(

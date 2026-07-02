@@ -8,6 +8,7 @@ import type { Database } from '../src/database/client.js';
 describe('createApp', () => {
   it('starts technical health route without business endpoints', async () => {
     const database: Database = {
+      isConfigured: mock.fn(() => true),
       checkConnection: mock.fn(async () => undefined),
       query: mock.fn(async () => ({ rows: [] }) as never),
       close: mock.fn(async () => undefined)
@@ -51,6 +52,7 @@ describe('createApp', () => {
         DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
       }),
       database: {
+        isConfigured: mock.fn(() => true),
         checkConnection: mock.fn(async () => undefined),
         query: mock.fn(async () => ({ rows: [] }) as never),
         close: mock.fn(async () => undefined)
@@ -73,9 +75,10 @@ describe('createApp', () => {
   it('exposes liveness and readiness probes', async () => {
     let connectionChecks = 0;
     const readiness = {
-      database: 'pending' as 'pending' | 'ok' | 'error'
+      database: 'pending' as 'disabled' | 'pending' | 'ok' | 'error'
     };
     const database: Database = {
+      isConfigured: mock.fn(() => true),
       async checkConnection() {
         connectionChecks += 1;
       },
@@ -113,6 +116,7 @@ describe('createApp', () => {
         DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
       }),
       database: {
+        isConfigured: mock.fn(() => true),
         checkConnection: mock.fn(async () => undefined),
         query: mock.fn(async () => ({ rows: [] }) as never),
         close: mock.fn(async () => undefined)
@@ -141,6 +145,7 @@ describe('createApp', () => {
         DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
       }),
       database: {
+        isConfigured: mock.fn(() => true),
         checkConnection: mock.fn(async () => undefined),
         query: mock.fn(async () => ({ rows: [] }) as never),
         close: mock.fn(async () => undefined)

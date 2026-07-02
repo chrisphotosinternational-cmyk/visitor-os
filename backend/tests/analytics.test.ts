@@ -109,6 +109,7 @@ function createAnalyticsDatabase(): Database & {
 
   return {
     calls,
+    isConfigured: () => true,
     async checkConnection() {},
     async close() {},
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(

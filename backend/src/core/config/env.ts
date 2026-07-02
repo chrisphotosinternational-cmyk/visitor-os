@@ -15,9 +15,13 @@ const environmentSchema = z
       .default('info'),
     DATABASE_URL: z
       .string()
-      .url()
+      .trim()
+      .optional()
       .refine(
-        (value) => value.startsWith('postgresql://') || value.startsWith('postgres://'),
+        (value) =>
+          !value ||
+          ((value.startsWith('postgresql://') || value.startsWith('postgres://')) &&
+            z.string().url().safeParse(value).success),
         'must start with postgresql:// or postgres://'
       ),
     DATABASE_SSL: z
@@ -70,7 +74,7 @@ export type AppConfig = {
     level: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
   };
   database: {
-    url: string;
+    url?: string;
     ssl: boolean;
     connectionTimeoutMs: number;
   };
@@ -132,7 +136,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       level: env.LOG_LEVEL
     },
     database: {
-      url: env.DATABASE_URL,
+      ...(env.DATABASE_URL ? { url: env.DATABASE_URL } : {}),
       ssl: env.DATABASE_SSL,
       connectionTimeoutMs: env.DATABASE_CONNECTION_TIMEOUT_MS
     },

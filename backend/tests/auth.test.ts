@@ -192,6 +192,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   await addUser(users, 'user-viewer', ORG_A, 'viewer@example.com', 'Viewer');
 
   return {
+    isConfigured: () => true,
     async checkConnection() {},
     async close() {},
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(

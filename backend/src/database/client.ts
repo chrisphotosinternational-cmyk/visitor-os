@@ -7,6 +7,7 @@ type QueryResultRow = pg.QueryResultRow;
 export type DatabaseConfig = AppConfig['database'];
 
 export type Database = {
+  isConfigured: () => boolean;
   checkConnection: () => Promise<void>;
   query: <T extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -16,6 +17,10 @@ export type Database = {
 };
 
 export function createDatabase(config: DatabaseConfig): Database {
+  if (!config.url) {
+    return createUnavailableDatabase();
+  }
+
   const pool = new Pool({
     connectionString: config.url,
     connectionTimeoutMillis: config.connectionTimeoutMs,
@@ -23,6 +28,10 @@ export function createDatabase(config: DatabaseConfig): Database {
   });
 
   return {
+    isConfigured(): boolean {
+      return true;
+    },
+
     async checkConnection(): Promise<void> {
       const client = await pool.connect();
 
@@ -42,6 +51,26 @@ export function createDatabase(config: DatabaseConfig): Database {
 
     async close(): Promise<void> {
       await pool.end();
+    }
+  };
+}
+
+function createUnavailableDatabase(): Database {
+  return {
+    isConfigured(): boolean {
+      return false;
+    },
+
+    checkConnection(): Promise<void> {
+      return Promise.reject(new Error('DATABASE_URL is not configured'));
+    },
+
+    query<T extends QueryResultRow = QueryResultRow>(): Promise<pg.QueryResult<T>> {
+      return Promise.reject(new Error('DATABASE_URL is not configured'));
+    },
+
+    close(): Promise<void> {
+      return Promise.resolve();
     }
   };
 }

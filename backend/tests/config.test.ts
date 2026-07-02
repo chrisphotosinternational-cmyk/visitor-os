@@ -31,8 +31,13 @@ describe('loadConfig', () => {
     ]);
   });
 
-  it('rejects missing database url', () => {
-    assert.throws(() => loadConfig({}), /DATABASE_URL/);
+  it('allows boot without a database url', () => {
+    const config = loadConfig({
+      NODE_ENV: 'production'
+    });
+
+    assert.equal(config.database.url, undefined);
+    assert.equal(config.app.environment, 'production');
   });
 
   it('allows production boot without optional deployment variables', () => {

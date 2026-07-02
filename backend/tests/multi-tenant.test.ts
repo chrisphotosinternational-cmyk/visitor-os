@@ -79,6 +79,7 @@ function createTenantMemoryDatabase(): Database {
   const sites = new Map<string, Record<string, unknown>>();
 
   return {
+    isConfigured: () => true,
     async checkConnection() {},
     async close() {},
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(

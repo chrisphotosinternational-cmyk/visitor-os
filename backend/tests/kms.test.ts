@@ -261,6 +261,7 @@ function createKnowledgeDatabase(): Database {
   let searchCount = 0;
 
   return {
+    isConfigured: () => true,
     async checkConnection() {},
     async close() {},
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(
