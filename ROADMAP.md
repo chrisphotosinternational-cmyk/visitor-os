@@ -10,6 +10,7 @@
 - Health, readiness and liveness endpoints
 - Backup and restore scripts
 - Installation, update and troubleshooting documentation
+- Render/Railway-first deployment guidance with managed PostgreSQL
 
 ## Current Development - v0.11.0-rc2
 

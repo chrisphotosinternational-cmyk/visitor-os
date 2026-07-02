@@ -10,6 +10,7 @@ All notable changes to VISITOR-OS will be documented here.
 - Added installation, update, backup, restore and healthcheck scripts.
 - Added production deployment documentation, reverse proxy examples and checklist.
 - Added minimal static admin runtime configuration for production API URL.
+- Corrected production target toward external SaaS platforms with managed PostgreSQL, not OVH Web mutualise.
 
 ## v0.11.0-rc2 - Document Intelligence
 

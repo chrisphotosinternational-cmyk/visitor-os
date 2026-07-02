@@ -1,50 +1,57 @@
 # Backup
 
-Les sauvegardes doivent couvrir :
+La strategie de sauvegarde beta doit etre adaptee a un deploiement cloud managé.
 
-- PostgreSQL ;
-- configurations ;
-- documents KMS stockes en base ;
-- logs utiles ;
-- fichier d'environnement redige sans secrets.
+## Elements A Sauvegarder
 
-## Commande
+- PostgreSQL managé ;
+- configurations JSON ;
+- documents KMS extraits ;
+- chunks et versions KMS ;
+- variables d'environnement ;
+- logs importants.
+
+## PostgreSQL Managé
+
+Activer les backups de la plateforme :
+
+- Render PostgreSQL backups ;
+- Railway backups selon plan ;
+- DigitalOcean managed database backups ;
+- solution externe `pg_dump` si necessaire.
+
+## KMS
+
+En beta, le KMS stocke le contenu exploitable dans PostgreSQL.
+
+Donc la sauvegarde PostgreSQL couvre :
+
+- documents ;
+- texte extrait ;
+- versions ;
+- chunks ;
+- evenements de recherche.
+
+Les fichiers originaux ne doivent pas dependre d'un disque local ephemeral.
+
+## Export Manuel
+
+Si la plateforme permet un acces base :
 
 ```bash
-scripts/backup.sh
+pg_dump "$DATABASE_URL" --format=custom > visitor_os.dump
 ```
-
-Le script cree un dossier :
-
-```text
-backups/YYYYMMDD-HHMMSS/
-```
-
-Contenu :
-
-- `postgres.dump`
-- `configs.tar.gz`
-- `docker.log`
-- `env.production.redacted`
 
 ## Frequence Recommandee
 
-Beta Internal :
+Beta interne :
 
-- une sauvegarde quotidienne ;
-- une sauvegarde avant chaque mise a jour ;
-- une restauration testee au moins une fois avant production publique.
+- backup automatique quotidien ;
+- export manuel avant mise a jour importante ;
+- test restauration avant ouverture publique.
 
 ## Retention Simple
 
-Conserver :
-
-- 7 sauvegardes quotidiennes ;
-- 4 sauvegardes hebdomadaires ;
-- 3 sauvegardes mensuelles.
-
-## Verification
-
-Une sauvegarde non restauree n'est pas encore une vraie sauvegarde.
-
-Tester `scripts/restore.sh` sur une machine non critique.
+- 7 jours quotidiens ;
+- 4 semaines hebdomadaires ;
+- 3 mois mensuels.

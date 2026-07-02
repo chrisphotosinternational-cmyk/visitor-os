@@ -1,44 +1,45 @@
 # Update
 
-Les mises a jour doivent rester previsibles.
+Les mises a jour beta doivent passer par Git et la plateforme cloud choisie.
 
-## Commande
+## Render
 
-```bash
-scripts/update.sh
-```
+Le push Git declenche le redeploiement si auto-deploy est actif.
 
-Le script :
+Verifier apres deploy :
 
-1. recupere le dernier code si Git est disponible ;
-2. reconstruit les images ;
-3. relance les services ;
-4. lance le healthcheck.
+- logs build ;
+- logs runtime ;
+- `/ready` ;
+- connexion admin ;
+- widget demo.
 
-## Avant Mise A Jour
+## Railway
 
-Toujours lancer :
-
-```bash
-scripts/backup.sh
-```
-
-## Apres Mise A Jour
+Railway redeploie depuis Git selon configuration.
 
 Verifier :
 
-- `/health` ;
-- `/live` ;
-- `/ready` ;
-- connexion admin ;
-- liste conversations ;
-- import KMS simple ;
-- logs backend.
+- variables d'environnement ;
+- service backend ;
+- PostgreSQL ;
+- logs deploy.
 
-## Rollback Simple
+## Avant Mise A Jour
 
-1. revenir au commit precedent ;
-2. reconstruire ;
-3. restaurer la sauvegarde si la base a change ;
-4. relancer `scripts/healthcheck.sh`.
+Toujours :
+
+- verifier le changelog ;
+- sauvegarder PostgreSQL ;
+- noter le commit courant ;
+- tester localement si possible.
+
+## Rollback
+
+Rollback simple :
+
+1. revenir au commit precedent sur la plateforme ;
+2. redeployer ;
+3. restaurer PostgreSQL uniquement si le schema ou les donnees ont ete modifies ;
+4. verifier `/ready`.
 

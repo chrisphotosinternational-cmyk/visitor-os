@@ -1,39 +1,42 @@
 # Restore
 
-La restauration permet de recuperer PostgreSQL et la configuration.
+La restauration depend de la plateforme cloud choisie.
 
-## Commande
+## Principe
+
+Restaurer d'abord PostgreSQL.
+
+Puis verifier :
+
+- backend ;
+- admin ;
+- KMS ;
+- widget ;
+- auth admin.
+
+## Restauration PostgreSQL
+
+Avec un dump :
 
 ```bash
-scripts/restore.sh backups/YYYYMMDD-HHMMSS
+pg_restore --clean --if-exists --dbname "$DATABASE_URL" visitor_os.dump
 ```
+
+Ne pas lancer cette commande sur une production active sans sauvegarde recente.
 
 ## Procedure Recommandee
 
-1. prevenir les utilisateurs ;
-2. arreter le backend si necessaire ;
-3. sauvegarder l'etat actuel ;
-4. restaurer depuis le dossier choisi ;
-5. relancer les services ;
-6. verifier `/ready` ;
-7. verifier l'admin ;
-8. verifier une conversation et un document KMS.
+1. creer une base temporaire ;
+2. restaurer le dump ;
+3. connecter un backend de test ;
+4. verifier `/ready` ;
+5. verifier les documents KMS ;
+6. verifier les conversations ;
+7. basculer seulement apres validation.
 
-## Risques
+## Plateformes
 
-La restauration remplace le contenu de la base cible.
+Render, Railway et DigitalOcean proposent des mecanismes differents.
 
-Ne jamais tester une restauration directement sur la production sans validation prealable.
-
-## Apres Restauration
-
-```bash
-scripts/healthcheck.sh
-```
-
-Puis consulter :
-
-```bash
-docker compose -f deployment/docker-compose.yml logs --tail=100 backend
-```
+Toujours documenter la procedure exacte choisie dans le runbook du client.
 

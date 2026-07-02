@@ -2,7 +2,7 @@
 
 VISITOR-OS is a modular SaaS platform designed to become a lightweight operating system for customer relationships: visitor assistance, lead capture, qualification, CRM, analytics, notifications, exports, and future AI-powered modules.
 
-The first integration target is Moto CMS 4. Moto CMS remains a showcase website only. VISITOR-OS is embedded through an external JavaScript widget, while all intelligence, data, administration, and automation run on an external Node.js-compatible hosting platform.
+The first integration target is Moto CMS 4. Moto CMS remains a showcase website only. VISITOR-OS is embedded through an external JavaScript widget, while all intelligence, data, administration, and automation run on an external Node.js-compatible SaaS platform such as Render, Railway, Fly.io, or DigitalOcean App Platform.
 
 ## Current Status
 
@@ -25,7 +25,8 @@ The first working MVP is available:
 - Analytics Engine with KPI dashboard, reporting exports and snapshot foundation.
 - Knowledge Management System with document import, search, versioning and RAG-ready interfaces.
 - Document Intelligence RC2 with real file extraction, configurable chunking and indexing queue.
-- Production deployment preparation with Docker Compose, health checks, backup and restore scripts.
+- Production deployment preparation with external SaaS guidance, health checks and backup/restore runbooks.
+- External SaaS deployment guidance for Render/Railway with managed PostgreSQL.
 
 ## Planned Modules
 
@@ -116,13 +117,14 @@ python3 -m http.server 5173
 
 Open `http://localhost:5173`.
 
-Production preparation:
+External SaaS production preparation:
 
 ```bash
-cp deployment/.env.production.example deployment/.env.production
-scripts/install.sh
-scripts/healthcheck.sh
+open deployment/RENDER.md
+open deployment/RAILWAY.md
 ```
+
+Docker Compose files are kept for local validation/reference, not for OVH Web mutualise.
 
 ## Development Rule
 

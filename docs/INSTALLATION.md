@@ -1,76 +1,82 @@
-# Installation Production
+# Installation Beta Externe
 
-Ce guide prepare une premiere installation interne de VISITOR-OS.
+Ce guide prepare une premiere installation externe de VISITOR-OS.
 
-## Prerequis
+## Principe
 
-- Docker ;
-- Docker Compose v2 ;
-- Git ;
-- curl ;
-- acces SSH au serveur ;
-- domaine ou sous-domaine configure ;
-- ports HTTP/HTTPS ouverts au niveau pare-feu.
+Ne pas installer le backend sur OVH Web mutualise.
 
-## Installation Rapide
+Installer VISITOR-OS sur :
 
-Depuis le serveur :
+- Render ;
+- Railway ;
+- Fly.io ;
+- DigitalOcean App Platform.
 
-```bash
-git clone https://github.com/chrisphotosinternational-cmyk/visitor-os.git
-cd visitor-os
-cp deployment/.env.production.example deployment/.env.production
-```
+Moto CMS 4 reste le site vitrine.
 
-Modifier ensuite `deployment/.env.production`.
+## Installation Recommandee Sur Render
 
-Variables minimales :
+1. Creer une base PostgreSQL managée.
+2. Creer un Web Service backend.
+3. Creer un Static Site admin.
+4. Configurer les variables d'environnement.
+5. Configurer `ALLOWED_ORIGINS`.
+6. Configurer le domaine public.
+7. Tester `/ready`.
+8. Ajouter le script widget dans Moto CMS.
 
-- `POSTGRES_PASSWORD`
+## Variables Minimales
+
+- `NODE_ENV=production`
+- `DATABASE_URL`
+- `ALLOWED_ORIGINS`
 - `ADMIN_SESSION_SECRET`
 - `FIRST_ADMIN_EMAIL`
 - `FIRST_ADMIN_PASSWORD`
-- `ALLOWED_ORIGINS`
 - `NOTIFICATION_FROM_EMAIL`
+- `BUSINESS_CONFIG_DIR=../configs`
 
-Puis lancer :
+Variables optionnelles :
 
-```bash
-scripts/install.sh
+- `OPENAI_API_KEY`
+- `RESEND_API_KEY`
+
+## Moto CMS
+
+Moto CMS integre uniquement :
+
+```html
+<script src="https://widget.example.com/visitor-os-widget.js"></script>
 ```
+
+Le backend, l'admin et la base ne sont pas installes sur Moto CMS.
 
 ## Verification
 
-```bash
-scripts/healthcheck.sh
-```
-
-Endpoints attendus :
+Tester :
 
 - `/health`
 - `/live`
 - `/ready`
+- connexion admin ;
+- creation conversation demo ;
+- lecture admin ;
+- import KMS simple.
 
 ## Temps Moyen D'installation
 
-Estimation pour une machine deja equipee de Docker :
+Avec un compte Render ou Railway pret :
 
 ```text
-15 a 30 minutes
+30 a 60 minutes
 ```
 
-La premiere execution peut prendre plus longtemps a cause du build Docker.
+La majorite du temps concerne :
 
-## Premiere Connexion Admin
-
-Le premier administrateur est cree au demarrage si :
-
-- `FIRST_ADMIN_EMAIL` est defini ;
-- `FIRST_ADMIN_PASSWORD` est defini.
-
-Changer le mot de passe temporaire apres la premiere connexion.
-
-## Important
-
-Ne jamais commiter `deployment/.env.production`.
+- variables d'environnement ;
+- domaine ;
+- CORS ;
+- premiere connexion admin ;
+- verification du widget Moto CMS.
 

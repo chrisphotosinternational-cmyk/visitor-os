@@ -1,78 +1,74 @@
 # Troubleshooting
 
-## Le Backend Ne Demarre Pas
+## Erreur Importante
+
+Ne pas chercher a installer le backend sur OVH Web mutualise.
+
+Si le backend ne demarre pas, verifier la plateforme externe choisie.
+
+## Backend Indisponible
 
 Verifier :
 
-```bash
-docker compose -f deployment/docker-compose.yml logs backend
-```
-
-Causes frequentes :
-
-- `DATABASE_URL` invalide ;
-- `ADMIN_SESSION_SECRET` trop court ;
-- `ALLOWED_ORIGINS` absent en production ;
-- PostgreSQL non pret ;
-- port deja utilise.
+- logs du service Render/Railway/Fly/DigitalOcean ;
+- `DATABASE_URL` ;
+- `ADMIN_SESSION_SECRET` ;
+- `ALLOWED_ORIGINS` ;
+- build command ;
+- start command ;
+- healthcheck `/ready`.
 
 ## `/ready` Echoue
 
-`/ready` teste PostgreSQL.
+`/ready` verifie PostgreSQL.
 
-Verifier :
+Causes probables :
 
-```bash
-docker compose -f deployment/docker-compose.yml ps
-docker compose -f deployment/docker-compose.yml logs postgres
-```
-
-## L'Admin Ne Communique Pas Avec L'API
-
-Verifier :
-
-- `VISITOR_OS_API_URL` ;
-- reverse proxy `/api/` ;
-- `ALLOWED_ORIGINS` ;
-- cookies admin ;
-- HTTPS.
-
-## Connexion Admin Impossible
-
-Verifier :
-
-- `FIRST_ADMIN_EMAIL` ;
-- `FIRST_ADMIN_PASSWORD` ;
-- logs backend ;
-- presence de l'utilisateur en base ;
-- cookies bloques par navigateur.
+- base managée non accessible ;
+- `DATABASE_URL` invalide ;
+- SSL requis par la plateforme ;
+- limite de connexions ;
+- migration/schema non initialise.
 
 ## Erreurs CORS
 
-En production, `ALLOWED_ORIGINS` doit contenir les domaines exacts.
+Verifier `ALLOWED_ORIGINS`.
 
-Exemple :
+Inclure exactement :
 
-```text
-https://chambres-dhotes-albi.com,https://admin.chambres-dhotes-albi.com
-```
+- domaine admin ;
+- domaine widget si different ;
+- domaine Moto CMS si le widget appelle l'API depuis ce domaine.
 
-## Sauvegarde Echoue
+## Moto CMS Ne Charge Pas Le Widget
 
 Verifier :
 
-- service `postgres` actif ;
-- permissions du dossier `backups` ;
-- espace disque disponible ;
-- variables `POSTGRES_USER` et `POSTGRES_DB`.
+- URL du script ;
+- HTTPS ;
+- CSP eventuelle ;
+- console navigateur ;
+- disponibilite du fichier widget ;
+- domaine API autorise.
 
-## Import KMS Echoue
+## Admin Ne Se Connecte Pas
+
+Verifier :
+
+- cookies ;
+- HTTPS ;
+- sameSite ;
+- `FIRST_ADMIN_EMAIL` ;
+- `FIRST_ADMIN_PASSWORD` ;
+- logs backend.
+
+## KMS Import Echoue
 
 Verifier :
 
 - taille du fichier ;
-- format supporte ;
-- fichier PDF non scanne ;
+- format ;
 - logs backend ;
-- espace base PostgreSQL.
+- espace PostgreSQL ;
+- PDF scanne non supporte sans OCR.
 

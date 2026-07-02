@@ -1,40 +1,59 @@
-# Production Deployment
+# External SaaS Deployment
 
-This folder contains the first production-oriented deployment kit for VISITOR-OS Beta Internal.
+VISITOR-OS Beta Internal doit etre deploye sur une plateforme externe compatible Node.js.
 
-## Files
+L'hebergement Web OVH mutualise/performance ne doit pas heberger le backend VISITOR-OS.
 
-- `Dockerfile.backend`: backend Node.js image.
-- `Dockerfile.frontend`: static admin image.
-- `docker-compose.yml`: local/production base stack.
-- `docker-compose.production.yml`: production overrides.
-- `.env.production.example`: production environment template.
-- `nginx.example.conf`: reverse proxy example.
-- `Caddyfile.example`: simpler HTTPS reverse proxy example.
-- `CHECKLIST.md`: pre-production checklist.
+## Cible Officielle
 
-## Quick Start
+Priorite :
 
-```bash
-cp deployment/.env.production.example deployment/.env.production
-scripts/install.sh
+1. Render ;
+2. Railway ;
+3. Fly.io ;
+4. DigitalOcean App Platform.
+
+## Role De Moto CMS 4
+
+Moto CMS 4 reste uniquement le site vitrine.
+
+Il integre VISITOR-OS avec un script externe :
+
+```html
+<script src="https://widget.visitor-os.example/visitor-os-widget.js"></script>
 ```
 
-Then check:
+Moto CMS ne lance aucun processus Node.js, ne gere pas PostgreSQL et ne stocke pas les donnees applicatives.
 
-```bash
-scripts/healthcheck.sh
-```
+## Fichiers De Ce Dossier
 
-## Recommended First Target
+- `RENDER.md` : deploiement recommande pour la premiere beta.
+- `RAILWAY.md` : alternative rapide pour MVP/beta.
+- `FLY.md` : option plus technique.
+- `DIGITALOCEAN_APP_PLATFORM.md` : option managée classique.
+- `.env.production.example` : variables production.
+- `Dockerfile.backend` : utile si la plateforme choisie utilise Docker.
+- `Dockerfile.frontend` : admin statique conteneurisable.
+- `docker-compose.yml` : validation locale uniquement.
+- `docker-compose.production.yml` : reference technique, pas cible OVH Web.
+- `CHECKLIST.md` : checklist avant mise en production.
 
-For `chambres-dhotes-albi.com`, keep the first installation simple:
+## Decision V1
 
-```text
-Caddy or Nginx
--> frontend container
--> backend container
--> PostgreSQL container
-```
+Pour une premiere installation reelle, recommander Render sauf contrainte contraire.
 
-Do not add extra services before the first real validation.
+Raison :
+
+- Web Service Node.js simple ;
+- PostgreSQL managé ;
+- variables d'environnement faciles ;
+- healthchecks ;
+- logs accessibles ;
+- pas d'administration serveur.
+
+## Ce Qui N'est Pas Recommande
+
+- OVH Web mutualise pour le backend ;
+- serveur FTP/PHP pour VISITOR-OS ;
+- PostgreSQL local sur un hebergement non administre ;
+- Docker Compose sur un serveur que tu ne possedes pas.

@@ -1,61 +1,107 @@
 # Deployment
 
-VISITOR-OS Beta Internal peut etre deploye avec Docker Compose.
+VISITOR-OS Beta Internal doit etre deploye sur une plateforme externe compatible SaaS.
+
+## Correction D'hebergement
+
+L'hebergement Web OVH actuel est mutualise/performance.
+
+Il est adapte a :
+
+- Moto CMS ;
+- PHP ;
+- MySQL ;
+- fichiers statiques simples ;
+- site vitrine.
+
+Il n'est pas adapte a :
+
+- backend Node.js persistant ;
+- PostgreSQL applicatif ;
+- workers ;
+- processus long-running ;
+- orchestration Docker.
+
+## Cible Recommandee
+
+Priorite :
+
+1. Render ;
+2. Railway ;
+3. Fly.io ;
+4. DigitalOcean App Platform.
 
 ## Architecture Cible
 
 ```text
-Internet
--> HTTPS reverse proxy
--> frontend admin statique
--> backend Fastify
--> PostgreSQL
+Moto CMS 4
+-> script widget externe
+-> API VISITOR-OS sur plateforme SaaS
+-> PostgreSQL managé
+-> admin statique
 ```
 
-## Services Compose
+## Render
 
-- `postgres` : base PostgreSQL ;
-- `backend` : API Node.js/Fastify ;
-- `frontend` : admin statique servi par Nginx.
+Recommande pour la premiere installation.
 
-## Fichiers
+Voir :
 
-- `deployment/Dockerfile.backend`
-- `deployment/Dockerfile.frontend`
-- `deployment/docker-compose.yml`
-- `deployment/docker-compose.production.yml`
-- `deployment/.env.production.example`
-- `deployment/nginx.example.conf`
-- `deployment/Caddyfile.example`
-
-## Lancement
-
-```bash
-scripts/install.sh
+```text
+deployment/RENDER.md
 ```
 
-## Reverse Proxy
+## Railway
 
-Deux exemples sont fournis :
+Alternative rapide et tres simple pour beta.
 
-- Nginx : `deployment/nginx.example.conf`
-- Caddy : `deployment/Caddyfile.example`
+Voir :
 
-Caddy est plus simple pour HTTPS automatique.
+```text
+deployment/RAILWAY.md
+```
 
-Nginx est plus classique si le serveur possede deja une configuration existante.
+## Fly.io
 
-## HTTPS
+Option plus technique.
 
-Le backend ne gere pas directement HTTPS.
+Voir :
 
-HTTPS doit etre termine par :
+```text
+deployment/FLY.md
+```
 
-- Caddy ;
-- Nginx + Let's Encrypt ;
-- reverse proxy managé.
+## DigitalOcean App Platform
 
-## Health Checks
+Option managée classique.
+
+Voir :
+
+```text
+deployment/DIGITALOCEAN_APP_PLATFORM.md
+```
+
+## PostgreSQL
+
+Utiliser PostgreSQL managé fourni par la plateforme ou un fournisseur cloud compatible.
+
+Ne pas utiliser une base locale sur OVH Web.
+
+## Stockage KMS
+
+En beta :
+
+- contenu extrait et chunks dans PostgreSQL ;
+- pas de stockage disque local ;
+- stockage objet futur si conservation des fichiers originaux necessaire.
+
+Voir :
+
+```text
+deployment/KMS_STORAGE.md
+```
+
+## Healthchecks
 
 - `/health` : application accessible ;
 - `/live` : processus vivant ;
@@ -63,23 +109,26 @@ HTTPS doit etre termine par :
 
 ## Monitoring Minimal
 
-Sur une premiere installation, surveiller :
+Sur la plateforme choisie, surveiller :
 
-- CPU ;
-- RAM ;
-- espace disque ;
-- statut Docker ;
-- taille base PostgreSQL ;
+- statut du service backend ;
+- latence `/ready` ;
+- CPU/RAM ;
+- connexions PostgreSQL ;
+- taille base ;
 - erreurs backend ;
 - echecs IA ;
 - echecs notifications ;
-- logs reverse proxy.
+- logs deploy ;
+- couts.
 
-Commandes utiles :
+## Docker Compose
 
-```bash
-docker compose -f deployment/docker-compose.yml ps
-docker compose -f deployment/docker-compose.yml logs -f backend
-docker stats
-```
+Les fichiers Docker Compose du depot servent uniquement a :
+
+- validation locale ;
+- environnement de test ;
+- reference technique.
+
+Ils ne sont pas la recommandation pour l'hebergement Web OVH.
 
