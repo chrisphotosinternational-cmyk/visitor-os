@@ -2,13 +2,30 @@ import type { KnowledgeChunk } from './knowledge-types.js';
 
 export type EmbeddingVector = number[];
 
+export type EmbeddingInput = {
+  organizationId: string;
+  siteId?: string;
+  documentId: string;
+  chunkId: string;
+  text: string;
+  language?: string;
+  metadata: Record<string, string | number | boolean>;
+};
+
 export interface EmbeddingProvider {
-  embed(text: string): Promise<EmbeddingVector>;
+  embed(input: EmbeddingInput): Promise<EmbeddingVector>;
+  embedBatch?(input: EmbeddingInput[]): Promise<EmbeddingVector[]>;
 }
 
 export interface VectorProvider {
-  upsert(chunks: KnowledgeChunk[], vectors: EmbeddingVector[]): Promise<void>;
-  search(vector: EmbeddingVector, limit: number): Promise<KnowledgeChunk[]>;
+  upsert(input: Array<{ chunk: KnowledgeChunk; vector: EmbeddingVector }>): Promise<void>;
+  deleteByDocument(documentId: string, organizationId: string): Promise<void>;
+  search(input: {
+    organizationId: string;
+    siteId?: string;
+    vector: EmbeddingVector;
+    limit: number;
+  }): Promise<KnowledgeChunk[]>;
 }
 
 export interface Retriever {
@@ -21,5 +38,9 @@ export interface Retriever {
 }
 
 export interface ContextBuilder {
-  buildContext(chunks: KnowledgeChunk[]): string;
+  buildContext(input: {
+    question: string;
+    chunks: KnowledgeChunk[];
+    maxCharacters: number;
+  }): string;
 }

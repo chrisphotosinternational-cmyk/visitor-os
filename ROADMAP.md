@@ -1,5 +1,15 @@
 # Roadmap
 
+## Current Development - v0.11.0-rc2
+
+- Document Intelligence
+- Real file import for PDF, DOCX, TXT, Markdown, HTML, CSV and JSON
+- Text extraction and metadata preservation
+- Configurable chunking
+- Simple indexing queue
+- Text/category/tag/language search
+- RAG architecture preparation without embeddings
+
 ## Current Development - v0.10.0-rc1
 
 - Knowledge Management System

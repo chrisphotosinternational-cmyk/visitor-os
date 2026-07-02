@@ -20,6 +20,7 @@ This package now contains the first minimal vertical slice:
 - central Notification Engine with internal, email and webhook providers.
 - Analytics Engine with KPI dashboard, exports and snapshot foundation.
 - Knowledge Management System with document import, search, versioning and RAG-ready interfaces.
+- Document Intelligence RC2 with real file extraction, configurable chunking and indexing queue.
 
 It still contains no payments, bookings or business-specific hardcoded logic.
 
@@ -144,7 +145,7 @@ The test suite verifies:
 - CRM scoring, tag detection and export formatting.
 - Notification Engine templates, mock email, webhook abstraction and retry behavior.
 - Analytics calculations, period filters, exports and snapshots.
-- KMS validation, indexing, search, versioning and Decision Engine priority.
+- KMS validation, file extraction, indexing, search, versioning and Decision Engine priority.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -223,6 +224,7 @@ tests/
 - `POST /api/admin/analytics/snapshots`
 - `GET /api/admin/knowledge`
 - `POST /api/admin/knowledge/import`
+- `POST /api/admin/knowledge/import-file`
 - `GET /api/admin/knowledge/search`
 - `GET /api/admin/knowledge/:documentId/versions`
 - `PATCH /api/admin/knowledge/:documentId/archive`
@@ -251,9 +253,10 @@ Decision priority:
 
 1. human escalation for sensitive requests;
 2. FAQ local match;
-3. knowledge base match;
-4. AI provider abstraction with provider factory and fallback;
-5. fallback.
+3. document Knowledge Search;
+4. knowledge base match;
+5. AI provider abstraction with provider factory and fallback;
+6. fallback.
 
 The admin conversation detail shows the response source, confidence, escalation flag and processing time for assistant messages.
 
@@ -270,6 +273,24 @@ Supported architecture:
 - `ProviderFactory`: selects the configured provider and falls back to mock when a provider is unavailable.
 
 AI events are persisted with provider, model, latency, input tokens, output tokens and estimated cost.
+
+## Knowledge Management System
+
+RC2 adds Document Intelligence while keeping the KMS self-contained.
+
+Supported file imports:
+
+- PDF
+- DOCX
+- TXT
+- Markdown
+- HTML
+- CSV
+- JSON
+
+The importer extracts text, preserves basic metadata, versions repeated file imports, chunks content with configurable limits and stores searchable tokens in PostgreSQL. The indexing queue is synchronous in RC2, but isolated behind a service so it can move to an async worker later.
+
+No embeddings, vector database or RAG generation is active in RC2.
 
 ## Notification Engine
 

@@ -34,6 +34,7 @@ import { analyticsPeriodPresets } from '../analytics/analytics-types.js';
 import { resolveAnalyticsPeriod } from '../analytics/analytics-period.js';
 import type { KnowledgeRepository } from '../kms/knowledge-repository.js';
 import { KnowledgeImporter } from '../kms/knowledge-importer.js';
+import { KnowledgeIndexingQueue } from '../kms/indexing-queue.js';
 import { RepositoryKnowledgeSearch } from '../kms/knowledge-search.js';
 import { KnowledgeStatisticsService } from '../kms/knowledge-statistics.js';
 import { knowledgeDocumentTypes, knowledgeStatuses } from '../kms/knowledge-types.js';
@@ -143,6 +144,28 @@ const knowledgeImportBodySchema = z.object({
   source: z.string().default('manual')
 });
 
+const knowledgeFileImportBodySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  siteId: z.string().uuid().optional(),
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  category: z.string().min(1).default('general'),
+  type: z.enum(knowledgeDocumentTypes).optional(),
+  language: z.string().min(2).default('fr'),
+  fileName: z.string().min(1).max(240),
+  mimeType: z.string().max(180).optional(),
+  dataBase64: z.string().min(1),
+  tags: z.array(z.string()).default([]),
+  author: z.string().optional(),
+  chunking: z
+    .object({
+      maxCharacters: z.number().int().min(200).max(6000).optional(),
+      overlapCharacters: z.number().int().min(0).max(2000).optional(),
+      splitByParagraph: z.boolean().optional()
+    })
+    .optional()
+});
+
 const knowledgeQuerySchema = z.object({
   organizationId: z.string().uuid().optional(),
   siteId: z.string().uuid().optional(),
@@ -170,6 +193,7 @@ export function registerAdminRoutes(
   const analytics = new AnalyticsRepository(database);
   const knowledge = knowledgeRepository;
   const knowledgeImporter = knowledge ? new KnowledgeImporter(knowledge) : null;
+  const knowledgeQueue = knowledgeImporter ? new KnowledgeIndexingQueue(knowledgeImporter) : null;
   const knowledgeSearch = knowledge ? new RepositoryKnowledgeSearch(knowledge) : null;
   const knowledgeStatistics = knowledge ? new KnowledgeStatisticsService(knowledge) : null;
   const authContexts = new WeakMap<object, AuthContext>();
@@ -481,6 +505,7 @@ export function registerAdminRoutes(
       }),
       types: knowledgeDocumentTypes,
       statuses: knowledgeStatuses,
+      indexingJobs: knowledgeQueue?.list(organizationId, query.siteId) ?? [],
       statistics: await knowledgeStatistics?.get(organizationId, query.siteId)
     };
   });
@@ -516,6 +541,45 @@ export function registerAdminRoutes(
     };
   });
 
+  app.post('/api/admin/knowledge/import-file', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = knowledgeFileImportBodySchema.parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+
+    if (!knowledgeQueue) {
+      throw new AppError('Knowledge importer is not available', {
+        statusCode: 503,
+        code: 'KNOWLEDGE_UNAVAILABLE'
+      });
+    }
+
+    const data = Buffer.from(body.dataBase64, 'base64');
+    if (data.byteLength === 0) {
+      throw new AppError('Uploaded knowledge file is empty', {
+        statusCode: 400,
+        code: 'KNOWLEDGE_FILE_EMPTY'
+      });
+    }
+
+    return knowledgeQueue.enqueueFileImport({
+      organizationId,
+      ...(body.siteId ? { siteId: body.siteId } : {}),
+      ...(body.title ? { title: body.title } : {}),
+      ...(body.description ? { description: body.description } : {}),
+      category: body.category,
+      ...(body.type ? { type: body.type } : {}),
+      language: body.language,
+      fileName: body.fileName,
+      ...(body.mimeType ? { mimeType: body.mimeType } : {}),
+      data,
+      tags: body.tags,
+      ...(body.author ? { author: body.author } : {}),
+      ...(body.chunking ? { chunking: body.chunking } : {})
+    });
+  });
+
   app.get('/api/admin/knowledge/search', async (request) => {
     const context = getAuthContext(authContexts, request);
     auth.requirePermission(context, 'settings:access');
@@ -524,6 +588,8 @@ export function registerAdminRoutes(
         organizationId: z.string().uuid().optional(),
         siteId: z.string().uuid().optional(),
         q: z.string().min(1),
+        category: z.string().optional(),
+        tags: z.string().optional(),
         language: z.string().min(2).optional()
       })
       .parse(request.query);
@@ -536,6 +602,15 @@ export function registerAdminRoutes(
           organizationId,
           ...(query.siteId ? { siteId: query.siteId } : {}),
           query: query.q,
+          ...(query.category ? { category: query.category } : {}),
+          ...(query.tags
+            ? {
+                tags: query.tags
+                  .split(',')
+                  .map((tag) => tag.trim())
+                  .filter(Boolean)
+              }
+            : {}),
           ...(query.language ? { language: query.language } : {}),
           limit: 10
         })) ?? []

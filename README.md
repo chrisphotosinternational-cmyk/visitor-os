@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Development version: `v0.10.0-rc1`.
+Development version: `v0.11.0-rc2`.
 
 The first working MVP is available:
 
@@ -24,6 +24,7 @@ The first working MVP is available:
 - Notification Engine with internal alerts, email mock/Resend provider, webhooks and history.
 - Analytics Engine with KPI dashboard, reporting exports and snapshot foundation.
 - Knowledge Management System with document import, search, versioning and RAG-ready interfaces.
+- Document Intelligence RC2 with real file extraction, configurable chunking and indexing queue.
 
 ## Planned Modules
 
@@ -72,7 +73,8 @@ The first working MVP is available:
 10. Notifications
 11. Analytics
 12. Knowledge Management System
-13. Future automations
+13. Document Intelligence
+14. Future automations
 
 Current architecture:
 

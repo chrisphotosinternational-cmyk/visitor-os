@@ -60,6 +60,18 @@ export type KnowledgeChunk = {
   metadata: Record<string, string | number | boolean>;
 };
 
+export type KnowledgeChunkingConfig = {
+  maxCharacters: number;
+  overlapCharacters: number;
+  splitByParagraph: boolean;
+};
+
+export type KnowledgeChunkingInput = {
+  maxCharacters?: number | undefined;
+  overlapCharacters?: number | undefined;
+  splitByParagraph?: boolean | undefined;
+};
+
 export type KnowledgeSearchResult = {
   documentId: string;
   title: string;
@@ -85,10 +97,68 @@ export type KnowledgeImportInput = {
   source?: string;
 };
 
+export type KnowledgeFileImportInput = {
+  organizationId: string;
+  siteId?: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  type?: KnowledgeDocumentType;
+  language?: string;
+  fileName: string;
+  mimeType?: string;
+  data: Buffer;
+  tags?: string[];
+  author?: string;
+  chunking?: KnowledgeChunkingInput;
+};
+
+export type KnowledgeExtractionMetadata = {
+  fileName: string;
+  mimeType?: string;
+  detectedType: KnowledgeDocumentType;
+  title?: string;
+  author?: string;
+  pageCount?: number;
+  rowCount?: number;
+  sizeBytes: number;
+};
+
+export type KnowledgeExtractionResult = {
+  text: string;
+  metadata: KnowledgeExtractionMetadata;
+  warnings: string[];
+};
+
+export type KnowledgeImportReport = {
+  document: KnowledgeDocument;
+  extraction: KnowledgeExtractionMetadata;
+  chunks: number;
+  warnings: string[];
+  durationMs: number;
+};
+
+export type KnowledgeIndexingJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+export type KnowledgeIndexingJob = {
+  id: string;
+  status: KnowledgeIndexingJobStatus;
+  documentId?: string;
+  fileName: string;
+  organizationId: string;
+  siteId?: string;
+  error?: string;
+  startedAt?: Date;
+  completedAt?: Date;
+  createdAt: Date;
+};
+
 export type KnowledgeSearchInput = {
   organizationId: string;
   siteId?: string;
   query: string;
+  category?: string;
+  tags?: string[];
   language?: string;
   limit?: number;
 };

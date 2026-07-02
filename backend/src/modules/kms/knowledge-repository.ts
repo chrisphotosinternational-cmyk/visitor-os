@@ -24,7 +24,12 @@ export class KnowledgeRepository {
 
   async upsertDocument(input: KnowledgeImportInput): Promise<KnowledgeDocument> {
     const hash = hashContent(input.content);
-    const existing = await this.findByHash(input.organizationId, input.siteId, hash);
+    const existing = await this.findExistingDocument(
+      input.organizationId,
+      input.siteId,
+      hash,
+      input.source
+    );
     const version = existing ? existing.version + 1 : 1;
     const documentId = existing?.id ?? randomUUID();
     const result = await this.database.query<KnowledgeDocument>(
@@ -248,6 +253,8 @@ export class KnowledgeRepository {
         and ($2::uuid is null or d.site_id = $2 or d.site_id is null)
         and d.status = 'active'
         and ($5::text is null or d.language = $5)
+        and ($7::text is null or d.category = $7)
+        and ($8::text[] is null or d.tags && $8::text[])
         and (
           c.tokens && $3::text[]
           or d.title ilike '%' || $4 || '%'
@@ -262,7 +269,9 @@ export class KnowledgeRepository {
         tokens,
         input.query,
         input.language ?? null,
-        input.limit ?? 5
+        input.limit ?? 5,
+        input.category ?? null,
+        input.tags && input.tags.length > 0 ? input.tags : null
       ]
     );
 
@@ -389,10 +398,11 @@ export class KnowledgeRepository {
     );
   }
 
-  private async findByHash(
+  private async findExistingDocument(
     organizationId: string,
     siteId: string | undefined,
-    hash: string
+    hash: string,
+    source?: string
   ): Promise<KnowledgeDocument | null> {
     const result = await this.database.query<KnowledgeDocument>(
       `
@@ -400,11 +410,15 @@ export class KnowledgeRepository {
       from knowledge_documents
       where organization_id = $1
         and ($2::uuid is null or site_id = $2)
-        and hash = $3
+        and (
+          hash = $3
+          or ($4::text like 'file:%' and source = $4)
+        )
         and status <> 'deleted'
+      order by updated_at desc
       limit 1
       `,
-      [organizationId, siteId ?? null, hash]
+      [organizationId, siteId ?? null, hash, source ?? null]
     );
 
     return result.rows[0] ?? null;

@@ -9,6 +9,18 @@ function apiFetch(url, options = {}) {
   });
 }
 
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result ?? '');
+      resolve(value.includes(',') ? value.split(',').pop() : value);
+    };
+    reader.onerror = () => reject(new Error('Lecture fichier impossible.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 createApp({
   data() {
     return {
@@ -97,6 +109,7 @@ createApp({
       knowledgeDocuments: [],
       knowledgeTypes: [],
       knowledgeStatuses: [],
+      knowledgeIndexingJobs: [],
       knowledgeStatistics: null,
       knowledgeResults: [],
       knowledgeFilters: {
@@ -113,6 +126,17 @@ createApp({
         tags: '',
         content: ''
       },
+      knowledgeFileImportForm: {
+        title: '',
+        category: 'general',
+        type: '',
+        language: 'fr',
+        tags: '',
+        file: null,
+        maxCharacters: 1200,
+        overlapCharacters: 120
+      },
+      knowledgeLastImportReport: null,
       knowledgeSearchQuery: '',
       organizationForm: {
         id: '',
@@ -549,6 +573,7 @@ createApp({
       this.knowledgeDocuments = data.documents;
       this.knowledgeTypes = data.types;
       this.knowledgeStatuses = data.statuses;
+      this.knowledgeIndexingJobs = data.indexingJobs ?? [];
       this.knowledgeStatistics = data.statistics;
     },
 
@@ -573,6 +598,55 @@ createApp({
         this.knowledgeImportForm.title = '';
         this.knowledgeImportForm.tags = '';
         this.knowledgeImportForm.content = '';
+        await this.loadKnowledge();
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
+      }
+    },
+
+    handleKnowledgeFile(event) {
+      const file = event.target.files?.[0] ?? null;
+      this.knowledgeFileImportForm.file = file;
+      if (file && !this.knowledgeFileImportForm.title) {
+        this.knowledgeFileImportForm.title = file.name.replace(/\.[^.]+$/, '');
+      }
+    },
+
+    async importKnowledgeFile() {
+      this.error = '';
+
+      try {
+        const file = this.knowledgeFileImportForm.file;
+        if (!file) throw new Error('Choisis un fichier a importer.');
+        const dataBase64 = await readFileAsBase64(file);
+        const response = await apiFetch(`${API_BASE_URL}/api/admin/knowledge/import-file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: this.knowledgeFileImportForm.title || undefined,
+            category: this.knowledgeFileImportForm.category,
+            type: this.knowledgeFileImportForm.type || undefined,
+            language: this.knowledgeFileImportForm.language,
+            fileName: file.name,
+            mimeType: file.type || undefined,
+            dataBase64,
+            siteId: this.knowledgeFilters.siteId || undefined,
+            tags: this.knowledgeFileImportForm.tags
+              .split(',')
+              .map((tag) => tag.trim())
+              .filter(Boolean),
+            chunking: {
+              maxCharacters: Number(this.knowledgeFileImportForm.maxCharacters) || 1200,
+              overlapCharacters: Number(this.knowledgeFileImportForm.overlapCharacters) || 120,
+              splitByParagraph: true
+            }
+          })
+        });
+        if (!response.ok) throw new Error('Import fichier impossible.');
+        this.knowledgeLastImportReport = await response.json();
+        this.knowledgeFileImportForm.title = '';
+        this.knowledgeFileImportForm.tags = '';
+        this.knowledgeFileImportForm.file = null;
         await this.loadKnowledge();
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
@@ -1174,6 +1248,7 @@ createApp({
 
           <div class="knowledge-grid">
             <form class="knowledge-form" @submit.prevent="importKnowledge">
+              <h3>Texte manuel</h3>
               <input v-model="knowledgeImportForm.title" placeholder="Titre document" required />
               <input v-model="knowledgeImportForm.category" placeholder="Categorie" required />
               <select v-model="knowledgeImportForm.type">
@@ -1183,6 +1258,28 @@ createApp({
               <input v-model="knowledgeImportForm.tags" placeholder="Tags separes par virgules" />
               <textarea v-model="knowledgeImportForm.content" placeholder="Contenu extrait du document" required></textarea>
               <button type="submit">Indexer</button>
+            </form>
+
+            <form class="knowledge-form" @submit.prevent="importKnowledgeFile">
+              <h3>Fichier</h3>
+              <input v-model="knowledgeFileImportForm.title" placeholder="Titre document" />
+              <input v-model="knowledgeFileImportForm.category" placeholder="Categorie" required />
+              <select v-model="knowledgeFileImportForm.type">
+                <option value="">Detection automatique</option>
+                <option v-for="type in knowledgeTypes" :key="type" :value="type">{{ type }}</option>
+              </select>
+              <input v-model="knowledgeFileImportForm.language" placeholder="Langue" />
+              <input v-model="knowledgeFileImportForm.tags" placeholder="Tags separes par virgules" />
+              <input type="file" accept=".pdf,.docx,.txt,.md,.markdown,.html,.htm,.csv,.json" @change="handleKnowledgeFile" />
+              <div class="crm-filters">
+                <input v-model.number="knowledgeFileImportForm.maxCharacters" type="number" min="200" max="6000" />
+                <input v-model.number="knowledgeFileImportForm.overlapCharacters" type="number" min="0" max="2000" />
+              </div>
+              <button type="submit">Importer fichier</button>
+              <p v-if="knowledgeLastImportReport" class="muted">
+                {{ knowledgeLastImportReport.report.chunks }} chunks ·
+                {{ knowledgeLastImportReport.report.durationMs }} ms
+              </p>
             </form>
 
             <div>
@@ -1209,6 +1306,12 @@ createApp({
                 <span>{{ knowledgeStatistics.documents }} documents</span>
                 <span>{{ knowledgeStatistics.searches }} recherches</span>
                 <span>{{ knowledgeStatistics.neverUsedDocuments }} jamais utilises</span>
+              </div>
+
+              <div v-if="knowledgeIndexingJobs.length" class="knowledge-stats">
+                <span v-for="job in knowledgeIndexingJobs" :key="job.id">
+                  {{ job.fileName }} · {{ job.status }}
+                </span>
               </div>
 
               <div v-for="result in knowledgeResults" :key="result.documentId" class="knowledge-result">

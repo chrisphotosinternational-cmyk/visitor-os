@@ -2,6 +2,17 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.11.0-rc2 - Document Intelligence
+
+- Added real KMS file import for PDF, DOCX, TXT, Markdown, HTML, CSV and JSON.
+- Added document extraction metadata, warnings and import reports.
+- Added configurable chunking with maximum size and overlap.
+- Added simple synchronous indexing queue abstraction for future async workers.
+- Enhanced knowledge search filters for category, tags and language.
+- Prepared RAG interfaces for batch embeddings, vector deletion and context building.
+- Added admin file import controls in the existing Knowledge panel.
+- Added RC2 documentation for importers, chunking, indexing, search and RAG architecture.
+
 ## v0.10.0-rc1 - Prompt 18
 
 - Added Knowledge Management System with documents, versions, chunks, search events and statistics.
