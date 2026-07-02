@@ -9,14 +9,14 @@ import { seedFirstAdmin } from './modules/auth/bootstrap.js';
 const logger = createLogger();
 
 type ReadinessState = {
-  database: 'disabled' | 'configured' | 'connected' | 'error';
+  database: 'disabled' | 'pending' | 'ok' | 'error';
 };
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig(process.env);
   const database = createDatabase(config.database);
   const readiness: ReadinessState = {
-    database: database.isConfigured() ? 'configured' : 'disabled'
+    database: database.isConfigured() ? 'pending' : 'disabled'
   };
   const app = await createApp({ config, database, logger, readiness });
 
@@ -40,8 +40,6 @@ async function bootstrap(): Promise<void> {
     'Backend listening'
   );
 
-  logDatabaseRuntimeConfiguration(config, database);
-
   if (!database.isConfigured()) {
     logger.warn('DATABASE_URL is not configured; database-backed routes are unavailable');
     return;
@@ -62,65 +60,11 @@ async function initializeRuntime(
   await initializeSchema(database);
   await seedFoundationData(database);
   await seedFirstAdmin(database, config);
-  readiness.database = 'connected';
+  readiness.database = 'ok';
   logger.info('Backend initialization completed');
 }
 
-function logDatabaseRuntimeConfiguration(
-  config: ReturnType<typeof loadConfig>,
-  database: ReturnType<typeof createDatabase>
-): void {
-  try {
-    logger.info(
-      {
-        DATABASE_URL_PRESENT: Boolean(config.database.url),
-        DATABASE_URL_HOST: getDatabaseUrlHost(config.database.url),
-        DATABASE_ENABLED: database.isConfigured()
-      },
-      'Database runtime configuration'
-    );
-  } catch (error) {
-    logger.warn({ error }, 'Database runtime configuration log failed');
-  }
-}
-
-function getDatabaseUrlHost(databaseUrl?: string): string | null {
-  if (!databaseUrl) {
-    return null;
-  }
-
-  try {
-    return new URL(databaseUrl).hostname;
-  } catch {
-    return 'invalid-url';
-  }
-}
-
 bootstrap().catch((error: unknown) => {
-  logger.error({ error: serializeStartupError(error) }, 'Backend failed to start');
+  logger.error({ error }, 'Backend failed to start');
   process.exitCode = 1;
 });
-
-function serializeStartupError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    const details: Record<string, unknown> = {
-      name: error.name,
-      message: error.message
-    };
-    const networkError = error as NodeJS.ErrnoException & {
-      address?: string;
-      port?: number;
-    };
-
-    if (networkError.code) details.code = networkError.code;
-    if (networkError.syscall) details.syscall = networkError.syscall;
-    if (networkError.address) details.address = networkError.address;
-    if (networkError.port) details.port = networkError.port;
-
-    return details;
-  }
-
-  return {
-    value: String(error)
-  };
-}

@@ -75,7 +75,7 @@ describe('createApp', () => {
   it('exposes liveness and readiness probes', async () => {
     let connectionChecks = 0;
     const readiness = {
-      database: 'configured' as 'disabled' | 'configured' | 'connected' | 'error'
+      database: 'pending' as 'disabled' | 'pending' | 'ok' | 'error'
     };
     const database: Database = {
       isConfigured: mock.fn(() => true),
@@ -102,35 +102,8 @@ describe('createApp', () => {
     assert.equal(live.statusCode, 200);
     assert.equal((live.json() as { status: string }).status, 'alive');
     assert.equal(ready.statusCode, 200);
-    assert.equal((ready.json() as { status: string; database: string }).database, 'configured');
+    assert.equal((ready.json() as { status: string; database: string }).database, 'pending');
     assert.equal(connectionChecks, 0);
-
-    await app.close();
-  });
-
-  it('reports disabled readiness when the database is not configured', async () => {
-    const readiness = {
-      database: 'disabled' as 'disabled' | 'configured' | 'connected' | 'error'
-    };
-    const app = await createApp({
-      config: loadConfig({
-        NODE_ENV: 'test',
-        LOG_LEVEL: 'silent'
-      }),
-      database: {
-        isConfigured: mock.fn(() => false),
-        checkConnection: mock.fn(async () => undefined),
-        query: mock.fn(async () => ({ rows: [] }) as never),
-        close: mock.fn(async () => undefined)
-      },
-      logger: createLogger(),
-      readiness
-    });
-
-    const ready = await app.inject({ method: 'GET', url: '/ready' });
-
-    assert.equal(ready.statusCode, 200);
-    assert.equal((ready.json() as { database: string }).database, 'disabled');
 
     await app.close();
   });

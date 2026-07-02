@@ -8,8 +8,7 @@ const environmentSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     APP_NAME: z.string().min(1).default('VISITOR-OS'),
-    APP_HOST: z.string().min(1).optional(),
-    HOST: z.string().min(1).optional(),
+    HOST: z.string().min(1).default('0.0.0.0'),
     PORT: z.coerce.number().int().positive().max(65535).default(3000),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
@@ -129,7 +128,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       environment: env.NODE_ENV
     },
     server: {
-      host: resolveServerHost(env.NODE_ENV, env.APP_HOST, env.HOST),
+      host: env.HOST,
       port: env.PORT,
       shutdownTimeoutMs: env.SHUTDOWN_TIMEOUT_MS
     },
@@ -191,16 +190,4 @@ function resolveSessionSecret(environment: string, secret: string): string {
   }
 
   return secret;
-}
-
-function resolveServerHost(environment: string, appHost?: string, host?: string): string {
-  if (appHost) {
-    return appHost;
-  }
-
-  if (environment === 'production') {
-    return '0.0.0.0';
-  }
-
-  return host ?? '0.0.0.0';
 }

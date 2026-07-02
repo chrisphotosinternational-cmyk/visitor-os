@@ -27,7 +27,7 @@ export type AppDependencies = {
   logger: AppLogger;
   businessConfigEngine?: BusinessConfigEngine;
   readiness?: {
-    database: 'disabled' | 'configured' | 'connected' | 'error';
+    database: 'disabled' | 'pending' | 'ok' | 'error';
   };
 };
 
@@ -70,7 +70,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     return {
       status: 'ready',
       app: dependencies.config.app.name,
-      database: dependencies.readiness?.database ?? 'connected'
+      database: dependencies.readiness?.database ?? 'ok'
     };
   });
 
