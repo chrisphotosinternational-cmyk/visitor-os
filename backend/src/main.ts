@@ -20,15 +20,6 @@ async function bootstrap(): Promise<void> {
   };
   const app = await createApp({ config, database, logger, readiness });
 
-  logger.info(
-    {
-      DATABASE_URL_PRESENT: Boolean(config.database.url),
-      DATABASE_URL_HOST: getDatabaseUrlHost(config.database.url),
-      DATABASE_ENABLED: database.isConfigured()
-    },
-    'Database runtime configuration'
-  );
-
   registerShutdownHooks({
     app,
     database,
@@ -48,6 +39,8 @@ async function bootstrap(): Promise<void> {
     },
     'Backend listening'
   );
+
+  logDatabaseRuntimeConfiguration(config, database);
 
   if (!database.isConfigured()) {
     logger.warn('DATABASE_URL is not configured; database-backed routes are unavailable');
@@ -71,6 +64,24 @@ async function initializeRuntime(
   await seedFirstAdmin(database, config);
   readiness.database = 'connected';
   logger.info('Backend initialization completed');
+}
+
+function logDatabaseRuntimeConfiguration(
+  config: ReturnType<typeof loadConfig>,
+  database: ReturnType<typeof createDatabase>
+): void {
+  try {
+    logger.info(
+      {
+        DATABASE_URL_PRESENT: Boolean(config.database.url),
+        DATABASE_URL_HOST: getDatabaseUrlHost(config.database.url),
+        DATABASE_ENABLED: database.isConfigured()
+      },
+      'Database runtime configuration'
+    );
+  } catch (error) {
+    logger.warn({ error }, 'Database runtime configuration log failed');
+  }
 }
 
 function getDatabaseUrlHost(databaseUrl?: string): string | null {
