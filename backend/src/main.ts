@@ -9,16 +9,25 @@ import { seedFirstAdmin } from './modules/auth/bootstrap.js';
 const logger = createLogger();
 
 type ReadinessState = {
-  database: 'disabled' | 'pending' | 'ok' | 'error';
+  database: 'disabled' | 'configured' | 'connected' | 'error';
 };
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig(process.env);
   const database = createDatabase(config.database);
   const readiness: ReadinessState = {
-    database: database.isConfigured() ? 'pending' : 'disabled'
+    database: database.isConfigured() ? 'configured' : 'disabled'
   };
   const app = await createApp({ config, database, logger, readiness });
+
+  logger.info(
+    {
+      DATABASE_URL_PRESENT: Boolean(config.database.url),
+      DATABASE_URL_HOST: getDatabaseUrlHost(config.database.url),
+      DATABASE_ENABLED: database.isConfigured()
+    },
+    'Database runtime configuration'
+  );
 
   registerShutdownHooks({
     app,
@@ -60,8 +69,20 @@ async function initializeRuntime(
   await initializeSchema(database);
   await seedFoundationData(database);
   await seedFirstAdmin(database, config);
-  readiness.database = 'ok';
+  readiness.database = 'connected';
   logger.info('Backend initialization completed');
+}
+
+function getDatabaseUrlHost(databaseUrl?: string): string | null {
+  if (!databaseUrl) {
+    return null;
+  }
+
+  try {
+    return new URL(databaseUrl).hostname;
+  } catch {
+    return 'invalid-url';
+  }
 }
 
 bootstrap().catch((error: unknown) => {
