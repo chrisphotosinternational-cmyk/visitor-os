@@ -72,6 +72,9 @@ describe('createApp', () => {
 
   it('exposes liveness and readiness probes', async () => {
     let connectionChecks = 0;
+    const readiness = {
+      database: 'pending' as 'pending' | 'ok' | 'error'
+    };
     const database: Database = {
       async checkConnection() {
         connectionChecks += 1;
@@ -86,7 +89,8 @@ describe('createApp', () => {
         DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
       }),
       database,
-      logger: createLogger()
+      logger: createLogger(),
+      readiness
     });
 
     const live = await app.inject({ method: 'GET', url: '/live' });
@@ -95,8 +99,8 @@ describe('createApp', () => {
     assert.equal(live.statusCode, 200);
     assert.equal((live.json() as { status: string }).status, 'alive');
     assert.equal(ready.statusCode, 200);
-    assert.equal((ready.json() as { status: string; database: string }).database, 'ok');
-    assert.equal(connectionChecks, 1);
+    assert.equal((ready.json() as { status: string; database: string }).database, 'pending');
+    assert.equal(connectionChecks, 0);
 
     await app.close();
   });

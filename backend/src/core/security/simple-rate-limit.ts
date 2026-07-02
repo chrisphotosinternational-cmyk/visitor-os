@@ -15,7 +15,12 @@ export function registerSimpleRateLimit(app: FastifyInstance, options: RateLimit
   const buckets = new Map<string, Bucket>();
 
   app.addHook('onRequest', (request, _reply, done) => {
-    if (request.method === 'OPTIONS' || request.url === '/health') {
+    if (
+      request.method === 'OPTIONS' ||
+      request.url === '/health' ||
+      request.url === '/live' ||
+      request.url === '/ready'
+    ) {
       done();
       return;
     }

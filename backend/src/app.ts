@@ -26,6 +26,9 @@ export type AppDependencies = {
   database: Database;
   logger: AppLogger;
   businessConfigEngine?: BusinessConfigEngine;
+  readiness?: {
+    database: 'pending' | 'ok' | 'error';
+  };
 };
 
 export async function createApp(dependencies: AppDependencies): Promise<FastifyInstance> {
@@ -63,13 +66,11 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     environment: dependencies.config.app.environment
   }));
 
-  app.get('/ready', async () => {
-    await dependencies.database.checkConnection();
-
+  app.get('/ready', () => {
     return {
       status: 'ready',
       app: dependencies.config.app.name,
-      database: 'ok'
+      database: dependencies.readiness?.database ?? 'ok'
     };
   });
 
