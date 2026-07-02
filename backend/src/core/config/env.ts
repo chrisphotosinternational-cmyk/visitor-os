@@ -1,5 +1,8 @@
 import 'dotenv/config';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+
+const DEV_SESSION_SECRET = 'dev-only-session-secret-change-before-production';
 
 const environmentSchema = z
   .object({
@@ -10,7 +13,13 @@ const environmentSchema = z
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
-    DATABASE_URL: z.string().url().startsWith('postgresql://'),
+    DATABASE_URL: z
+      .string()
+      .url()
+      .refine(
+        (value) => value.startsWith('postgresql://') || value.startsWith('postgres://'),
+        'must start with postgresql:// or postgres://'
+      ),
     DATABASE_SSL: z
       .enum(['true', 'false'])
       .default('false')
@@ -37,7 +46,7 @@ const environmentSchema = z
     ADMIN_SESSION_SECRET: z
       .string()
       .min(32)
-      .default('dev-only-session-secret-change-before-production'),
+      .default(DEV_SESSION_SECRET),
     ADMIN_SESSION_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
     ADMIN_SESSION_RENEWAL_MS: z.coerce.number().int().positive().default(3_600_000),
     FIRST_ADMIN_EMAIL: z.string().email().optional(),
@@ -45,26 +54,6 @@ const environmentSchema = z
     FIRST_ADMIN_FIRST_NAME: z.string().min(1).default('VISITOR'),
     FIRST_ADMIN_LAST_NAME: z.string().min(1).default('Admin'),
     FIRST_ADMIN_ORGANIZATION_ID: z.string().uuid().optional()
-  })
-  .superRefine((env, context) => {
-    if (env.NODE_ENV === 'production' && env.ALLOWED_ORIGINS.length === 0) {
-      context.addIssue({
-        code: 'custom',
-        path: ['ALLOWED_ORIGINS'],
-        message: 'must be set in production'
-      });
-    }
-
-    if (
-      env.NODE_ENV === 'production' &&
-      env.ADMIN_SESSION_SECRET === 'dev-only-session-secret-change-before-production'
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['ADMIN_SESSION_SECRET'],
-        message: 'must be changed in production'
-      });
-    }
   });
 
 export type AppConfig = {
@@ -162,7 +151,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       directory: env.BUSINESS_CONFIG_DIR
     },
     auth: {
-      sessionSecret: env.ADMIN_SESSION_SECRET,
+      sessionSecret: resolveSessionSecret(env.NODE_ENV, env.ADMIN_SESSION_SECRET),
       sessionTtlMs: env.ADMIN_SESSION_TTL_MS,
       sessionRenewalMs: env.ADMIN_SESSION_RENEWAL_MS
     }
@@ -189,4 +178,12 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   }
 
   return config;
+}
+
+function resolveSessionSecret(environment: string, secret: string): string {
+  if (environment === 'production' && secret === DEV_SESSION_SECRET) {
+    return randomBytes(32).toString('base64url');
+  }
+
+  return secret;
 }

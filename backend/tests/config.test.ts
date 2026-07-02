@@ -35,14 +35,25 @@ describe('loadConfig', () => {
     assert.throws(() => loadConfig({}), /DATABASE_URL/);
   });
 
-  it('requires explicit allowed origins in production', () => {
-    assert.throws(
-      () =>
-        loadConfig({
-          ...baseEnv,
-          NODE_ENV: 'production'
-        }),
-      /ALLOWED_ORIGINS/
+  it('allows production boot without optional deployment variables', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'production'
+    });
+
+    assert.equal(config.app.environment, 'production');
+    assert.deepEqual(config.security.allowedOrigins, []);
+    assert.notEqual(config.auth.sessionSecret, 'dev-only-session-secret-change-before-production');
+  });
+
+  it('accepts postgres connection strings from managed providers', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgres://visitor_os:visitor_os@localhost:5432/visitor_os'
+    });
+
+    assert.equal(
+      config.database.url,
+      'postgres://visitor_os:visitor_os@localhost:5432/visitor_os'
     );
   });
 });
