@@ -504,9 +504,84 @@ select {
   overflow-wrap: anywhere;
 }
 
+.analytics-panel,
 .ai-panel,
 .notifications-panel {
   margin-top: 24px;
+}
+
+.analytics-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  padding: 18px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 0 18px 18px;
+}
+
+.analytics-grid h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.analytics-grid table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analytics-grid th,
+.analytics-grid td {
+  border-bottom: 1px solid #eef0f3;
+  padding: 8px 6px;
+  text-align: left;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 92px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.bar-row div {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef0f3;
+}
+
+.bar-row i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #1f6f5b;
+}
+
+.analytics-alerts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.analytics-alerts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #eef0f3;
+  padding-bottom: 8px;
+}
+
+.analytics-alerts dt,
+.analytics-alerts dd {
+  margin: 0;
 }
 
 .ai-grid,
@@ -650,6 +725,8 @@ select {
   .app-shell,
   .layout,
   .metrics,
+  .analytics-kpis,
+  .analytics-grid,
   .tenant-layout {
     grid-template-columns: 1fr;
   }

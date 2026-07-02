@@ -18,6 +18,7 @@ This package now contains the first minimal vertical slice:
 - AI Provider Engine with mock/OpenAI abstraction and fallback.
 - advanced CRM with scoring, tags, notes, follow-ups and exports.
 - central Notification Engine with internal, email and webhook providers.
+- Analytics Engine with KPI dashboard, exports and snapshot foundation.
 
 It still contains no payments, bookings or business-specific hardcoded logic.
 
@@ -141,6 +142,7 @@ The test suite verifies:
 - AI provider abstraction, mock fallback, OpenAI adapter and cost estimation.
 - CRM scoring, tag detection and export formatting.
 - Notification Engine templates, mock email, webhook abstraction and retry behavior.
+- Analytics calculations, period filters, exports and snapshots.
 
 An optional PostgreSQL integration test runs when `TEST_DATABASE_URL` is provided:
 
@@ -214,6 +216,9 @@ tests/
 - `GET /api/admin/notifications/settings`
 - `PUT /api/admin/notifications/settings`
 - `POST /api/admin/notifications/test`
+- `GET /api/admin/analytics`
+- `GET /api/admin/analytics/export`
+- `POST /api/admin/analytics/snapshots`
 
 The widget/admin routes are intentionally minimal and exist only to validate the product flow.
 

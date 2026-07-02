@@ -87,6 +87,13 @@ createApp({
       },
       notificationAdminEmailsText: '',
       notificationTestResult: null,
+      analytics: null,
+      analyticsFilters: {
+        preset: '7d',
+        siteId: '',
+        from: '',
+        to: ''
+      },
       organizationForm: {
         id: '',
         name: '',
@@ -187,6 +194,7 @@ createApp({
           this.loadAiConfig(),
           this.loadNotifications(),
           this.loadNotificationSettings(),
+          this.loadAnalytics(),
           this.loadOrganizations(),
           this.loadSites()
         ]);
@@ -471,6 +479,40 @@ createApp({
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Erreur inconnue.';
       }
+    },
+
+    async loadAnalytics() {
+      if (!this.can('conversations:read')) return;
+
+      const params = new URLSearchParams();
+      params.set('preset', this.analyticsFilters.preset);
+      if (this.analyticsFilters.siteId) params.set('siteId', this.analyticsFilters.siteId);
+      if (this.analyticsFilters.preset === 'custom') {
+        if (this.analyticsFilters.from) {
+          params.set('from', new Date(this.analyticsFilters.from).toISOString());
+        }
+        if (this.analyticsFilters.to) {
+          params.set('to', new Date(this.analyticsFilters.to).toISOString());
+        }
+      }
+      const response = await apiFetch(`${API_BASE_URL}/api/admin/analytics?${params.toString()}`);
+      if (!response.ok) throw new Error('Impossible de charger les analytics.');
+      const data = await response.json();
+      this.analytics = data.analytics;
+    },
+
+    exportAnalytics(format = 'csv') {
+      const params = new URLSearchParams({ preset: this.analyticsFilters.preset, format });
+      if (this.analyticsFilters.siteId) params.set('siteId', this.analyticsFilters.siteId);
+      if (this.analyticsFilters.preset === 'custom') {
+        if (this.analyticsFilters.from) {
+          params.set('from', new Date(this.analyticsFilters.from).toISOString());
+        }
+        if (this.analyticsFilters.to) {
+          params.set('to', new Date(this.analyticsFilters.to).toISOString());
+        }
+      }
+      window.location.href = `${API_BASE_URL}/api/admin/analytics/export?${params.toString()}`;
     },
 
     async loadOrganizations() {
@@ -827,6 +869,12 @@ createApp({
       );
     },
 
+    barWidth(value, rows) {
+      const max = Math.max(1, ...rows.map((row) => Number(row.count)));
+
+      return `${Math.max(4, Math.round((Number(value) / max) * 100))}%`;
+    },
+
     can(permission) {
       return this.permissions.includes(permission);
     }
@@ -891,6 +939,132 @@ createApp({
             <span>Prospects</span>
             <strong>{{ prospects.length }}</strong>
           </article>
+        </section>
+
+        <section v-if="analytics" class="panel analytics-panel">
+          <div class="panel-header config-header">
+            <div>
+              <h2>Analytics</h2>
+              <p class="muted">Vue claire des conversations, prospects, IA et notifications.</p>
+            </div>
+            <div class="config-actions">
+              <select v-model="analyticsFilters.preset" @change="loadAnalytics">
+                <option value="today">Aujourd'hui</option>
+                <option value="7d">7 jours</option>
+                <option value="30d">30 jours</option>
+                <option value="custom">Personnalise</option>
+              </select>
+              <select v-model="analyticsFilters.siteId" @change="loadAnalytics">
+                <option value="">Tous sites</option>
+                <option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option>
+              </select>
+              <input v-if="analyticsFilters.preset === 'custom'" v-model="analyticsFilters.from" type="datetime-local" />
+              <input v-if="analyticsFilters.preset === 'custom'" v-model="analyticsFilters.to" type="datetime-local" />
+              <button type="button" @click="loadAnalytics">Actualiser</button>
+              <button v-if="can('data:export')" type="button" @click="exportAnalytics('csv')">CSV</button>
+              <button v-if="can('data:export')" type="button" @click="exportAnalytics('xlsx')">XLSX</button>
+            </div>
+          </div>
+
+          <div class="analytics-kpis">
+            <article class="metric">
+              <span>Prospects crees</span>
+              <strong>{{ analytics.kpis.prospects }}</strong>
+            </article>
+            <article class="metric">
+              <span>Conversion</span>
+              <strong>{{ analytics.kpis.visitorToProspectRate }} %</strong>
+            </article>
+            <article class="metric">
+              <span>Score moyen</span>
+              <strong>{{ analytics.kpis.averageScore }}</strong>
+            </article>
+            <article class="metric">
+              <span>Prospects chauds</span>
+              <strong>{{ analytics.kpis.hotProspects }}</strong>
+            </article>
+            <article class="metric">
+              <span>Fallback</span>
+              <strong>{{ analytics.kpis.fallbackRate }} %</strong>
+            </article>
+            <article class="metric">
+              <span>Cout IA</span>
+              <strong>{{ analytics.kpis.aiEstimatedCost }}</strong>
+            </article>
+          </div>
+
+          <div class="analytics-grid">
+            <section>
+              <h3>Conversations par jour</h3>
+              <div v-for="point in analytics.conversationsByDay" :key="point.date" class="bar-row">
+                <span>{{ point.date }}</span>
+                <div><i :style="{ width: barWidth(point.count, analytics.conversationsByDay) }"></i></div>
+                <strong>{{ point.count }}</strong>
+              </div>
+            </section>
+
+            <section>
+              <h3>Prospects par jour</h3>
+              <div v-for="point in analytics.prospectsByDay" :key="point.date" class="bar-row">
+                <span>{{ point.date }}</span>
+                <div><i :style="{ width: barWidth(point.count, analytics.prospectsByDay) }"></i></div>
+                <strong>{{ point.count }}</strong>
+              </div>
+            </section>
+
+            <section>
+              <h3>Performance par site</h3>
+              <table>
+                <thead>
+                  <tr><th>Site</th><th>Conv.</th><th>Prospects</th><th>Conv.</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="site in analytics.sitePerformance" :key="site.siteId">
+                    <td>{{ site.siteName }}</td>
+                    <td>{{ site.conversations }}</td>
+                    <td>{{ site.prospects }}</td>
+                    <td>{{ site.conversionRate }} %</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section>
+              <h3>Tags frequents</h3>
+              <table>
+                <tbody>
+                  <tr v-for="tag in analytics.topTags" :key="tag.slug">
+                    <td>{{ tag.label }}</td>
+                    <td>{{ tag.count }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section>
+              <h3>Sources de reponse</h3>
+              <table>
+                <tbody>
+                  <tr v-for="source in analytics.responseSources" :key="source.source">
+                    <td>{{ sourceLabel(source.source) }}</td>
+                    <td>{{ source.count }}</td>
+                    <td>{{ source.rate }} %</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section>
+              <h3>Alertes</h3>
+              <dl class="analytics-alerts">
+                <div><dt>Relances du jour</dt><dd>{{ analytics.kpis.followUpsToday }}</dd></div>
+                <div><dt>Relances en retard</dt><dd>{{ analytics.kpis.followUpsOverdue }}</dd></div>
+                <div><dt>Notifications envoyees</dt><dd>{{ analytics.kpis.notificationsSent }}</dd></div>
+                <div><dt>Erreurs importantes</dt><dd>{{ analytics.kpis.importantErrors }}</dd></div>
+                <div><dt>Escalade humaine</dt><dd>{{ analytics.kpis.humanEscalationRate }} %</dd></div>
+              </dl>
+            </section>
+          </div>
         </section>
 
         <section class="tenant-layout">

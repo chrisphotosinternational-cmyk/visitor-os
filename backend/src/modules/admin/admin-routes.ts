@@ -29,6 +29,9 @@ import { permissionsForRole } from '../auth/rbac.js';
 import type { NotificationEngine } from '../notifications/notification-engine.js';
 import type { NotificationRepository } from '../notifications/notification-repository.js';
 import { notificationStatuses, notificationTypes } from '../notifications/notification-types.js';
+import { AnalyticsRepository } from '../analytics/analytics-repository.js';
+import { analyticsPeriodPresets } from '../analytics/analytics-types.js';
+import { resolveAnalyticsPeriod } from '../analytics/analytics-period.js';
 
 const organizationInputSchema = z.object({
   name: z.string().min(1),
@@ -105,6 +108,22 @@ const notificationSettingsSchema = z.object({
   timeoutMs: z.number().int().positive().max(30_000).default(5000)
 });
 
+const analyticsQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  siteId: z.string().uuid().optional(),
+  preset: z.enum(analyticsPeriodPresets).default('7d'),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional()
+});
+
+const analyticsExportQuerySchema = analyticsQuerySchema.extend({
+  format: z.enum(['csv', 'xlsx']).default('csv')
+});
+
+const analyticsSnapshotSchema = analyticsQuerySchema.extend({
+  periodType: z.enum(['daily', 'weekly', 'monthly']).default('daily')
+});
+
 export function registerAdminRoutes(
   app: FastifyInstance,
   database: Database,
@@ -120,6 +139,7 @@ export function registerAdminRoutes(
   const conversations = new ConversationRepository(database);
   const organizations = new OrganizationRepository(database);
   const sites = new SiteRepository(database);
+  const analytics = new AnalyticsRepository(database);
   const authContexts = new WeakMap<object, AuthContext>();
 
   app.post('/api/admin/auth/login', async (request, reply) => {
@@ -325,6 +345,83 @@ export function registerAdminRoutes(
         organizationId,
         variables: { organization: organizationId }
       })
+    };
+  });
+
+  app.get('/api/admin/analytics', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'conversations:read');
+    const query = analyticsQuerySchema.parse(request.query);
+    const organizationId = auth.requireOrganizationAccess(context, query.organizationId);
+
+    return {
+      analytics: await analytics.getDashboard(
+        resolveAnalyticsPeriod({
+          preset: query.preset,
+          ...(query.from ? { from: query.from } : {}),
+          ...(query.to ? { to: query.to } : {}),
+          ...(organizationId ? { organizationId } : {}),
+          ...(query.siteId ? { siteId: query.siteId } : {})
+        })
+      )
+    };
+  });
+
+  app.get('/api/admin/analytics/export', async (request, reply) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'data:export');
+    const query = analyticsExportQuerySchema.parse(request.query);
+    const organizationId = auth.requireOrganizationAccess(context, query.organizationId);
+    const rows = await analytics.exportRows(
+      resolveAnalyticsPeriod({
+        preset: query.preset,
+        ...(query.from ? { from: query.from } : {}),
+        ...(query.to ? { to: query.to } : {}),
+        ...(organizationId ? { organizationId } : {}),
+        ...(query.siteId ? { siteId: query.siteId } : {})
+      })
+    );
+
+    if (query.format === 'xlsx') {
+      reply.type('application/vnd.ms-excel');
+      reply.header('Content-Disposition', 'attachment; filename="visitor-os-analytics.xls"');
+
+      return toSpreadsheetXml(rows);
+    }
+
+    reply.type('text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="visitor-os-analytics.csv"');
+
+    return toCsv(rows);
+  });
+
+  app.post('/api/admin/analytics/snapshots', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const body = analyticsSnapshotSchema.parse(request.body);
+    const organizationId =
+      auth.requireOrganizationAccess(context, body.organizationId) ?? context.user.organizationId;
+    const filters = resolveAnalyticsPeriod({
+      preset: body.preset,
+      ...(body.from ? { from: body.from } : {}),
+      ...(body.to ? { to: body.to } : {}),
+      organizationId,
+      ...(body.siteId ? { siteId: body.siteId } : {})
+    });
+    const dashboard = await analytics.getDashboard(filters);
+
+    await analytics.createSnapshot({
+      organizationId,
+      ...(filters.siteId ? { siteId: filters.siteId } : {}),
+      periodType: body.periodType,
+      periodStart: filters.from,
+      periodEnd: filters.to,
+      metrics: dashboard
+    });
+
+    return {
+      ok: true,
+      snapshots: await analytics.countSnapshots(organizationId)
     };
   });
 

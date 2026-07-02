@@ -115,6 +115,18 @@ export async function initializeSchema(database: Database): Promise<void> {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists analytics_snapshots (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid references sites(id),
+      period_type text not null,
+      period_start date not null,
+      period_end date not null,
+      metrics jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now(),
+      unique (organization_id, site_id, period_type, period_start)
+    );
+
     create table if not exists visitors (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -299,6 +311,8 @@ export async function initializeSchema(database: Database): Promise<void> {
       on notification_events(organization_id, created_at desc);
     create index if not exists idx_notification_events_status
       on notification_events(organization_id, status, created_at desc);
+    create index if not exists idx_analytics_snapshots_period
+      on analytics_snapshots(organization_id, period_type, period_start desc);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);
     create index if not exists idx_conversations_organization_site on conversations(organization_id, site_id);
     create index if not exists idx_messages_conversation_created on messages(conversation_id, created_at);

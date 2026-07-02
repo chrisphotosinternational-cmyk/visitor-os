@@ -1,5 +1,16 @@
 # Roadmap
 
+## Current Development - v0.9.0-dev
+
+- Analytics Engine
+- KPI dashboard
+- Conversations and prospects per day
+- Site performance
+- Frequent tags
+- Response sources and fallback rate
+- AI cost and notification metrics
+- Analytics exports and snapshots
+
 ## Current Development - v0.8.0-dev
 
 - Notification Engine

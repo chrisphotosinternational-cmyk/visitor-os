@@ -2,6 +2,15 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v0.9.0-dev - Sprint 9
+
+- Added Analytics Engine for conversations, prospects, scores, tags, AI, notifications, follow-ups and sites.
+- Added period filters for today, 7 days, 30 days and custom ranges.
+- Added admin analytics dashboard with KPI cards, lightweight charts and performance tables.
+- Added CSV/XLSX-compatible analytics exports with RBAC and organization isolation.
+- Added analytics snapshots table for future daily, weekly and monthly precomputation.
+- Added analytics tests for conversion, score, filters, exports and snapshots.
+
 ## v0.8.0-dev - Sprint 8
 
 - Added central Notification Engine with internal, email and webhook providers.
