@@ -1,12 +1,15 @@
-import { access, readFile } from 'node:fs/promises';
-import { dirname, join, normalize, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import {
+  adminAppJs,
+  adminConfigJs,
+  adminIndexHtml,
+  adminStylesCss
+} from './frontend-admin-assets.js';
 
 const staticFiles = new Map([
-  ['/app.js', { file: 'app.js', contentType: 'application/javascript; charset=utf-8' }],
-  ['/config.js', { file: 'config.js', contentType: 'application/javascript; charset=utf-8' }],
-  ['/styles.css', { file: 'styles.css', contentType: 'text/css; charset=utf-8' }]
+  ['/app.js', { body: adminAppJs, contentType: 'application/javascript; charset=utf-8' }],
+  ['/config.js', { body: adminConfigJs, contentType: 'application/javascript; charset=utf-8' }],
+  ['/styles.css', { body: adminStylesCss, contentType: 'text/css; charset=utf-8' }]
 ]);
 
 const reservedPrefixes = ['/api/', '/api'];
@@ -21,23 +24,23 @@ const reservedPaths = new Set([
 ]);
 
 export function registerFrontendAdmin(app: FastifyInstance): void {
-  app.get('/', async (_request, reply) => {
-    await sendAdminFile(reply, 'index.html', 'text/html; charset=utf-8');
+  app.get('/', (_request, reply) => {
+    sendText(reply, adminIndexHtml, 'text/html; charset=utf-8');
   });
 
   for (const [route, asset] of staticFiles) {
-    app.get(route, async (_request, reply) => {
-      await sendAdminFile(reply, asset.file, asset.contentType);
+    app.get(route, (_request, reply) => {
+      sendText(reply, asset.body, asset.contentType);
     });
   }
 
-  app.setNotFoundHandler(async (request, reply) => {
+  app.setNotFoundHandler((request, reply) => {
     if (shouldServeSpaFallback(request)) {
-      await sendAdminFile(reply, 'index.html', 'text/html; charset=utf-8');
+      sendText(reply, adminIndexHtml, 'text/html; charset=utf-8');
       return;
     }
 
-    await reply.status(404).send({
+    void reply.status(404).send({
       message: `Route ${request.method}:${request.url} not found`,
       error: 'Not Found',
       statusCode: 404
@@ -45,21 +48,8 @@ export function registerFrontendAdmin(app: FastifyInstance): void {
   });
 }
 
-async function sendAdminFile(
-  reply: FastifyReply,
-  fileName: string,
-  contentType: string
-): Promise<void> {
-  const directory = await resolveFrontendAdminDirectory();
-  const filePath = resolve(directory, normalize(fileName));
-
-  if (!filePath.startsWith(directory)) {
-    await reply.status(404).send({ error: 'Not Found' });
-    return;
-  }
-
-  const content = await readFile(filePath);
-  await reply.type(contentType).send(content);
+function sendText(reply: FastifyReply, body: string, contentType: string): void {
+  void reply.type(contentType).send(body);
 }
 
 function shouldServeSpaFallback(request: FastifyRequest): boolean {
@@ -68,26 +58,4 @@ function shouldServeSpaFallback(request: FastifyRequest): boolean {
   if (reservedPaths.has(path)) return false;
 
   return !reservedPrefixes.some((prefix) => path.startsWith(prefix));
-}
-
-async function resolveFrontendAdminDirectory(): Promise<string> {
-  const currentDirectory = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve(process.cwd(), '../frontend-admin'),
-    resolve(process.cwd(), 'frontend-admin'),
-    resolve(currentDirectory, '../../../../frontend-admin'),
-    resolve(currentDirectory, '../../../frontend-admin'),
-    resolve(currentDirectory, '../../frontend-admin')
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await access(join(candidate, 'index.html'));
-      return candidate;
-    } catch {
-      // Try the next runtime layout.
-    }
-  }
-
-  throw new Error('frontend-admin static directory was not found');
 }
