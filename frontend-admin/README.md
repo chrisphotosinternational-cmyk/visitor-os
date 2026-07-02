@@ -1,18 +1,18 @@
-# VISITOR-OS Admin MVP
+# VISITOR-OS Admin
 
-Minimal dashboard for the first VISITOR-OS MVP.
+Minimal web application for VISITOR-OS administrators.
 
-It is intentionally small:
+This sprint intentionally covers only:
 
-- list conversations;
-- search conversations;
-- open a conversation;
-- read the full message history;
-- see conversation date and status;
-- update conversation status;
-- see created prospects.
+- JWT login through `POST /login`;
+- session restoration and expiration handling;
+- protected identity through `GET /me`;
+- protected dashboard through `GET /dashboard`;
+- API and PostgreSQL status through `/health` and `/ready`.
 
-It uses Vue 3 from a CDN for this MVP slice. A dedicated Vue/Vite setup can replace it later when the admin grows.
+No CRM, AI or widget feature is implemented in this interface.
+
+It uses Vue 3 from a CDN for this lightweight slice. A dedicated Vue/Vite setup can replace it later when the admin grows.
 
 ## Run locally
 
@@ -32,12 +32,10 @@ Override it before loading `app.js` if needed:
 </script>
 ```
 
-## MVP Test Flow
+## Test Flow
 
 1. Start the backend.
-2. Open the widget demo.
-3. Send a visitor message.
-4. Open the admin dashboard.
-5. Search or select the conversation.
-6. Read the messages.
-7. Change the conversation status.
+2. Open the admin dashboard.
+3. Log in with the first administrator.
+4. Confirm that user, role, organization, API and PostgreSQL status are visible.
+5. Log out.
