@@ -5,7 +5,6 @@ import { createDatabase } from './database/client.js';
 import { initializeSchema, seedFoundationData } from './database/schema.js';
 import { registerShutdownHooks } from './core/lifecycle/shutdown.js';
 import { seedFirstAdmin } from './modules/auth/bootstrap.js';
-import { ZodError } from 'zod';
 
 const logger = createLogger();
 
@@ -66,22 +65,6 @@ async function initializeRuntime(
 }
 
 bootstrap().catch((error: unknown) => {
-  logStartupError(error);
+  logger.error({ error }, 'Backend failed to start');
   process.exitCode = 1;
 });
-
-function logStartupError(error: unknown): void {
-  console.error('Backend failed to start');
-  console.error('error:', error);
-
-  if (error instanceof Error) {
-    console.error('error.stack:', error.stack);
-    console.error('cause:', error.cause);
-  }
-
-  if (error instanceof ZodError) {
-    console.error('ZodError:', error.issues);
-  }
-
-  logger.error(error, 'Backend failed to start');
-}
