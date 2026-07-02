@@ -1,13 +1,17 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
-  "rootDirectory": "backend",
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "pnpm build",
-    "watchPatterns": ["backend/**", "configs/**"]
+    "builder": "RAILPACK",
+    "buildCommand": "pnpm --dir backend install --frozen-lockfile && pnpm --dir backend build",
+    "watchPatterns": [
+      "/backend/**",
+      "/configs/**",
+      "/railway.json",
+      "/package.json"
+    ]
   },
   "deploy": {
-    "startCommand": "pnpm start",
+    "startCommand": "pnpm --dir backend start",
     "healthcheckPath": "/ready",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",

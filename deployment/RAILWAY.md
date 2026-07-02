@@ -23,10 +23,15 @@ Railway est l'alternative principale a Render pour une beta rapide.
 Configuration recommandee :
 
 ```text
-Build: cd backend && pnpm install --frozen-lockfile && pnpm build
-Start: cd backend && pnpm start
+Builder: RAILPACK
+Build: pnpm --dir backend install --frozen-lockfile && pnpm --dir backend build
+Start: pnpm --dir backend start
 Healthcheck: /ready
 ```
+
+Le depot contient un `package.json` racine pour que Railway detecte automatiquement Node.js meme si le code backend est dans `backend/`.
+
+Le fichier `railway.json` racine configure les commandes sans exiger de reglage manuel complexe dans l'interface Railway.
 
 Variables :
 
