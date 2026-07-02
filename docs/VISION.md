@@ -1,74 +1,91 @@
-# VISITOR-OS Vision
+# VISITOR-OS Vision 2030
 
-VISITOR-OS est un système d'exploitation léger pour la relation visiteur.
+VISITOR-OS n'est pas un chatbot.
 
-Sa mission est d'aider une petite organisation à comprendre, qualifier et convertir les visiteurs de ses sites sans installer une usine logicielle, sans former longuement les équipes et sans dépendre d'un outil opaque.
+VISITOR-OS est une Customer Intelligence Platform.
 
-## Vision Produit
+Sa mission est de transformer chaque visiteur en conversation, chaque conversation en connaissance, chaque connaissance en opportunite, et chaque opportunite en relation durable.
 
-VISITOR-OS doit devenir une plateforme SaaS simple qui transforme un site vitrine en interface active de relation client.
+## Vision Officielle
 
-Le produit doit :
+D'ici 2030, VISITOR-OS doit devenir une plateforme simple, modulaire et independante permettant a toute organisation de comprendre ses visiteurs, structurer sa connaissance, assister ses equipes et convertir les interactions en relations utiles.
 
-- répondre aux questions fréquentes ;
-- qualifier les demandes ;
-- créer des prospects exploitables ;
-- centraliser les conversations ;
-- guider les relances ;
-- mesurer ce qui se passe ;
-- exploiter la connaissance documentaire ;
-- rester configurable par activité.
+VISITOR-OS doit rester suffisamment simple pour etre exploite par une petite equipe, mais suffisamment robuste pour devenir une base SaaS multi-tenant durable.
 
-## Positionnement
+## Conviction Centrale
+
+La relation client commence avant le CRM.
+
+Elle commence au moment ou un visiteur pose une question, cherche une information, compare une offre, hesite a reserver, ou exprime un besoin encore mal formule.
+
+VISITOR-OS existe pour capturer ce moment, l'organiser, l'enrichir et le rendre actionnable.
+
+## Ce Que VISITOR-OS Veut Devenir
+
+VISITOR-OS veut devenir une plateforme capable de :
+
+- comprendre les visiteurs ;
+- centraliser la connaissance ;
+- assister les equipes ;
+- qualifier les prospects ;
+- automatiser les taches repetitives ;
+- rester independante des fournisseurs IA ;
+- connecter plusieurs sources de connaissance ;
+- fonctionner pour plusieurs organisations et plusieurs sites ;
+- exposer une API publique propre ;
+- accueillir un ecosysteme de modules interchangeables.
+
+## Ce Que VISITOR-OS N'est Pas
 
 VISITOR-OS n'est pas :
 
-- un CRM enterprise complet ;
-- un outil de marketing automation lourd ;
-- un constructeur de site ;
+- un ERP ;
+- un CMS generaliste ;
+- un outil marketing de masse ;
+- un simple chatbot OpenAI ;
+- un clone de HubSpot ;
+- un clone d'Intercom ;
 - une plateforme de paiement ;
-- un système de réservation universel ;
-- une solution de BI complexe.
+- un systeme de reservation universel ;
+- une usine logicielle enterprise.
 
-VISITOR-OS est :
+Ces limites protegent le produit.
 
-- un assistant relationnel ;
-- un mini CRM opérationnel ;
-- un moteur de décision configurable ;
-- un moteur de connaissance ;
-- une base SaaS multi-tenant ;
-- une plateforme évolutive par modules.
+Elles evitent la dispersion, la dette technique et la confusion commerciale.
 
-## Utilisateur Cible
+## Promesse Produit
 
-Le produit doit rester utilisable par :
+VISITOR-OS doit permettre a une organisation de :
 
-- un indépendant ;
-- une petite entreprise ;
-- un établissement hôtelier ;
-- un studio photo ;
-- une agence ;
-- un commerce local ;
-- une équipe commerciale réduite.
+1. brancher un widget sur son site ;
+2. repondre correctement aux visiteurs ;
+3. collecter les bonnes informations sans etre intrusif ;
+4. conserver les conversations ;
+5. transformer les demandes en prospects ;
+6. exploiter ses documents et sa connaissance ;
+7. comprendre ce qui se passe ;
+8. agir plus vite.
 
-Le produit doit être administrable par une seule personne.
+## Horizon 2030
 
-## Promesse
+En 2030, VISITOR-OS doit pouvoir exister sous plusieurs formes :
 
-En moins de quelques minutes, un site vitrine doit pouvoir :
+- SaaS cloud managé ;
+- deploiement dedie pour clients exigeants ;
+- option on-premise pour organisations sensibles ;
+- API publique ;
+- SDK ;
+- marketplace de modules ;
+- connecteurs documentaires et metiers ;
+- moteur IA multi-provider ;
+- moteur de connaissance extensible.
 
-- afficher un widget ;
-- répondre aux questions simples ;
-- créer un prospect ;
-- conserver la conversation ;
-- donner une vue claire à l'administrateur.
+## Principe Directeur
 
-## Ambition
+Le produit doit grandir sans devenir lourd.
 
-L'ambition n'est pas de construire le plus gros système possible.
+Chaque release doit apporter une capacite claire.
 
-L'ambition est de construire une plateforme excellente, sobre, modulaire, fiable et durable.
+Chaque module doit pouvoir etre compris, teste, documente, remplace et desactive.
 
-Chaque ajout doit renforcer la clarté du produit.
-
-Chaque ajout qui rend VISITOR-OS plus difficile à comprendre, vendre, maintenir ou déployer doit être suspect.
+La simplicite reste une exigence technique, produit et commerciale.
