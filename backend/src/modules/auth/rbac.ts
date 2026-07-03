@@ -3,6 +3,8 @@ import type { UserRole } from '../users/user-model.js';
 export type Permission =
   | 'organizations:read'
   | 'organizations:write'
+  | 'users:read'
+  | 'users:write'
   | 'sites:read'
   | 'sites:write'
   | 'conversations:read'
@@ -15,6 +17,8 @@ export type Permission =
 const allPermissions: readonly Permission[] = [
   'organizations:read',
   'organizations:write',
+  'users:read',
+  'users:write',
   'sites:read',
   'sites:write',
   'conversations:read',
@@ -30,6 +34,7 @@ export const rolePermissions: Record<UserRole, readonly Permission[]> = {
   Admin: allPermissions.filter((permission) => permission !== 'organizations:write'),
   Manager: [
     'organizations:read',
+    'users:read',
     'sites:read',
     'sites:write',
     'conversations:read',

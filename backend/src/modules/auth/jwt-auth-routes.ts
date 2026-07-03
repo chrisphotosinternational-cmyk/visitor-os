@@ -4,6 +4,7 @@ import { AppError } from '../../core/errors/app-error.js';
 import type { AppConfig } from '../../core/config/env.js';
 import type { Database } from '../../database/client.js';
 import { UserRepository, type UserRecord } from '../users/user-repository.js';
+import { OrganizationRepository } from '../organizations/organization-repository.js';
 import { verifyPassword } from './password.js';
 import { signJwt, verifyJwt, type JwtAuthContext } from './jwt.js';
 
@@ -18,6 +19,7 @@ export function registerJwtAuthRoutes(
   config: AppConfig
 ): void {
   const users = new UserRepository(database);
+  const organizations = new OrganizationRepository(database);
 
   app.post('/login', async (request) => {
     const body = loginSchema.parse(request.body);
@@ -50,12 +52,16 @@ export function registerJwtAuthRoutes(
     return { user: context.user };
   });
 
-  app.get('/dashboard', (request) => {
+  app.get('/dashboard', async (request) => {
     const context = authenticateJwt(request, config);
+    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organizationId;
 
     return {
       status: 'ok',
-      user: context.user
+      user: context.user,
+      organizationsCount:
+        context.user.role === 'SuperAdmin' ? await organizations.count() : context.user.organizationId ? 1 : 0,
+      usersCount: await users.count(organizationId)
     };
   });
 }

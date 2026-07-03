@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { Database } from '../../database/client.js';
 
-export type OrganizationStatus = 'active' | 'inactive' | 'suspended';
+export type OrganizationStatus = 'active' | 'inactive' | 'suspended' | 'deleted';
 
 export const organizationStatuses: readonly OrganizationStatus[] = [
   'active',
   'inactive',
-  'suspended'
+  'suspended',
+  'deleted'
 ] as const;
 
 export type OrganizationRecord = {
@@ -46,12 +47,28 @@ export type OrganizationInput = {
 export class OrganizationRepository {
   constructor(private readonly database: Database) {}
 
-  async list(): Promise<OrganizationRecord[]> {
+  async list(search?: string): Promise<OrganizationRecord[]> {
+    const searchTerm = `%${search ?? ''}%`;
     const result = await this.database.query<OrganizationRecord>(
-      `select * from organizations order by created_at desc, name asc limit 100`
+      `
+      select * from organizations
+      where status <> 'deleted'
+        and ($1 = '%%' or name ilike $1 or slug ilike $1 or coalesce(email, '') ilike $1)
+      order by created_at desc, name asc
+      limit 100
+      `,
+      [searchTerm]
     );
 
     return result.rows;
+  }
+
+  async count(): Promise<number> {
+    const result = await this.database.query<{ count: string }>(
+      `select count(*)::text as count from organizations where status <> 'deleted'`
+    );
+
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   async find(id: string): Promise<OrganizationRecord | null> {
@@ -150,7 +167,10 @@ export class OrganizationRepository {
   }
 
   async delete(id: string): Promise<boolean> {
-    const result = await this.database.query(`delete from organizations where id = $1`, [id]);
+    const result = await this.database.query(
+      `update organizations set status = 'deleted' where id = $1 and status <> 'deleted'`,
+      [id]
+    );
 
     return (result.rowCount ?? 0) > 0;
   }

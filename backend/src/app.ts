@@ -5,6 +5,7 @@ import type { AppConfig } from './core/config/env.js';
 import type { AppLogger } from './core/logger/logger.js';
 import type { Database } from './database/client.js';
 import { registerAdminRoutes } from './modules/admin/admin-routes.js';
+import { registerAdminManagementRoutes } from './modules/admin-management/admin-management-routes.js';
 import { registerWidgetRoutes } from './modules/widget/widget-routes.js';
 import { registerSecurityHeaders } from './core/security/security-headers.js';
 import { registerSimpleRateLimit } from './core/security/simple-rate-limit.js';
@@ -100,6 +101,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   const notificationEngine = new NotificationEngine(notificationRepository, dependencies.config);
 
   registerJwtAuthRoutes(app, dependencies.database, dependencies.config);
+  registerAdminManagementRoutes(app, dependencies.database, dependencies.config);
   registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(
     app,

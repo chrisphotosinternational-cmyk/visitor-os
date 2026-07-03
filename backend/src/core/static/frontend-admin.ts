@@ -12,7 +12,7 @@ const staticFiles = new Map([
   ['/styles.css', { body: adminStylesCss, contentType: 'text/css; charset=utf-8' }]
 ]);
 
-const reservedPrefixes = ['/api/', '/api'];
+const reservedPrefixes = ['/api/', '/api', '/admin-api/', '/admin-api'];
 const reservedPaths = new Set([
   '/health',
   '/live',
