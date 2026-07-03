@@ -18,11 +18,7 @@ export type JwtAuthContext = {
   user: JwtUserPayload;
 };
 
-export function signJwt(
-  payload: JwtUserPayload,
-  secret: string,
-  expiresInSeconds: number
-): string {
+export function signJwt(payload: JwtUserPayload, secret: string, expiresInSeconds: number): string {
   const now = Math.floor(Date.now() / 1000);
   const jwtPayload: JwtPayload = {
     ...payload,

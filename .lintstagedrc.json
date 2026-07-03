@@ -1,0 +1,13 @@
+{
+  "backend/src/**/*.ts": [
+    "pnpm --dir backend lint",
+    "pnpm --dir backend typecheck"
+  ],
+  "backend/tests/**/*.ts": [
+    "pnpm --dir backend lint",
+    "pnpm --dir backend typecheck"
+  ],
+  "*.{md,json,yml,yaml}": [
+    "pnpm --dir backend format:check"
+  ]
+}

@@ -1,5 +1,5 @@
 import cors from '@fastify/cors';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { registerErrorHandler } from './core/errors/error-handler.js';
 import type { AppConfig } from './core/config/env.js';
 import type { AppLogger } from './core/logger/logger.js';
@@ -27,6 +27,9 @@ import { AppCache } from './core/cache/app-cache.js';
 import { InMemoryJobQueue } from './core/jobs/in-memory-job-queue.js';
 import { renderMetrics } from './core/monitoring/metrics.js';
 import { writeFileLog } from './core/logger/file-logger.js';
+import { registerTraceContext } from './core/observability/trace-context.js';
+import { AuditTrailService, actionFromRequest } from './modules/audit/audit-trail-service.js';
+import { verifyJwt } from './modules/auth/jwt.js';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -53,7 +56,9 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     });
   const queue = dependencies.queue ?? new InMemoryJobQueue();
   const startedAt = dependencies.startedAt ?? new Date();
+  const auditTrail = new AuditTrailService(dependencies.database);
 
+  registerTraceContext(app);
   await app.register(cors, {
     credentials: true,
     origin:
@@ -72,6 +77,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
 
   registerErrorHandler(app);
   registerFileLogging(app, dependencies.config);
+  registerAuditTrail(app, dependencies.config, auditTrail);
   registerFrontendAdmin(app);
 
   app.get('/health', () => ({
@@ -79,7 +85,13 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     app: dependencies.config.app.name,
     version: dependencies.config.app.version ?? '1.0.0-beta',
     environment: dependencies.config.app.environment,
-    database: dependencies.readiness?.database ?? (dependencies.database.isConfigured() ? 'ok' : 'disabled'),
+    database:
+      dependencies.readiness?.database ??
+      (dependencies.database.isConfigured() ? 'ok' : 'disabled'),
+    openTelemetry: {
+      enabled: dependencies.config.observability?.openTelemetryEnabled ?? true,
+      serviceName: dependencies.config.observability?.serviceName ?? 'visitor-os-backend'
+    },
     cache: cache.stats(),
     queue: queue.stats(),
     disk: {
@@ -193,4 +205,49 @@ function registerFileLogging(app: FastifyInstance, config: AppConfig): void {
 
     done();
   });
+}
+
+function registerAuditTrail(
+  app: FastifyInstance,
+  config: AppConfig,
+  auditTrail: AuditTrailService
+): void {
+  app.addHook('onResponse', (request, reply, done) => {
+    const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+    const isAdminRoute =
+      request.url.startsWith('/admin-api') || request.url.startsWith('/api/admin');
+
+    if (isMutation && isAdminRoute && reply.statusCode < 400) {
+      const action = actionFromRequest(request);
+      const user = readJwtUser(request, config);
+      const auditEntry = {
+        organizationId: user?.organizationId ?? null,
+        userId: user?.sub ?? null,
+        action: action.action,
+        resource: action.resource,
+        after: {
+          method: request.method,
+          statusCode: reply.statusCode
+        },
+        request
+      };
+
+      void auditTrail.safeRecord(
+        action.resourceId ? { ...auditEntry, resourceId: action.resourceId } : auditEntry
+      );
+    }
+
+    done();
+  });
+}
+
+function readJwtUser(request: FastifyRequest, config: AppConfig) {
+  const authorization = request.headers.authorization;
+  if (!authorization?.startsWith('Bearer ')) return null;
+
+  try {
+    return verifyJwt(authorization.slice('Bearer '.length).trim(), config.auth.sessionSecret);
+  } catch {
+    return null;
+  }
 }

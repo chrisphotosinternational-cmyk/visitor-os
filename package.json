@@ -5,7 +5,8 @@
   "packageManager": "pnpm@11.7.0",
   "scripts": {
     "build": "pnpm --dir backend install --frozen-lockfile && pnpm --dir backend build",
-    "start": "pnpm --dir backend start"
+    "start": "pnpm --dir backend start",
+    "check": "pnpm --dir backend check"
   },
   "engines": {
     "node": ">=22.0.0"

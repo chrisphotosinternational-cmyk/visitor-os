@@ -11,7 +11,13 @@ All notable changes to VISITOR-OS will be documented here.
 - Expanded `/health` with database, cache, queue, log, uptime and version status.
 - Added `/metrics` endpoint for minimal production monitoring.
 - Added optional rotating file logs for application, error and audit events.
+- Added request trace identifiers and OpenTelemetry-ready observability settings.
+- Added audit trail storage for important administrative actions.
+- Added feature flags for AI, enrichment, forecast, advanced dashboard, and exports.
+- Added central runtime settings for scoring, pipeline, forecast, timeouts, rate limits, batch size, and cache TTL.
+- Added GitHub Actions CI/CD for lint, tests, coverage, build, migration check, security audit, packaging, and release artifacts.
 - Updated deployment, backup, security and performance documentation.
+- Added production readiness documentation for observability, audit trail, feature flags, configuration, CI/CD, coverage, and known limitations.
 
 ## v0.15.0-auth-production
 

@@ -264,7 +264,10 @@ export class PublicEnrichmentService {
     return result.rows[0] ?? null;
   }
 
-  async listForProspect(prospectId: string, organizationId?: string): Promise<ProspectEnrichmentRecord[]> {
+  async listForProspect(
+    prospectId: string,
+    organizationId?: string
+  ): Promise<ProspectEnrichmentRecord[]> {
     const result = await this.database.query<ProspectEnrichmentRecord>(
       `
       select *
@@ -307,7 +310,10 @@ export class PublicEnrichmentService {
   async acceptSuggestion(
     suggestionId: string,
     prospect: ProspectRecord
-  ): Promise<{ suggestion: ProspectFieldSuggestionRecord | null; prospect: ProspectRecord | null }> {
+  ): Promise<{
+    suggestion: ProspectFieldSuggestionRecord | null;
+    prospect: ProspectRecord | null;
+  }> {
     const suggestion = await this.findSuggestion(suggestionId, prospect.organization_id);
     if (!suggestion || suggestion.prospect_id !== prospect.id || suggestion.status !== 'pending') {
       return { suggestion: null, prospect: null };
@@ -517,7 +523,11 @@ export class PublicEnrichmentService {
     prospect: ProspectRecord,
     enrichment: ProspectEnrichmentRecord
   ): Promise<void> {
-    const candidates: Array<{ fieldName: string; currentValue: string | null; suggestedValue: string }> = [
+    const candidates: Array<{
+      fieldName: string;
+      currentValue: string | null;
+      suggestedValue: string;
+    }> = [
       {
         fieldName: 'email',
         currentValue: prospect.email,
@@ -620,12 +630,21 @@ export function detectPublicSources(
 ): Array<{ type: EnrichmentSourceType; url: string }> {
   return [
     { type: 'website' as const, url: prospect.website },
-    { type: 'instagram_public' as const, url: normalizeHandleUrl(prospect.instagram, 'https://www.instagram.com/') },
+    {
+      type: 'instagram_public' as const,
+      url: normalizeHandleUrl(prospect.instagram, 'https://www.instagram.com/')
+    },
     { type: 'x_public' as const, url: normalizeHandleUrl(prospect.twitter_x, 'https://x.com/') },
     { type: 'linktree' as const, url: normalizeHandleUrl(prospect.linktree, 'https://linktr.ee/') },
-    { type: 'allmylinks' as const, url: normalizeHandleUrl(prospect.allmylinks, 'https://allmylinks.com/') },
+    {
+      type: 'allmylinks' as const,
+      url: normalizeHandleUrl(prospect.allmylinks, 'https://allmylinks.com/')
+    },
     { type: 'mym_public' as const, url: normalizeHandleUrl(prospect.mym, 'https://mym.fans/') },
-    { type: 'onlyfans_public' as const, url: normalizeHandleUrl(prospect.onlyfans, 'https://onlyfans.com/') },
+    {
+      type: 'onlyfans_public' as const,
+      url: normalizeHandleUrl(prospect.onlyfans, 'https://onlyfans.com/')
+    },
     { type: 'other' as const, url: prospect.source_url }
   ].filter((source): source is { type: EnrichmentSourceType; url: string } => Boolean(source.url));
 }
@@ -639,7 +658,9 @@ export function extractPublicProfileData(html: string, sourceUrl: string) {
   const emails = uniqueMatches(html, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
   const phones = uniqueMatches(text, /(?:\+|00)?\d[\d .()/-]{7,}\d/g).slice(0, 5);
   const socialLinks = extractLinks(html, sourceUrl).filter((url) =>
-    /(instagram\.com|x\.com|twitter\.com|linktr\.ee|allmylinks\.com|mym\.fans|onlyfans\.com)/i.test(url)
+    /(instagram\.com|x\.com|twitter\.com|linktr\.ee|allmylinks\.com|mym\.fans|onlyfans\.com)/i.test(
+      url
+    )
   );
   const platforms = detectPlatforms([sourceUrl, ...socialLinks, text].join(' '));
   const location = detectLocation(text);
@@ -744,7 +765,10 @@ function detectPlatforms(value: string): string[] {
 }
 
 function detectLocation(text: string): string | null {
-  const city = /(?:ville|city|based in|localisation|location)\s*:?\s*([A-ZÀ-ÿ][A-Za-zÀ-ÿ -]{2,40})/i.exec(text)?.[1];
+  const city =
+    /(?:ville|city|based in|localisation|location)\s*:?\s*([A-ZÀ-ÿ][A-Za-zÀ-ÿ -]{2,40})/i.exec(
+      text
+    )?.[1];
   return city?.trim() ?? null;
 }
 

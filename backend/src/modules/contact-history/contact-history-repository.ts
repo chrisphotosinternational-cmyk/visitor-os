@@ -309,7 +309,9 @@ export class ContactHistoryRepository {
     return [
       headers.join(','),
       ...rows.map((row) =>
-        headers.map((header) => csvEscape(csvValue((row as unknown as Record<string, unknown>)[header]))).join(',')
+        headers
+          .map((header) => csvEscape(csvValue((row as unknown as Record<string, unknown>)[header])))
+          .join(',')
       )
     ].join('\n');
   }

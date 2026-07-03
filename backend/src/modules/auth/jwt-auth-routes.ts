@@ -8,6 +8,7 @@ import { OrganizationRepository } from '../organizations/organization-repository
 import { ProspectRepository } from '../prospects/prospect-repository.js';
 import { verifyPassword } from './password.js';
 import { signJwt, verifyJwt, type JwtAuthContext } from './jwt.js';
+import { AuditTrailService } from '../audit/audit-trail-service.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -22,6 +23,7 @@ export function registerJwtAuthRoutes(
   const users = new UserRepository(database);
   const organizations = new OrganizationRepository(database);
   const prospects = new ProspectRepository(database);
+  const auditTrail = new AuditTrailService(database);
 
   app.post('/login', async (request) => {
     const body = loginSchema.parse(request.body);
@@ -37,6 +39,15 @@ export function registerJwtAuthRoutes(
     }
 
     const token = signJwt(toJwtPayload(user), config.auth.sessionSecret, config.auth.jwtTtlSeconds);
+    await auditTrail.safeRecord({
+      organizationId: user.organization_id,
+      userId: user.id,
+      action: 'login',
+      resource: 'auth',
+      resourceId: user.id,
+      after: { email: user.email, role: user.role },
+      request
+    });
 
     return {
       token,
@@ -44,7 +55,17 @@ export function registerJwtAuthRoutes(
     };
   });
 
-  app.post('/logout', () => {
+  app.post('/logout', async (request) => {
+    const context = optionalJwt(request, config);
+    await auditTrail.safeRecord({
+      organizationId: context?.user.organizationId ?? null,
+      userId: context?.user.sub ?? null,
+      action: 'logout',
+      resource: 'auth',
+      resourceId: context?.user.sub ?? null,
+      request
+    });
+
     return { ok: true };
   });
 
@@ -56,23 +77,33 @@ export function registerJwtAuthRoutes(
 
   app.get('/dashboard', async (request) => {
     const context = authenticateJwt(request, config);
-    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organizationId;
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organizationId;
 
     return {
       status: 'ok',
       user: context.user,
       organizationsCount:
-        context.user.role === 'SuperAdmin' ? await organizations.count() : context.user.organizationId ? 1 : 0,
+        context.user.role === 'SuperAdmin'
+          ? await organizations.count()
+          : context.user.organizationId
+            ? 1
+            : 0,
       usersCount: await users.count(organizationId),
       prospects: await prospects.metrics(organizationId)
     };
   });
 }
 
-export function authenticateJwt(
-  request: FastifyRequest,
-  config: AppConfig
-): JwtAuthContext {
+function optionalJwt(request: FastifyRequest, config: AppConfig): JwtAuthContext | null {
+  try {
+    return authenticateJwt(request, config);
+  } catch {
+    return null;
+  }
+}
+
+export function authenticateJwt(request: FastifyRequest, config: AppConfig): JwtAuthContext {
   const authorization = request.headers.authorization;
   if (!authorization?.startsWith('Bearer ')) {
     throw new AppError('JWT required', { statusCode: 401, code: 'JWT_REQUIRED' });

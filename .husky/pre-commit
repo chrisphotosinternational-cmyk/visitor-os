@@ -1,0 +1,5 @@
+#!/bin/sh
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm --dir backend lint
+  pnpm --dir backend typecheck
+fi

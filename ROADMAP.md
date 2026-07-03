@@ -8,6 +8,10 @@
 - Batch job queue abstraction
 - Enhanced health and metrics endpoints
 - Optional file logs with rotation
+- Observability trace IDs and OpenTelemetry-ready configuration
+- Audit trail for critical administrative and CRM actions
+- Feature flags and central runtime configuration
+- CI/CD checks for lint, tests, build, migration checks, coverage and security audit
 - Backup, performance and security documentation
 
 ## Current Development - v0.12.0-beta-prep

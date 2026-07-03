@@ -825,7 +825,11 @@ describe('admin authentication and RBAC', () => {
         headers: { authorization: `Bearer ${token}` }
       });
       const body = response.json() as {
-        enrichments: Array<{ status: string; detected_emails: string[]; detected_phones: string[] }>;
+        enrichments: Array<{
+          status: string;
+          detected_emails: string[];
+          detected_phones: string[];
+        }>;
         suggestions: Array<{ field_name: string; suggested_value: string; status: string }>;
       };
 
@@ -861,8 +865,9 @@ describe('admin authentication and RBAC', () => {
         url: `/admin-api/prospects/${prospect.id}/enrich`,
         headers: { authorization: `Bearer ${token}` }
       });
-      const suggestions = (enriched.json() as { suggestions: Array<{ id: string; field_name: string }> })
-        .suggestions;
+      const suggestions = (
+        enriched.json() as { suggestions: Array<{ id: string; field_name: string }> }
+      ).suggestions;
       const emailSuggestion = suggestions.find((suggestion) => suggestion.field_name === 'email');
       assert.ok(emailSuggestion);
       const beforeAccept = await app.inject({
@@ -870,7 +875,10 @@ describe('admin authentication and RBAC', () => {
         url: `/admin-api/prospects/${prospect.id}`,
         headers: { authorization: `Bearer ${token}` }
       });
-      assert.equal((beforeAccept.json() as { prospect: { email: string | null } }).prospect.email, null);
+      assert.equal(
+        (beforeAccept.json() as { prospect: { email: string | null } }).prospect.email,
+        null
+      );
 
       const accepted = await app.inject({
         method: 'POST',
@@ -894,8 +902,9 @@ describe('admin authentication and RBAC', () => {
         url: `/admin-api/prospects/${prospect.id}/suggestions`,
         headers: { authorization: `Bearer ${token}` }
       });
-      const rejectable = (remaining.json() as { suggestions: Array<{ id: string; status: string }> })
-        .suggestions.find((suggestion) => suggestion.status === 'pending');
+      const rejectable = (
+        remaining.json() as { suggestions: Array<{ id: string; status: string }> }
+      ).suggestions.find((suggestion) => suggestion.status === 'pending');
       if (rejectable) {
         const rejected = await app.inject({
           method: 'POST',
@@ -903,7 +912,10 @@ describe('admin authentication and RBAC', () => {
           headers: { authorization: `Bearer ${token}` }
         });
         assert.equal(rejected.statusCode, 200);
-        assert.equal((rejected.json() as { suggestion: { status: string } }).suggestion.status, 'rejected');
+        assert.equal(
+          (rejected.json() as { suggestion: { status: string } }).suggestion.status,
+          'rejected'
+        );
       }
     } finally {
       globalThis.fetch = originalFetch;
@@ -943,10 +955,13 @@ describe('admin authentication and RBAC', () => {
   it('runs public enrichment batch and updates dashboard metrics', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      new Response('<html><title>Batch</title><body>hello@batch.test Instagram city: Albi</body></html>', {
-        status: 200,
-        headers: { 'content-type': 'text/html' }
-      });
+      new Response(
+        '<html><title>Batch</title><body>hello@batch.test Instagram city: Albi</body></html>',
+        {
+          status: 200,
+          headers: { 'content-type': 'text/html' }
+        }
+      );
     const app = await createAuthTestApp();
     try {
       const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
@@ -1069,8 +1084,10 @@ describe('admin authentication and RBAC', () => {
 
     assert.equal(adminList.statusCode, 200);
     assert.equal(
-      (adminList.json() as { columns: Array<{ prospects: Array<{ organization_id: string }> }> })
-        .columns.flatMap((column) => column.prospects)
+      (
+        adminList.json() as { columns: Array<{ prospects: Array<{ organization_id: string }> }> }
+      ).columns
+        .flatMap((column) => column.prospects)
         .some((item) => item.organization_id === ORG_B),
       false
     );
@@ -1640,7 +1657,10 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       if (sql.includes('from prospect_enrichments e') && sql.includes('enriched_prospects')) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const rows = filterProspectEnrichments(prospectEnrichments, organizationId);
-        const suggestions = filterProspectFieldSuggestions(prospectFieldSuggestions, organizationId);
+        const suggestions = filterProspectFieldSuggestions(
+          prospectFieldSuggestions,
+          organizationId
+        );
         return result([
           {
             enriched_prospects: String(new Set(rows.map((row) => row.prospect_id)).size),
@@ -1744,8 +1764,11 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const status = values[1] ? valueToString(values[1]) : null;
         const sourceType = values[2] ? valueToString(values[2]) : null;
-        const confidenceMin = values[3] === null || values[3] === undefined ? null : Number(values[3]);
-        const city = valueToString(values[4] ?? '').replaceAll('%', '').toLowerCase();
+        const confidenceMin =
+          values[3] === null || values[3] === undefined ? null : Number(values[3]);
+        const city = valueToString(values[4] ?? '')
+          .replaceAll('%', '')
+          .toLowerCase();
         const platform = values[5] ? valueToString(values[5]) : null;
         return result(
           filterProspectEnrichments(prospectEnrichments, organizationId).filter(
@@ -1793,7 +1816,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
           const stage = valueToString(row.status);
           counts.set(stage, (counts.get(stage) ?? 0) + 1);
         }
-        return result([...counts.entries()].map(([stage, count]) => ({ stage, count: String(count) })));
+        return result(
+          [...counts.entries()].map(([stage, count]) => ({ stage, count: String(count) }))
+        );
       }
 
       if (sql.includes('avg_contact_to_interest_days')) {
@@ -1815,10 +1840,13 @@ async function createAuthMemoryDatabase(): Promise<Database> {
             signed: String(orgProspects.filter((row) => row.status === 'signed_client').length),
             total: String(orgProspects.length),
             stalled: String(orgProspects.filter((row) => row.status === 'contacted').length),
-            overdue_followups: String(rows.filter((row) => toTime(row.follow_up_date) < Date.now()).length),
+            overdue_followups: String(
+              rows.filter((row) => toTime(row.follow_up_date) < Date.now()).length
+            ),
             never_contacted: String(
-              orgProspects.filter((prospect) => !rows.some((row) => row.prospect_id === prospect.id))
-                .length
+              orgProspects.filter(
+                (prospect) => !rows.some((row) => row.prospect_id === prospect.id)
+              ).length
             ),
             avg_contact_to_interest_days: null,
             avg_interest_to_signed_days: null
@@ -1826,10 +1854,15 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         ]);
       }
 
-      if (sql.includes('coalesce(sum(score), 0)::text as potential') && sql.includes('group by city')) {
+      if (
+        sql.includes('coalesce(sum(score), 0)::text as potential') &&
+        sql.includes('group by city')
+      ) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const counts = new Map<string, { count: number; potential: number }>();
-        for (const row of filterProspects(prospects, organizationId).filter((item) => !['refused', 'blacklist'].includes(valueToString(item.status)))) {
+        for (const row of filterProspects(prospects, organizationId).filter(
+          (item) => !['refused', 'blacklist'].includes(valueToString(item.status))
+        )) {
           const city = valueToString(row.city);
           if (!city) continue;
           const current = counts.get(city) ?? { count: 0, potential: 0 };
@@ -1849,7 +1882,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       if (sql.includes('from (') && sql.includes('platforms') && sql.includes('potential')) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const counts = new Map<string, { count: number; potential: number }>();
-        for (const row of filterProspects(prospects, organizationId).filter((item) => !['refused', 'blacklist'].includes(valueToString(item.status)))) {
+        for (const row of filterProspects(prospects, organizationId).filter(
+          (item) => !['refused', 'blacklist'].includes(valueToString(item.status))
+        )) {
           const platform = primaryPlatform(row);
           if (!platform) continue;
           const current = counts.get(platform) ?? { count: 0, potential: 0 };
@@ -1888,7 +1923,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
 
       if (sql.includes('next_follow_up_at')) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
-        const city = valueToString(values[1] ?? '').replaceAll('%', '').toLowerCase();
+        const city = valueToString(values[1] ?? '')
+          .replaceAll('%', '')
+          .toLowerCase();
         const scoreLabel = values[2] ? valueToString(values[2]) : null;
         const source = values[3] ? valueToString(values[3]) : null;
         const platform = values[4] ? valueToString(values[4]) : null;
@@ -2621,7 +2658,15 @@ function filterContactHistory(
 }
 
 function primaryPlatform(row: Record<string, unknown>): string | null {
-  for (const platform of ['mym', 'onlyfans', 'instagram', 'twitter_x', 'linktree', 'allmylinks', 'website']) {
+  for (const platform of [
+    'mym',
+    'onlyfans',
+    'instagram',
+    'twitter_x',
+    'linktree',
+    'allmylinks',
+    'website'
+  ]) {
     if (row[platform]) return platform;
   }
 
@@ -2692,7 +2737,8 @@ function parseJsonArray(value: unknown): unknown[] {
 }
 
 function parseJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (value && typeof value === 'object' && !Array.isArray(value))
+    return value as Record<string, unknown>;
   if (typeof value !== 'string') return {};
   try {
     const parsed = JSON.parse(value) as unknown;

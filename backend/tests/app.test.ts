@@ -95,6 +95,7 @@ describe('createApp', () => {
       database: string;
       cache: { enabled: boolean };
       queue: { enabled: boolean };
+      openTelemetry: { enabled: boolean; serviceName: string };
       uptime: number;
     } = response.json();
 
@@ -105,6 +106,8 @@ describe('createApp', () => {
     assert.equal(body.database, 'ok');
     assert.equal(body.cache.enabled, true);
     assert.equal(body.queue.enabled, true);
+    assert.equal(body.openTelemetry.enabled, true);
+    assert.equal(body.openTelemetry.serviceName, 'visitor-os-backend');
     assert.equal(typeof body.uptime, 'number');
 
     await app.close();
@@ -134,6 +137,32 @@ describe('createApp', () => {
     assert.equal(response.headers['x-content-type-options'], 'nosniff');
     assert.equal(response.headers['x-frame-options'], 'DENY');
     assert.equal(response.headers['referrer-policy'], 'no-referrer');
+
+    await app.close();
+  });
+
+  it('adds a trace id header to every request', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent'
+      }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/health'
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(String(response.headers['x-trace-id']), /^[a-f0-9]{32}$/);
 
     await app.close();
   });

@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 import { AppCache } from '../src/core/cache/app-cache.js';
 import { InMemoryJobQueue } from '../src/core/jobs/in-memory-job-queue.js';
 import { renderMetrics } from '../src/core/monitoring/metrics.js';
+import { SettingsService } from '../src/modules/settings/settings-service.js';
+import type { Database } from '../src/database/client.js';
 
 describe('production readiness utilities', () => {
   it('caches values with TTL stats and tag invalidation', async () => {
@@ -55,6 +57,25 @@ describe('production readiness utilities', () => {
     assert.match(metrics, /visitor_os_uptime_seconds 42/);
     assert.match(metrics, /visitor_os_database_state 2/);
     assert.match(metrics, /visitor_os_cache_keys 0/);
+  });
+
+  it('uses safe feature flag and runtime setting defaults without PostgreSQL', async () => {
+    const database: Database = {
+      isConfigured: () => false,
+      checkConnection: async () => undefined,
+      query: async () => ({ rows: [] }) as never,
+      close: async () => undefined
+    };
+    const settings = new SettingsService(database);
+
+    const flags = await settings.featureFlags();
+    const runtimeSettings = await settings.runtimeSettings();
+
+    assert.equal(flags.ai, true);
+    assert.equal(flags.enrichment, true);
+    assert.equal(flags.exports, true);
+    assert.equal(runtimeSettings.scoring.email, 15);
+    assert.equal(runtimeSettings.cache.ttlMs, 30000);
   });
 });
 

@@ -81,6 +81,9 @@ createApp({
       pipelineForecast: null,
       pipelineActivity: [],
       pipelineFilters: { city: '', scoreLabel: '', platform: '', sort: 'score' },
+      featureFlags: {},
+      runtimeSettings: null,
+      runtimeSettingsJson: '',
       draggedProspectId: '',
       loading: false,
       error: '',
@@ -186,7 +189,8 @@ createApp({
           this.loadFollowUps(),
           this.loadMessageTemplates(),
           this.loadEnrichments(),
-          this.loadPipeline()
+          this.loadPipeline(),
+          this.loadSettings()
         ]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
@@ -315,7 +319,52 @@ createApp({
     },
     async refreshDashboard() {
       const response = await this.apiRequest('/admin-api/dashboard', { authenticated: true });
-      if (response.ok) this.dashboard = await response.json();
+      if (response.ok) {
+        this.dashboard = await response.json();
+        this.featureFlags = this.dashboard.featureFlags ?? this.featureFlags;
+        this.runtimeSettings = this.dashboard.settings ?? this.runtimeSettings;
+        this.runtimeSettingsJson = JSON.stringify(this.runtimeSettings ?? {}, null, 2);
+      }
+    },
+    async loadSettings() {
+      if (!this.token) return;
+      const [flagsResponse, settingsResponse] = await Promise.all([
+        this.apiRequest('/admin-api/feature-flags', { authenticated: true }),
+        this.apiRequest('/admin-api/settings', { authenticated: true })
+      ]);
+      if (!flagsResponse.ok || !settingsResponse.ok) return;
+      this.featureFlags = (await flagsResponse.json()).featureFlags;
+      this.runtimeSettings = (await settingsResponse.json()).settings;
+      this.runtimeSettingsJson = JSON.stringify(this.runtimeSettings, null, 2);
+    },
+    async saveFeatureFlags() {
+      const response = await this.apiRequest('/admin-api/feature-flags', {
+        method: 'PATCH',
+        authenticated: true,
+        body: JSON.stringify(this.featureFlags)
+      });
+      if (!response.ok) throw new Error('Sauvegarde des modules impossible.');
+      this.featureFlags = (await response.json()).featureFlags;
+      this.notify('Modules mis a jour.');
+      await this.refreshDashboard();
+    },
+    async saveRuntimeSettings() {
+      let parsed;
+      try {
+        parsed = JSON.parse(this.runtimeSettingsJson);
+      } catch {
+        throw new Error('Configuration JSON invalide.');
+      }
+      const response = await this.apiRequest('/admin-api/settings', {
+        method: 'PATCH',
+        authenticated: true,
+        body: JSON.stringify(parsed)
+      });
+      if (!response.ok) throw new Error('Sauvegarde configuration impossible.');
+      this.runtimeSettings = (await response.json()).settings;
+      this.runtimeSettingsJson = JSON.stringify(this.runtimeSettings, null, 2);
+      this.notify('Configuration mise a jour.');
+      await this.refreshDashboard();
     },
     async loadPipeline() {
       if (!this.token) return;
@@ -330,14 +379,14 @@ createApp({
         this.apiRequest('/admin-api/pipeline/forecast', { authenticated: true }),
         this.apiRequest('/admin-api/pipeline/activity', { authenticated: true })
       ]);
-      if (!pipelineResponse.ok || !metricsResponse.ok || !forecastResponse.ok || !activityResponse.ok) {
+      if (!pipelineResponse.ok || !metricsResponse.ok || !activityResponse.ok) {
         throw new Error('Chargement pipeline impossible.');
       }
       const pipelineData = await pipelineResponse.json();
       this.pipelineColumns = pipelineData.columns;
       this.pipelineStages = pipelineData.stages;
       this.pipelineMetrics = (await metricsResponse.json()).metrics;
-      this.pipelineForecast = (await forecastResponse.json()).forecast;
+      this.pipelineForecast = forecastResponse.ok ? (await forecastResponse.json()).forecast : null;
       this.pipelineActivity = (await activityResponse.json()).activity;
     },
     async moveProspectToStage(prospect, stage) {
@@ -1270,9 +1319,23 @@ createApp({
           </div>
         </section>
 
-        <section v-if="route === 'settings'" class="panel empty-panel">
-          <h2>Parametres</h2>
-          <p>Socle pret pour les prochains reglages administrateur.</p>
+        <section v-if="route === 'settings'" class="panel">
+          <div class="panel-header"><h2>Parametres production</h2><button type="button" @click="loadSettings">Recharger</button></div>
+          <div class="settings-grid">
+            <article>
+              <h3>Modules</h3>
+              <label v-for="(_enabled, key) in featureFlags" :key="key" class="checkbox-field">
+                <input v-model="featureFlags[key]" type="checkbox" />
+                {{ key }}
+              </label>
+              <button type="button" @click="saveFeatureFlags">Sauvegarder modules</button>
+            </article>
+            <article>
+              <h3>Configuration avancee</h3>
+              <textarea v-model="runtimeSettingsJson" spellcheck="false"></textarea>
+              <button type="button" @click="saveRuntimeSettings">Sauvegarder configuration</button>
+            </article>
+          </div>
         </section>
       </main>
     </section>\`
@@ -1565,6 +1628,9 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91,
 .import-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .message-preview { display: grid; gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; background: #fbfcfe; }
 .message-preview textarea { min-height: 160px; }
+.settings-grid { display: grid; grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr); gap: 18px; padding: 18px; }
+.settings-grid article { display: grid; align-content: start; gap: 12px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
+.settings-grid textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
 .analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; }
 .analysis-grid article { display: grid; gap: 8px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
 .analysis-grid .analysis-main { grid-column: span 2; }
@@ -1640,6 +1706,7 @@ td strong, td small { display: block; }
   .topbar, .panel-header { align-items: flex-start; flex-direction: column; }
   .topbar-actions, .panel-header input { width: 100%; max-width: none; }
   .dashboard-grid, .status-strip, .admin-form, .prospect-form { grid-template-columns: 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
   .prospect-form textarea { grid-column: span 1; }
   .analysis-grid, .analysis-grid .analysis-main { grid-template-columns: 1fr; grid-column: span 1; }
   .compact-grid, .pipeline-mini, .activity-list article { grid-template-columns: 1fr; }

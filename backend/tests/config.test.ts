@@ -57,9 +57,6 @@ describe('loadConfig', () => {
       DATABASE_URL: 'postgres://visitor_os:visitor_os@localhost:5432/visitor_os'
     });
 
-    assert.equal(
-      config.database.url,
-      'postgres://visitor_os:visitor_os@localhost:5432/visitor_os'
-    );
+    assert.equal(config.database.url, 'postgres://visitor_os:visitor_os@localhost:5432/visitor_os');
   });
 });

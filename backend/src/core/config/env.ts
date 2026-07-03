@@ -4,74 +4,73 @@ import { z } from 'zod';
 
 const DEV_SESSION_SECRET = 'dev-only-session-secret-change-before-production';
 
-const environmentSchema = z
-  .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    APP_NAME: z.string().min(1).default('VISITOR-OS'),
-    APP_VERSION: z.string().min(1).default('1.0.0-beta'),
-    HOST: z.string().min(1).default('0.0.0.0'),
-    PORT: z.coerce.number().int().positive().max(65535).default(3000),
-    LOG_LEVEL: z
-      .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
-      .default('info'),
-    DATABASE_URL: z
-      .string()
-      .trim()
-      .optional()
-      .refine(
-        (value) =>
-          !value ||
-          ((value.startsWith('postgresql://') || value.startsWith('postgres://')) &&
-            z.string().url().safeParse(value).success),
-        'must start with postgresql:// or postgres://'
-      ),
-    DATABASE_SSL: z
-      .enum(['true', 'false'])
-      .default('false')
-      .transform((value) => value === 'true'),
-    DATABASE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-    ALLOWED_ORIGINS: z
-      .string()
-      .default('')
-      .transform((value) =>
-        value
-          .split(',')
-          .map((origin) => origin.trim())
-          .filter(Boolean)
-      ),
-    SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
-    RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
-    RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
-    CACHE_ENABLED: z
-      .enum(['true', 'false'])
-      .default('true')
-      .transform((value) => value === 'true'),
-    CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(30000),
-    FILE_LOGS_ENABLED: z
-      .enum(['true', 'false'])
-      .default('false')
-      .transform((value) => value === 'true'),
-    FILE_LOGS_DIR: z.string().trim().min(1).default('logs'),
-    FILE_LOG_MAX_BYTES: z.coerce.number().int().positive().default(5_000_000),
-    OPENAI_API_KEY: z.string().optional(),
-    RESEND_API_KEY: z.string().optional(),
-    NOTIFICATION_FROM_EMAIL: z.string().email().default('notifications@visitor-os.local'),
-    NOTIFICATION_RETRY_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(2),
-    NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-    BUSINESS_CONFIG_DIR: z.string().trim().min(1).default('../configs'),
-    ADMIN_SESSION_SECRET: z
-      .string()
-      .min(32)
-      .default(DEV_SESSION_SECRET),
-    ADMIN_SESSION_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
-    ADMIN_SESSION_RENEWAL_MS: z.coerce.number().int().positive().default(3_600_000),
-    JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
-    FIRST_ADMIN_EMAIL: z.string().email().optional(),
-    FIRST_ADMIN_PASSWORD: z.string().min(12).optional(),
-    FIRST_ADMIN_FIRST_NAME: z.string().min(1).default('VISITOR'),
-    FIRST_ADMIN_LAST_NAME: z.string().min(1).default('Admin'),
-    FIRST_ADMIN_ORGANIZATION_ID: z.string().uuid().optional()
-  });
+const environmentSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  APP_NAME: z.string().min(1).default('VISITOR-OS'),
+  APP_VERSION: z.string().min(1).default('1.0.0-beta'),
+  HOST: z.string().min(1).default('0.0.0.0'),
+  PORT: z.coerce.number().int().positive().max(65535).default(3000),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  DATABASE_URL: z
+    .string()
+    .trim()
+    .optional()
+    .refine(
+      (value) =>
+        !value ||
+        ((value.startsWith('postgresql://') || value.startsWith('postgres://')) &&
+          z.string().url().safeParse(value).success),
+      'must start with postgresql:// or postgres://'
+    ),
+  DATABASE_SSL: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  DATABASE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  ALLOWED_ORIGINS: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+    ),
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
+  CACHE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(30000),
+  FILE_LOGS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  FILE_LOGS_DIR: z.string().trim().min(1).default('logs'),
+  FILE_LOG_MAX_BYTES: z.coerce.number().int().positive().default(5_000_000),
+  OTEL_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  OTEL_SERVICE_NAME: z.string().trim().min(1).default('visitor-os-backend'),
+  OPENAI_API_KEY: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  NOTIFICATION_FROM_EMAIL: z.string().email().default('notifications@visitor-os.local'),
+  NOTIFICATION_RETRY_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(2),
+  NOTIFICATION_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  BUSINESS_CONFIG_DIR: z.string().trim().min(1).default('../configs'),
+  ADMIN_SESSION_SECRET: z.string().min(32).default(DEV_SESSION_SECRET),
+  ADMIN_SESSION_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
+  ADMIN_SESSION_RENEWAL_MS: z.coerce.number().int().positive().default(3_600_000),
+  JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3_600),
+  FIRST_ADMIN_EMAIL: z.string().email().optional(),
+  FIRST_ADMIN_PASSWORD: z.string().min(12).optional(),
+  FIRST_ADMIN_FIRST_NAME: z.string().min(1).default('VISITOR'),
+  FIRST_ADMIN_LAST_NAME: z.string().min(1).default('Admin'),
+  FIRST_ADMIN_ORGANIZATION_ID: z.string().uuid().optional()
+});
 
 export type AppConfig = {
   app: {
@@ -105,6 +104,10 @@ export type AppConfig = {
     enabled: boolean;
     directory: string;
     maxBytes: number;
+  };
+  observability?: {
+    openTelemetryEnabled: boolean;
+    serviceName: string;
   };
   ai: {
     openAiApiKey?: string;
@@ -178,6 +181,10 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       enabled: env.FILE_LOGS_ENABLED,
       directory: env.FILE_LOGS_DIR,
       maxBytes: env.FILE_LOG_MAX_BYTES
+    },
+    observability: {
+      openTelemetryEnabled: env.OTEL_ENABLED,
+      serviceName: env.OTEL_SERVICE_NAME
     },
     ai: {},
     notifications: {

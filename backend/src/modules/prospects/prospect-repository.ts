@@ -84,13 +84,7 @@ export type ProspectRecord = {
 export type ProspectScoreLabel = 'very_high' | 'high' | 'medium' | 'low' | 'ignore';
 
 export type ProspectPlatformFilter =
-  | 'instagram'
-  | 'twitter_x'
-  | 'mym'
-  | 'onlyfans'
-  | 'website'
-  | 'linktree'
-  | 'allmylinks';
+  'instagram' | 'twitter_x' | 'mym' | 'onlyfans' | 'website' | 'linktree' | 'allmylinks';
 
 export type ProspectListFilters = {
   organizationId?: string;
@@ -312,7 +306,10 @@ export class ProspectRepository {
         )
     `;
     const [countResult, prospectsResult] = await Promise.all([
-      this.database.query<{ count: string }>(`select count(*)::text as count from prospects ${where}`, params),
+      this.database.query<{ count: string }>(
+        `select count(*)::text as count from prospects ${where}`,
+        params
+      ),
       this.database.query<ProspectRecord>(
         `
         select *
@@ -467,7 +464,11 @@ export class ProspectRepository {
     return requireRow(result.rows[0], 'Prospect was not created');
   }
 
-  async updateCore(id: string, organizationId: string | undefined, input: ProspectInput): Promise<ProspectRecord | null> {
+  async updateCore(
+    id: string,
+    organizationId: string | undefined,
+    input: ProspectInput
+  ): Promise<ProspectRecord | null> {
     const scored = scoreProspect(input);
     const result = await this.database.query<ProspectRecord>(
       `
@@ -714,7 +715,9 @@ export class ProspectRepository {
 }
 
 export function scoreProspect(input: ProspectInput): { score: number; label: ProspectScoreLabel } {
-  const hasContact = Boolean(input.email || input.phone || input.instagram || input.twitterX || input.website);
+  const hasContact = Boolean(
+    input.email || input.phone || input.instagram || input.twitterX || input.website
+  );
   let score = 0;
   if (input.city) score += 10;
   if (input.email) score += 15;
@@ -857,7 +860,10 @@ function parseCsvLine(line: string): string[] {
 }
 
 function normalizeHeader(header: string): string {
-  return header.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return header
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
 }
 
 function normalizeCsvRow(organizationId: string, row: Record<string, string>): ProspectInput {
@@ -960,7 +966,11 @@ function toProspectsCsv(prospects: ProspectRecord[]): string {
     'notes'
   ];
   const lines = prospects.map((prospect) =>
-    headers.map((header) => csvEscape(csvValue((prospect as unknown as Record<string, unknown>)[header]))).join(',')
+    headers
+      .map((header) =>
+        csvEscape(csvValue((prospect as unknown as Record<string, unknown>)[header]))
+      )
+      .join(',')
   );
 
   return [headers.join(','), ...lines].join('\n');

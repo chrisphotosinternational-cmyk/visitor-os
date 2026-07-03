@@ -246,7 +246,8 @@ export function qualifyProspect(prospect: ProspectRecord): AIQualificationResult
   const portfolioLinks = countPresent([prospect.website, prospect.linktree, prospect.allmylinks]);
   const premiumPlatforms = countPresent([prospect.mym, prospect.onlyfans]);
   const hasDescription = textLength(prospect.description) >= 30;
-  const hasIdentity = countPresent([prospect.first_name, prospect.last_name, prospect.pseudo, prospect.company]) >= 1;
+  const hasIdentity =
+    countPresent([prospect.first_name, prospect.last_name, prospect.pseudo, prospect.company]) >= 1;
 
   if (hasIdentity) {
     strengths.push('Profil identifiable avec une base commerciale exploitable.');
@@ -315,11 +316,24 @@ export function qualifyProspect(prospect: ProspectRecord): AIQualificationResult
   const commercialOpportunity = opportunities[0] ?? 'Opportunite a qualifier manuellement.';
 
   return {
-    summary: buildSummary(prospect, socialPlatforms, commercialOpportunity, risks, recommended.offer, confidence),
+    summary: buildSummary(
+      prospect,
+      socialPlatforms,
+      commercialOpportunity,
+      risks,
+      recommended.offer,
+      confidence
+    ),
     strengths: ensureAtLeast(strengths, 'Profil exploitable apres verification manuelle.'),
-    weaknesses: ensureAtLeast(weaknesses, 'Aucune faiblesse majeure detectee dans les donnees disponibles.'),
+    weaknesses: ensureAtLeast(
+      weaknesses,
+      'Aucune faiblesse majeure detectee dans les donnees disponibles.'
+    ),
     opportunities: ensureAtLeast(opportunities, commercialOpportunity),
-    risks: ensureAtLeast(risks, 'Aucun risque critique detecte dans les donnees publiques disponibles.'),
+    risks: ensureAtLeast(
+      risks,
+      'Aucun risque critique detecte dans les donnees publiques disponibles.'
+    ),
     commercial_opportunity: commercialOpportunity,
     recommended_offer: `${recommended.offer} - ${recommended.justification}`,
     priority,
@@ -334,25 +348,48 @@ function recommendedOffer(
   socialPlatforms: string[]
 ): { offer: string; justification: string } {
   const activity = [prospect.activity, prospect.description].join(' ').toLowerCase();
-  if (prospect.mym) return { offer: 'Pack MYM', justification: 'Presence MYM detectee, offre contenu premium adaptee.' };
-  if (prospect.onlyfans) return { offer: 'Pack OnlyFans', justification: 'Presence OnlyFans detectee, offre contenu premium adaptee.' };
+  if (prospect.mym)
+    return {
+      offer: 'Pack MYM',
+      justification: 'Presence MYM detectee, offre contenu premium adaptee.'
+    };
+  if (prospect.onlyfans)
+    return {
+      offer: 'Pack OnlyFans',
+      justification: 'Presence OnlyFans detectee, offre contenu premium adaptee.'
+    };
   if (activity.includes('contenu') || socialPlatforms.length >= 2) {
-    return { offer: 'Creation de contenu', justification: 'Presence multi-plateformes utile pour une production reguliere.' };
+    return {
+      offer: 'Creation de contenu',
+      justification: 'Presence multi-plateformes utile pour une production reguliere.'
+    };
   }
   if (activity.includes('modele') || activity.includes('portrait')) {
-    return { offer: 'Portrait professionnel', justification: 'Profil compatible avec une approche portrait ou modele.' };
+    return {
+      offer: 'Portrait professionnel',
+      justification: 'Profil compatible avec une approche portrait ou modele.'
+    };
   }
   if (portfolioLinks > 0 && premiumPlatforms === 0) {
-    return { offer: 'Shooting premium', justification: 'Portfolio disponible, potentiel de proposition plus qualitative.' };
+    return {
+      offer: 'Shooting premium',
+      justification: 'Portfolio disponible, potentiel de proposition plus qualitative.'
+    };
   }
   if (activity.includes('pub') || activity.includes('marque')) {
     return { offer: 'Publicite', justification: 'Indices de positionnement commercial ou marque.' };
   }
   if (prospect.score >= 70) {
-    return { offer: 'Collaboration artistique', justification: 'Score CRM eleve et profil interessant pour une prise de contact respectueuse.' };
+    return {
+      offer: 'Collaboration artistique',
+      justification: 'Score CRM eleve et profil interessant pour une prise de contact respectueuse.'
+    };
   }
 
-  return { offer: 'Shooting decouverte', justification: 'Offre simple pour qualifier l interet sans pression commerciale.' };
+  return {
+    offer: 'Shooting decouverte',
+    justification: 'Offre simple pour qualifier l interet sans pression commerciale.'
+  };
 }
 
 function buildSummary(
@@ -365,7 +402,9 @@ function buildSummary(
 ): string {
   return [
     `${prospect.display_name} est un prospect ${prospect.score_label} avec un score CRM de ${prospect.score}.`,
-    prospect.activity ? `Activite detectee : ${prospect.activity}.` : 'Activite a confirmer manuellement.',
+    prospect.activity
+      ? `Activite detectee : ${prospect.activity}.`
+      : 'Activite a confirmer manuellement.',
     prospect.city ? `Localisation indiquee : ${prospect.city}.` : 'Localisation non renseignee.',
     prospect.email || prospect.phone
       ? `Moyens de contact : ${[prospect.email ? 'email' : '', prospect.phone ? 'telephone' : ''].filter(Boolean).join(', ')}.`
@@ -374,7 +413,9 @@ function buildSummary(
       ? `Plateformes presentes : ${socialPlatforms.join(', ')}.`
       : 'Aucune plateforme sociale renseignee.',
     commercialOpportunity,
-    risks.length > 0 ? `Risque principal : ${risks[0]}.` : 'Risque principal faible dans les donnees disponibles.',
+    risks.length > 0
+      ? `Risque principal : ${risks[0]}.`
+      : 'Risque principal faible dans les donnees disponibles.',
     `Offre recommandee : ${recommendedOffer}.`,
     `Indice de confiance : ${confidence}/100.`
   ].join('\n');

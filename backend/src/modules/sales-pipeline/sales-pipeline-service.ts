@@ -105,7 +105,9 @@ export type CrmActivityLogRecord = {
 export class SalesPipelineService {
   constructor(private readonly database: Database) {}
 
-  async list(filters: PipelineFilters = {}): Promise<{ columns: PipelineColumn[]; stages: readonly PipelineStage[] }> {
+  async list(
+    filters: PipelineFilters = {}
+  ): Promise<{ columns: PipelineColumn[]; stages: readonly PipelineStage[] }> {
     const result = await this.database.query<PipelineProspectCard>(
       `
       select
@@ -350,10 +352,7 @@ export class SalesPipelineService {
     };
   }
 
-  async forecast(
-    organizationId?: string,
-    config: ForecastConfig = {}
-  ): Promise<PipelineForecast> {
+  async forecast(organizationId?: string, config: ForecastConfig = {}): Promise<PipelineForecast> {
     const averageDealValue = positiveNumber(config.averageDealValue, 1200);
     const lowConversionRate = positiveNumber(config.lowConversionRate, 10);
     const mediumConversionRate = positiveNumber(config.mediumConversionRate, 20);
@@ -394,12 +393,14 @@ export class SalesPipelineService {
     };
   }
 
-  async activity(filters: {
-    organizationId?: string;
-    prospectId?: string;
-    actionType?: string;
-    userId?: string;
-  } = {}): Promise<CrmActivityLogRecord[]> {
+  async activity(
+    filters: {
+      organizationId?: string;
+      prospectId?: string;
+      actionType?: string;
+      userId?: string;
+    } = {}
+  ): Promise<CrmActivityLogRecord[]> {
     const result = await this.database.query<CrmActivityLogRecord>(
       `
       select

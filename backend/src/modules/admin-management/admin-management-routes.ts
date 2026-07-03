@@ -45,6 +45,13 @@ import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
 import type { AppCache } from '../../core/cache/app-cache.js';
 import type { InMemoryJobQueue } from '../../core/jobs/in-memory-job-queue.js';
+import {
+  defaultRuntimeSettings,
+  featureFlagKeys,
+  SettingsService,
+  type FeatureFlagKey,
+  type RuntimeSettingsUpdate
+} from '../settings/settings-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -227,6 +234,66 @@ const activityQuerySchema = z.object({
   userId: z.string().uuid().optional()
 });
 
+const featureFlagsPayloadSchema = z.object(
+  Object.fromEntries(featureFlagKeys.map((key) => [key, z.boolean().optional()])) as Record<
+    FeatureFlagKey,
+    z.ZodOptional<z.ZodBoolean>
+  >
+);
+
+const runtimeSettingsPayloadSchema: z.ZodType<RuntimeSettingsUpdate> = z
+  .object({
+    scoring: z
+      .object({
+        email: z.number().optional(),
+        phone: z.number().optional(),
+        city: z.number().optional(),
+        social: z.number().optional(),
+        premiumPlatform: z.number().optional(),
+        portfolio: z.number().optional(),
+        description: z.number().optional(),
+        noContactPenalty: z.number().optional(),
+        duplicatePenalty: z.number().optional()
+      })
+      .optional(),
+    pipeline: z
+      .object({
+        staleDays: z.number().int().positive().optional()
+      })
+      .optional(),
+    forecast: z
+      .object({
+        averageDealValue: z.number().nonnegative().optional(),
+        lowConversionRate: z.number().min(0).max(100).optional(),
+        mediumConversionRate: z.number().min(0).max(100).optional(),
+        highConversionRate: z.number().min(0).max(100).optional()
+      })
+      .optional(),
+    timeouts: z
+      .object({
+        enrichmentMs: z.number().int().positive().optional(),
+        notificationMs: z.number().int().positive().optional()
+      })
+      .optional(),
+    rateLimits: z
+      .object({
+        windowMs: z.number().int().positive().optional(),
+        maxRequests: z.number().int().positive().optional()
+      })
+      .optional(),
+    batch: z
+      .object({
+        size: z.number().int().positive().optional()
+      })
+      .optional(),
+    cache: z
+      .object({
+        ttlMs: z.number().int().nonnegative().optional()
+      })
+      .optional()
+  })
+  .partial();
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -244,6 +311,7 @@ export function registerAdminManagementRoutes(
   const aiQualification = new AIQualificationService(database);
   const enrichments = new PublicEnrichmentService(database);
   const pipeline = new SalesPipelineService(database);
+  const settings = new SettingsService(database);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
 
@@ -264,25 +332,78 @@ export function registerAdminManagementRoutes(
     const organizationId =
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
 
-    return cached(cache, cacheKey('dashboard', organizationId), ['dashboard', 'statistics'], async () => ({
-      organizationsCount:
-        context.user.role === 'SuperAdmin'
-          ? await organizations.count()
-          : context.user.organization_id
-            ? 1
-            : 0,
-      usersCount: await users.count(organizationId),
-      prospects: await prospects.metrics(organizationId),
-      contactHistory: await contactHistory.metrics(organizationId),
-      messageTemplates: await messageTemplates.metrics(organizationId),
-      aiQualification: await aiQualification.metrics(organizationId),
-      enrichments: await enrichments.metrics(organizationId),
-      pipeline: await pipeline.metrics(organizationId),
-      forecast: await pipeline.forecast(organizationId),
-      activity: await pipeline.activity(toActivityFilters({ organizationId })),
-      role: context.user.role,
-      organizationId: context.user.organization_id
-    }));
+    return cached(
+      cache,
+      cacheKey('dashboard', organizationId),
+      ['dashboard', 'statistics'],
+      async () => {
+        const featureFlags = await settings.featureFlags(organizationId);
+        const runtimeSettings = await settings.runtimeSettings(organizationId);
+
+        return {
+          organizationsCount:
+            context.user.role === 'SuperAdmin'
+              ? await organizations.count()
+              : context.user.organization_id
+                ? 1
+                : 0,
+          usersCount: await users.count(organizationId),
+          prospects: await prospects.metrics(organizationId),
+          contactHistory: await contactHistory.metrics(organizationId),
+          messageTemplates: await messageTemplates.metrics(organizationId),
+          aiQualification: featureFlags.ai ? await aiQualification.metrics(organizationId) : null,
+          enrichments: featureFlags.enrichment ? await enrichments.metrics(organizationId) : null,
+          pipeline: await pipeline.metrics(organizationId),
+          forecast: featureFlags.forecast ? await pipeline.forecast(organizationId) : null,
+          activity: await pipeline.activity(toActivityFilters({ organizationId })),
+          featureFlags,
+          settings: runtimeSettings,
+          role: context.user.role,
+          organizationId: context.user.organization_id
+        };
+      }
+    );
+  });
+
+  app.get('/admin-api/feature-flags', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'settings:access');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return { featureFlags: await settings.featureFlags(organizationId) };
+  });
+
+  app.patch('/admin-api/feature-flags', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'settings:access');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+    const body = featureFlagsPayloadSchema.parse(request.body);
+
+    return { featureFlags: await settings.updateFeatureFlags(organizationId, body) };
+  });
+
+  app.get('/admin-api/settings', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'settings:access');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return {
+      settings: await settings.runtimeSettings(organizationId),
+      defaults: defaultRuntimeSettings
+    };
+  });
+
+  app.patch('/admin-api/settings', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'settings:access');
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+    const body = runtimeSettingsPayloadSchema.parse(request.body);
+
+    return { settings: await settings.updateRuntimeSettings(organizationId, body) };
   });
 
   app.get('/admin-api/pipeline', async (request) => {
@@ -315,6 +436,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'prospects:read');
     const query = forecastQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+    await requireFeature(settings, 'forecast', organizationId);
 
     return {
       forecast: await cached(
@@ -333,12 +455,14 @@ export function registerAdminManagementRoutes(
     const organizationId = resolveOrganizationScope(context.user, query.organizationId);
 
     return {
-      activity: await pipeline.activity(toActivityFilters({
-        organizationId,
-        prospectId: query.prospectId,
-        actionType: query.actionType,
-        userId: query.userId
-      }))
+      activity: await pipeline.activity(
+        toActivityFilters({
+          organizationId,
+          prospectId: query.prospectId,
+          actionType: query.actionType,
+          userId: query.userId
+        })
+      )
     };
   });
 
@@ -488,6 +612,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'data:export');
     const query = prospectListQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireFeature(settings, 'exports', organizationId);
     const csv = await prospects.exportCsv(toProspectFilters(organizationId, query));
 
     reply.type('text/csv; charset=utf-8');
@@ -523,6 +648,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'data:export');
     const query = followUpQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireFeature(settings, 'exports', organizationId);
     const csv = await contactHistory.exportCsv(toContactHistoryFilters(organizationId, query));
 
     reply.type('text/csv; charset=utf-8');
@@ -536,6 +662,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'prospects:read');
     const query = enrichmentListQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireFeature(settings, 'enrichment', organizationId);
 
     return {
       enrichments: await enrichments.list(toEnrichmentFilters(organizationId, query)),
@@ -547,6 +674,7 @@ export function registerAdminManagementRoutes(
   app.get('/admin-api/enrichments/:enrichmentId', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:read');
+    await requireFeature(settings, 'enrichment', context.user.organization_id);
     const params = z.object({ enrichmentId: z.string().uuid() }).parse(request.params);
     const enrichment = await enrichments.find(
       params.enrichmentId,
@@ -560,6 +688,7 @@ export function registerAdminManagementRoutes(
   app.delete('/admin-api/enrichments/:enrichmentId', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:write');
+    await requireFeature(settings, 'enrichment', context.user.organization_id);
     const params = z.object({ enrichmentId: z.string().uuid() }).parse(request.params);
 
     return {
@@ -589,6 +718,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'data:export');
     const query = messageTemplateListQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireFeature(settings, 'exports', organizationId);
     reply.type('text/csv; charset=utf-8');
     reply.header('Content-Disposition', 'attachment; filename="visitor-os-message-templates.csv"');
 
@@ -600,6 +730,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'data:export');
     const query = messageTemplateListQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireFeature(settings, 'exports', organizationId);
     reply.type('text/csv; charset=utf-8');
     reply.header('Content-Disposition', 'attachment; filename="visitor-os-message-usage.csv"');
 
@@ -834,6 +965,7 @@ export function registerAdminManagementRoutes(
     const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
     const organizationId =
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    await requireFeature(settings, 'ai', organizationId);
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
     const analysis = await aiQualification.analyzeProspect(prospect);
@@ -854,6 +986,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'prospects:write');
     const body = analyzeBatchSchema.parse(request.body);
     const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireFeature(settings, 'ai', organizationId);
     const selectedProspects = body.prospectIds?.length
       ? (
           await Promise.all(
@@ -891,6 +1024,7 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'prospects:write');
     const body = enrichmentBatchSchema.parse(request.body);
     const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireFeature(settings, 'enrichment', organizationId);
     const baseProspects = body.prospectIds?.length
       ? (
           await Promise.all(
@@ -901,7 +1035,9 @@ export function registerAdminManagementRoutes(
     const selectedProspects = filterProspectsForEnrichmentMode(baseProspects, body.mode);
     const job = enrichments.createBatchJob(organizationId, selectedProspects.length);
     if (queue) {
-      queue.enqueue('public-enrichment-batch', () => enrichments.runBatch(job.id, selectedProspects));
+      queue.enqueue('public-enrichment-batch', () =>
+        enrichments.runBatch(job.id, selectedProspects)
+      );
     } else {
       void enrichments.runBatch(job.id, selectedProspects);
     }
@@ -926,6 +1062,7 @@ export function registerAdminManagementRoutes(
     const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
     const organizationId =
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    await requireFeature(settings, 'enrichment', organizationId);
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
     const results = await enrichments.enrichProspect(prospect);
@@ -952,6 +1089,7 @@ export function registerAdminManagementRoutes(
     const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
     const organizationId =
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    await requireFeature(settings, 'enrichment', organizationId);
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
 
@@ -1333,13 +1471,13 @@ function filterProspectsForEnrichmentMode(
   return prospects.filter((prospect) => {
     const hasUrl = Boolean(
       prospect.website ||
-        prospect.instagram ||
-        prospect.twitter_x ||
-        prospect.linktree ||
-        prospect.allmylinks ||
-        prospect.mym ||
-        prospect.onlyfans ||
-        prospect.source_url
+      prospect.instagram ||
+      prospect.twitter_x ||
+      prospect.linktree ||
+      prospect.allmylinks ||
+      prospect.mym ||
+      prospect.onlyfans ||
+      prospect.source_url
     );
     if (!hasUrl) return false;
     if (mode === 'all' || mode === 'not_enriched') return true;
@@ -1351,6 +1489,19 @@ function filterProspectsForEnrichmentMode(
 
 function optional<T>(value: T | null): T[] {
   return value ? [value] : [];
+}
+
+async function requireFeature(
+  settings: SettingsService,
+  feature: FeatureFlagKey,
+  organizationId?: string
+): Promise<void> {
+  if (await settings.isEnabled(feature, organizationId)) return;
+
+  throw new AppError(`Feature disabled: ${feature}`, {
+    statusCode: 403,
+    code: 'FEATURE_DISABLED'
+  });
 }
 
 async function cached<T>(

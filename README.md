@@ -501,7 +501,12 @@ Runtime capabilities:
 - in-memory queue wrapper for batch AI qualification and public enrichment;
 - expanded `GET /health` with database, cache, queue, log, uptime and version status;
 - `GET /metrics` with minimal Prometheus-compatible metrics;
-- optional rotating file logs: `application.log`, `error.log`, `audit.log`.
+- optional rotating file logs: `application.log`, `error.log`, `audit.log`;
+- request trace identifiers with `x-trace-id`;
+- audit trail foundation for important admin and CRM actions;
+- feature flags for AI, enrichment, forecast, advanced dashboard and exports;
+- central runtime configuration for scoring, pipeline, forecast, timeouts, rate limits, batch size and cache TTL;
+- GitHub Actions CI/CD for lint, tests, coverage, build, migration checks, security audit, packaging and releases.
 
 Configuration:
 
@@ -512,6 +517,8 @@ CACHE_TTL_MS=30000
 FILE_LOGS_ENABLED=false
 FILE_LOGS_DIR=logs
 FILE_LOG_MAX_BYTES=5000000
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=visitor-os-backend
 ```
 
 Production documents:
@@ -521,7 +528,14 @@ Production documents:
 - `docs/SECURITY.md`;
 - `docs/BACKUP.md`;
 - `docs/DEPLOYMENT.md`;
-- `docs/RELEASE_1.0.0-beta.md`.
+- `docs/RELEASE_1.0.0-beta.md`;
+- `docs/OBSERVABILITY.md`;
+- `docs/AUDIT-TRAIL.md`;
+- `docs/FEATURE-FLAGS.md`;
+- `docs/CONFIGURATION.md`;
+- `docs/CI-CD.md`;
+- `docs/COVERAGE.md`;
+- `KNOWN_LIMITATIONS.md`.
 
 ## Development Rule
 

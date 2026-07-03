@@ -20,6 +20,8 @@ model Organization {
   prospectEnrichments ProspectEnrichment[]
   prospectFieldSuggestions ProspectFieldSuggestion[]
   crmActivityLog CrmActivityLog[]
+  auditTrail AuditTrail[]
+  appSettings AppSetting[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([createdAt])
@@ -42,6 +44,7 @@ model User {
   messageTemplates MessageTemplate[]
   messageTemplateUsage MessageTemplateUsage[]
   crmActivityLog CrmActivityLog[]
+  auditTrail AuditTrail[]
 
   @@unique([organizationId, email])
   @@index([organizationId, role, status])
@@ -366,4 +369,41 @@ model CrmActivityLog {
   @@index([organizationId, actionType, createdAt])
   @@index([organizationId, userId, createdAt])
   @@map("crm_activity_log")
+}
+
+model AuditTrail {
+  id             String       @id @db.Uuid
+  organizationId String?      @map("organization_id") @db.Uuid
+  userId         String?      @map("user_id") @db.Uuid
+  ip             String?
+  userAgent      String?      @map("user_agent")
+  traceId        String?      @map("trace_id")
+  action         String
+  resource       String
+  resourceId     String?      @map("resource_id")
+  before         Json?
+  after          Json?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([traceId])
+  @@map("audit_trail")
+}
+
+model AppSetting {
+  id             String        @id @db.Uuid
+  organizationId String?       @map("organization_id") @db.Uuid
+  key            String
+  value          Json          @default("{}")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, key])
+  @@index([organizationId, key])
+  @@map("app_settings")
 }
