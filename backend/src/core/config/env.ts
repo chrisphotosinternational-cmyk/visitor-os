@@ -8,6 +8,7 @@ const environmentSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     APP_NAME: z.string().min(1).default('VISITOR-OS'),
+    APP_VERSION: z.string().min(1).default('1.0.0-beta'),
     HOST: z.string().min(1).default('0.0.0.0'),
     PORT: z.coerce.number().int().positive().max(65535).default(3000),
     LOG_LEVEL: z
@@ -41,6 +42,17 @@ const environmentSchema = z
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
+    CACHE_ENABLED: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((value) => value === 'true'),
+    CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(30000),
+    FILE_LOGS_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+    FILE_LOGS_DIR: z.string().trim().min(1).default('logs'),
+    FILE_LOG_MAX_BYTES: z.coerce.number().int().positive().default(5_000_000),
     OPENAI_API_KEY: z.string().optional(),
     RESEND_API_KEY: z.string().optional(),
     NOTIFICATION_FROM_EMAIL: z.string().email().default('notifications@visitor-os.local'),
@@ -64,6 +76,7 @@ const environmentSchema = z
 export type AppConfig = {
   app: {
     name: string;
+    version?: string;
     environment: 'development' | 'test' | 'production';
   };
   server: {
@@ -83,6 +96,15 @@ export type AppConfig = {
     allowedOrigins: string[];
     rateLimitWindowMs: number;
     rateLimitMaxRequests: number;
+  };
+  cache?: {
+    enabled: boolean;
+    ttlMs: number;
+  };
+  fileLogs?: {
+    enabled: boolean;
+    directory: string;
+    maxBytes: number;
   };
   ai: {
     openAiApiKey?: string;
@@ -127,6 +149,7 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   const config: AppConfig = {
     app: {
       name: env.APP_NAME,
+      version: env.APP_VERSION,
       environment: env.NODE_ENV
     },
     server: {
@@ -146,6 +169,15 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       allowedOrigins: env.ALLOWED_ORIGINS,
       rateLimitWindowMs: env.RATE_LIMIT_WINDOW_MS,
       rateLimitMaxRequests: env.RATE_LIMIT_MAX_REQUESTS
+    },
+    cache: {
+      enabled: env.CACHE_ENABLED,
+      ttlMs: env.CACHE_TTL_MS
+    },
+    fileLogs: {
+      enabled: env.FILE_LOGS_ENABLED,
+      directory: env.FILE_LOGS_DIR,
+      maxBytes: env.FILE_LOG_MAX_BYTES
     },
     ai: {},
     notifications: {

@@ -90,14 +90,22 @@ describe('createApp', () => {
     const body: {
       status: string;
       app: string;
+      version: string;
       environment: string;
+      database: string;
+      cache: { enabled: boolean };
+      queue: { enabled: boolean };
+      uptime: number;
     } = response.json();
 
-    assert.deepEqual(body, {
-      status: 'ok',
-      app: 'VISITOR-OS',
-      environment: 'test'
-    });
+    assert.equal(body.status, 'ok');
+    assert.equal(body.app, 'VISITOR-OS');
+    assert.equal(body.version, '1.0.0-beta');
+    assert.equal(body.environment, 'test');
+    assert.equal(body.database, 'ok');
+    assert.equal(body.cache.enabled, true);
+    assert.equal(body.queue.enabled, true);
+    assert.equal(typeof body.uptime, 'number');
 
     await app.close();
   });
@@ -162,6 +170,33 @@ describe('createApp', () => {
     assert.equal(ready.statusCode, 200);
     assert.equal((ready.json() as { status: string; database: string }).database, 'pending');
     assert.equal(connectionChecks, 0);
+
+    await app.close();
+  });
+
+  it('exposes production metrics without querying PostgreSQL', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent',
+        DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
+      }),
+      database: {
+        isConfigured: mock.fn(() => true),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger(),
+      readiness: { database: 'pending' }
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/metrics' });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'] ?? '', /text\/plain/);
+    assert.match(response.body, /visitor_os_uptime_seconds/);
+    assert.match(response.body, /visitor_os_database_state 1/);
 
     await app.close();
   });

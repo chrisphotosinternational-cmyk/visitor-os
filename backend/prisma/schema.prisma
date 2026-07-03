@@ -22,6 +22,7 @@ model Organization {
   crmActivityLog CrmActivityLog[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  @@index([createdAt])
   @@map("organizations")
 }
 
@@ -43,6 +44,7 @@ model User {
   crmActivityLog CrmActivityLog[]
 
   @@unique([organizationId, email])
+  @@index([organizationId, role, status])
   @@map("users")
 }
 
@@ -98,6 +100,8 @@ model Prospect {
   @@index([organizationId, status])
   @@index([organizationId, scoreLabel])
   @@index([organizationId, city])
+  @@index([organizationId, updatedAt, createdAt])
+  @@index([organizationId, score, updatedAt])
   @@map("prospects")
 }
 
@@ -144,6 +148,9 @@ model ContactHistory {
   @@index([prospectId, contactDate])
   @@index([organizationId, followUpDate])
   @@index([organizationId, outcome])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, contactDate])
+  @@index([organizationId, userId, contactDate])
   @@map("contact_history")
 }
 
@@ -250,6 +257,8 @@ model ProspectAiAnalysis {
 
   @@index([prospectId, createdAt])
   @@index([organizationId, priority, confidence])
+  @@index([organizationId, createdAt])
+  @@index([prospectId, organizationId, createdAt])
   @@map("prospect_ai_analysis")
 }
 
@@ -286,6 +295,8 @@ model ProspectEnrichment {
   @@index([prospectId, createdAt])
   @@index([organizationId, status, createdAt])
   @@index([organizationId, sourceType, confidenceScore])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, confidenceScore])
   @@map("prospect_enrichments")
 }
 
@@ -306,6 +317,7 @@ model ProspectFieldSuggestion {
 
   @@index([prospectId, status, createdAt])
   @@index([organizationId, status, createdAt])
+  @@index([prospectId, organizationId, status, createdAt])
   @@map("prospect_field_suggestions")
 }
 
@@ -352,5 +364,6 @@ model CrmActivityLog {
   @@index([organizationId, createdAt])
   @@index([prospectId, createdAt])
   @@index([organizationId, actionType, createdAt])
+  @@index([organizationId, userId, createdAt])
   @@map("crm_activity_log")
 }

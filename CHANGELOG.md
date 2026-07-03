@@ -2,6 +2,17 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## 1.0.0-beta - Sprint 12
+
+- Added production readiness performance report.
+- Added PostgreSQL performance indexes for prospects, contact history, AI analysis, enrichments, users, organizations and activity logs.
+- Added in-memory TTL cache for dashboard, pipeline metrics, forecast and latest AI analysis.
+- Added queue abstraction for batch AI qualification and public enrichment.
+- Expanded `/health` with database, cache, queue, log, uptime and version status.
+- Added `/metrics` endpoint for minimal production monitoring.
+- Added optional rotating file logs for application, error and audit events.
+- Updated deployment, backup, security and performance documentation.
+
 ## v0.15.0-auth-production
 
 - Sprint 3 authentication validated in production.

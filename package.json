@@ -1,6 +1,6 @@
 {
   "name": "visitor-os",
-  "version": "0.12.1-beta-prep",
+  "version": "1.0.0-beta",
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "scripts": {

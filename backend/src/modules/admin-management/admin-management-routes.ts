@@ -43,6 +43,8 @@ import {
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
+import type { AppCache } from '../../core/cache/app-cache.js';
+import type { InMemoryJobQueue } from '../../core/jobs/in-memory-job-queue.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -228,7 +230,11 @@ const activityQuerySchema = z.object({
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
-  config: AppConfig
+  config: AppConfig,
+  dependencies?: {
+    cache?: AppCache;
+    queue?: InMemoryJobQueue;
+  }
 ): void {
   const organizations = new OrganizationRepository(database);
   const users = new UserRepository(database);
@@ -238,6 +244,19 @@ export function registerAdminManagementRoutes(
   const aiQualification = new AIQualificationService(database);
   const enrichments = new PublicEnrichmentService(database);
   const pipeline = new SalesPipelineService(database);
+  const cache = dependencies?.cache;
+  const queue = dependencies?.queue;
+
+  app.addHook('onResponse', (request, reply, done) => {
+    if (
+      request.url.startsWith('/admin-api') &&
+      request.method !== 'GET' &&
+      reply.statusCode < 400
+    ) {
+      cache?.invalidateTags(['dashboard', 'pipeline', 'forecast', 'ai-analysis', 'statistics']);
+    }
+    done();
+  });
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
@@ -245,7 +264,7 @@ export function registerAdminManagementRoutes(
     const organizationId =
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
 
-    return {
+    return cached(cache, cacheKey('dashboard', organizationId), ['dashboard', 'statistics'], async () => ({
       organizationsCount:
         context.user.role === 'SuperAdmin'
           ? await organizations.count()
@@ -263,7 +282,7 @@ export function registerAdminManagementRoutes(
       activity: await pipeline.activity(toActivityFilters({ organizationId })),
       role: context.user.role,
       organizationId: context.user.organization_id
-    };
+    }));
   });
 
   app.get('/admin-api/pipeline', async (request) => {
@@ -281,7 +300,14 @@ export function registerAdminManagementRoutes(
     const query = pipelineQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationScope(context.user, query.organizationId);
 
-    return { metrics: await pipeline.metrics(organizationId) };
+    return {
+      metrics: await cached(
+        cache,
+        cacheKey('pipeline-metrics', organizationId),
+        ['pipeline', 'statistics'],
+        () => pipeline.metrics(organizationId)
+      )
+    };
   });
 
   app.get('/admin-api/pipeline/forecast', async (request) => {
@@ -290,7 +316,14 @@ export function registerAdminManagementRoutes(
     const query = forecastQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationScope(context.user, query.organizationId);
 
-    return { forecast: await pipeline.forecast(organizationId, toForecastConfig(query)) };
+    return {
+      forecast: await cached(
+        cache,
+        cacheKey('pipeline-forecast', organizationId, JSON.stringify(toForecastConfig(query))),
+        ['forecast', 'pipeline'],
+        () => pipeline.forecast(organizationId, toForecastConfig(query))
+      )
+    };
   });
 
   app.get('/admin-api/pipeline/activity', async (request) => {
@@ -768,7 +801,12 @@ export function registerAdminManagementRoutes(
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
 
     return {
-      analysis: await aiQualification.latestForProspect(params.prospectId, prospect.organization_id)
+      analysis: await cached(
+        cache,
+        cacheKey('ai-analysis', prospect.organization_id, params.prospectId),
+        ['ai-analysis'],
+        () => aiQualification.latestForProspect(params.prospectId, prospect.organization_id)
+      )
     };
   });
 
@@ -826,7 +864,13 @@ export function registerAdminManagementRoutes(
         ? await prospects.listAllCore(organizationId)
         : (await prospects.listCore({ organizationId, page: 1, pageSize: 25 })).prospects;
     const job = aiQualification.createBatchJob(organizationId, selectedProspects.length);
-    void aiQualification.runBatch(job.id, selectedProspects);
+    if (queue) {
+      queue.enqueue('ai-qualification-batch', () =>
+        aiQualification.runBatch(job.id, selectedProspects)
+      );
+    } else {
+      void aiQualification.runBatch(job.id, selectedProspects);
+    }
 
     return { job };
   });
@@ -856,7 +900,11 @@ export function registerAdminManagementRoutes(
       : await prospects.listAllCore(organizationId);
     const selectedProspects = filterProspectsForEnrichmentMode(baseProspects, body.mode);
     const job = enrichments.createBatchJob(organizationId, selectedProspects.length);
-    void enrichments.runBatch(job.id, selectedProspects);
+    if (queue) {
+      queue.enqueue('public-enrichment-batch', () => enrichments.runBatch(job.id, selectedProspects));
+    } else {
+      void enrichments.runBatch(job.id, selectedProspects);
+    }
 
     return { job };
   });
@@ -1303,6 +1351,21 @@ function filterProspectsForEnrichmentMode(
 
 function optional<T>(value: T | null): T[] {
   return value ? [value] : [];
+}
+
+async function cached<T>(
+  cache: AppCache | undefined,
+  key: string,
+  tags: string[],
+  producer: () => Promise<T>
+): Promise<T> {
+  if (!cache) return producer();
+
+  return cache.getOrSet(key, tags, producer);
+}
+
+function cacheKey(...parts: Array<string | number | undefined>): string {
+  return parts.map((part) => part ?? 'global').join(':');
 }
 
 function coreProspectStatuses() {

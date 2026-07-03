@@ -84,6 +84,7 @@ createApp({
       draggedProspectId: '',
       loading: false,
       error: '',
+      notification: '',
       sessionTimer: null
     };
   },
@@ -757,14 +758,34 @@ createApp({
         }
       }, 10000);
     },
-    apiRequest(path, options = {}) {
+    notify(message) {
+      this.notification = message;
+      window.setTimeout(() => {
+        if (this.notification === message) this.notification = '';
+      }, 3500);
+    },
+    async apiRequest(path, options = {}) {
       const headers = {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.authenticated ? { Authorization: 'Bearer ' + this.token } : {}),
         ...(options.headers ?? {})
       };
-      return fetch(this.apiBaseUrl + path, { ...options, headers });
+      const retries = options.method && options.method !== 'GET' ? 0 : 1;
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+          const response = await fetch(this.apiBaseUrl + path, { ...options, headers });
+          if (response.status >= 500 && attempt < retries) {
+            await delay(350);
+            continue;
+          }
+          return response;
+        } catch (error) {
+          if (attempt >= retries) throw error;
+          await delay(350);
+        }
+      }
+      throw new Error('API indisponible.');
     }
   },
   template: \`
@@ -800,6 +821,10 @@ createApp({
           <div class="topbar-actions"><span class="user-chip">{{ userName }}</span><button type="button" @click="logout()">Deconnexion</button></div>
         </header>
         <p v-if="error" class="error-message">{{ error }}</p>
+        <p v-if="notification" class="toast-message">{{ notification }}</p>
+        <div v-if="loading" class="loading-skeleton" aria-label="Chargement">
+          <span></span><span></span><span></span>
+        </div>
 
         <section v-if="route === 'dashboard'" class="dashboard-grid" aria-label="Etat general">
           <article class="metric"><span>Organisations</span><strong>{{ dashboard?.organizationsCount ?? 0 }}</strong><small>PostgreSQL</small></article>
@@ -1424,6 +1449,10 @@ async function responseJsonOrFallback(result, fallback) {
   return result.value.json();
 }
 
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function extractTokenExpiration(token) {
   try {
     const [, payload] = token.split('.');
@@ -1484,6 +1513,12 @@ h1, h2, p, .metric strong, .metric small { margin: 0; }
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91, 0.18); border-color: #166a5b; }
 .error-message { border: 1px solid #fecaca; border-radius: 6px; margin: 0 0 14px; padding: 10px 12px; color: #991b1b; background: #fff1f2; }
+.toast-message { position: sticky; top: 12px; z-index: 4; border: 1px solid #a7f3d0; border-radius: 6px; margin: 0 0 14px; padding: 10px 12px; color: #065f46; background: #ecfdf5; }
+.loading-skeleton { display: grid; gap: 10px; margin: 0 0 14px; }
+.loading-skeleton span { display: block; height: 12px; border-radius: 999px; background: linear-gradient(90deg, #e7edf5, #f6f8fb, #e7edf5); background-size: 220% 100%; animation: shimmer 1.2s linear infinite; }
+.loading-skeleton span:nth-child(2) { width: 72%; }
+.loading-skeleton span:nth-child(3) { width: 48%; }
+@keyframes shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
 .status-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 4px 0 0; }
 .status-strip div { border: 1px solid #e4e9f0; border-radius: 6px; padding: 10px; background: #f8fafc; }
 .status-strip dt { color: #647084; font-size: 12px; }

@@ -1,5 +1,15 @@
 # Roadmap
 
+## Current Development - 1.0.0-beta
+
+- Production readiness
+- PostgreSQL performance indexes
+- Dashboard and pipeline cache
+- Batch job queue abstraction
+- Enhanced health and metrics endpoints
+- Optional file logs with rotation
+- Backup, performance and security documentation
+
 ## Current Development - v0.12.0-beta-prep
 
 - Production deployment preparation

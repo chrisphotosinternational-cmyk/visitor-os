@@ -61,6 +61,45 @@ Voir :
 deployment/RAILWAY.md
 ```
 
+## Sprint 12 Health And Metrics
+
+Production services must expose:
+
+- `GET /live` for liveness;
+- `GET /ready` for readiness;
+- `GET /health` for database/cache/queue/log status;
+- `GET /metrics` for minimal Prometheus-compatible metrics.
+
+Railway should keep using `/ready` for deployment healthchecks.
+
+Use `/health` after deployment to verify:
+
+- database state;
+- cache state;
+- queue state;
+- uptime;
+- application version.
+
+## Runtime Logs
+
+File logs are optional because SaaS platforms already collect stdout/stderr.
+
+Enable only when needed:
+
+```text
+FILE_LOGS_ENABLED=true
+FILE_LOGS_DIR=logs
+FILE_LOG_MAX_BYTES=5000000
+```
+
+Generated files:
+
+- `logs/application.log`;
+- `logs/error.log`;
+- `logs/audit.log`.
+
+Do not store these logs in a public bucket.
+
 ## Fly.io
 
 Option plus technique.
@@ -131,4 +170,3 @@ Les fichiers Docker Compose du depot servent uniquement a :
 - reference technique.
 
 Ils ne sont pas la recommandation pour l'hebergement Web OVH.
-

@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Development version: `v0.12.0-beta-prep`.
+Development version: `1.0.0-beta`.
 
 The first working MVP is available:
 
@@ -30,6 +30,7 @@ The first working MVP is available:
 - Document Intelligence RC2 with real file extraction, configurable chunking and indexing queue.
 - Production deployment preparation with external SaaS guidance, health checks and backup/restore runbooks.
 - External SaaS deployment guidance for Render/Railway with managed PostgreSQL.
+- Production readiness layer with performance indexes, cache, queue, monitoring and optional file logs.
 
 ## Planned Modules
 
@@ -487,6 +488,40 @@ Limits:
 - no automatic status progression outside explicit user actions and existing contact-history rules;
 - no predictive analytics;
 - forecast values must be configured and interpreted by the administrator.
+
+## Production Readiness
+
+Sprint 12 prepares VISITOR-OS for beta production operation without changing the business scope.
+
+Runtime capabilities:
+
+- PostgreSQL indexes for CRM, pipeline, AI, enrichment, activity and admin queries;
+- in-memory TTL cache for dashboard, pipeline metrics, forecast and latest AI analysis;
+- broad cache invalidation after successful admin mutations;
+- in-memory queue wrapper for batch AI qualification and public enrichment;
+- expanded `GET /health` with database, cache, queue, log, uptime and version status;
+- `GET /metrics` with minimal Prometheus-compatible metrics;
+- optional rotating file logs: `application.log`, `error.log`, `audit.log`.
+
+Configuration:
+
+```text
+APP_VERSION=1.0.0-beta
+CACHE_ENABLED=true
+CACHE_TTL_MS=30000
+FILE_LOGS_ENABLED=false
+FILE_LOGS_DIR=logs
+FILE_LOG_MAX_BYTES=5000000
+```
+
+Production documents:
+
+- `performance_report.md`;
+- `docs/PERFORMANCE.md`;
+- `docs/SECURITY.md`;
+- `docs/BACKUP.md`;
+- `docs/DEPLOYMENT.md`;
+- `docs/RELEASE_1.0.0-beta.md`.
 
 ## Development Rule
 
