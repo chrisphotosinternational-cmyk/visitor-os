@@ -17,6 +17,8 @@ model Organization {
   messageTemplates MessageTemplate[]
   messageTemplateUsage MessageTemplateUsage[]
   prospectAiAnalysis ProspectAiAnalysis[]
+  prospectEnrichments ProspectEnrichment[]
+  prospectFieldSuggestions ProspectFieldSuggestion[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("organizations")
@@ -87,6 +89,8 @@ model Prospect {
   contactHistory ContactHistory[]
   messageTemplateUsage MessageTemplateUsage[]
   aiAnalysis      ProspectAiAnalysis[]
+  enrichments     ProspectEnrichment[]
+  fieldSuggestions ProspectFieldSuggestion[]
 
   @@index([organizationId, status])
   @@index([organizationId, scoreLabel])
@@ -251,4 +255,79 @@ enum AiQualificationPriority {
   high
   medium
   low
+}
+
+model ProspectEnrichment {
+  id                  String                 @id @db.Uuid
+  organizationId      String                 @map("organization_id") @db.Uuid
+  prospectId          String                 @map("prospect_id") @db.Uuid
+  sourceType          EnrichmentSourceType   @map("source_type")
+  sourceUrl           String                 @map("source_url")
+  pageTitle           String?                @map("page_title")
+  metaDescription     String?                @map("meta_description")
+  detectedEmails      Json                   @default("[]") @map("detected_emails")
+  detectedPhones      Json                   @default("[]") @map("detected_phones")
+  detectedSocialLinks Json                   @default("[]") @map("detected_social_links")
+  detectedPlatforms   Json                   @default("[]") @map("detected_platforms")
+  detectedLocation    String?                @map("detected_location")
+  detectedActivity    String?                @map("detected_activity")
+  extractedSummary    String?                @map("extracted_summary")
+  confidenceScore     Int                    @default(0) @map("confidence_score")
+  status              EnrichmentStatus       @default(pending)
+  errorMessage        String?                @map("error_message")
+  createdAt           DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime               @default(now()) @map("updated_at") @db.Timestamptz
+  organization        Organization           @relation(fields: [organizationId], references: [id])
+  prospect            Prospect               @relation(fields: [prospectId], references: [id])
+
+  @@index([prospectId, createdAt])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, sourceType, confidenceScore])
+  @@map("prospect_enrichments")
+}
+
+model ProspectFieldSuggestion {
+  id              String           @id @db.Uuid
+  organizationId  String           @map("organization_id") @db.Uuid
+  prospectId      String           @map("prospect_id") @db.Uuid
+  fieldName       String           @map("field_name")
+  currentValue    String?          @map("current_value")
+  suggestedValue  String           @map("suggested_value")
+  sourceUrl       String           @map("source_url")
+  confidenceScore Int              @default(0) @map("confidence_score")
+  status          SuggestionStatus @default(pending)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  prospect        Prospect         @relation(fields: [prospectId], references: [id])
+
+  @@index([prospectId, status, createdAt])
+  @@index([organizationId, status, createdAt])
+  @@map("prospect_field_suggestions")
+}
+
+enum EnrichmentSourceType {
+  website
+  instagram_public
+  x_public
+  linktree
+  allmylinks
+  mym_public
+  onlyfans_public
+  other
+}
+
+enum EnrichmentStatus {
+  pending
+  success
+  partial
+  failed
+  blocked
+  skipped
+}
+
+enum SuggestionStatus {
+  pending
+  accepted
+  rejected
 }

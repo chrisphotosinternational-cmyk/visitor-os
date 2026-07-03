@@ -804,6 +804,202 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('enriches a public prospect profile and generates field suggestions', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        '<html><head><title>Studio Public</title><meta name="description" content="Photographe et modele basee a Albi"></head><body>Contact public hello@example.com +33 6 11 22 33 44 <a href="https://instagram.com/publicmodel">Instagram</a> city: Albi content creator</body></html>',
+        { status: 200, headers: { 'content-type': 'text/html' } }
+      );
+    const app = await createAuthTestApp();
+    try {
+      const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+      const prospect = await createTestProspect(app, token, {
+        organizationId: ORG_A,
+        pseudo: 'public_profile',
+        website: 'https://example.com/profile'
+      });
+      const response = await app.inject({
+        method: 'POST',
+        url: `/admin-api/prospects/${prospect.id}/enrich`,
+        headers: { authorization: `Bearer ${token}` }
+      });
+      const body = response.json() as {
+        enrichments: Array<{ status: string; detected_emails: string[]; detected_phones: string[] }>;
+        suggestions: Array<{ field_name: string; suggested_value: string; status: string }>;
+      };
+
+      assert.equal(response.statusCode, 200);
+      assert.equal(body.enrichments[0]?.status, 'success');
+      assert.deepEqual(body.enrichments[0]?.detected_emails, ['hello@example.com']);
+      assert.ok(body.enrichments[0]?.detected_phones.length);
+      assert.ok(body.suggestions.some((suggestion) => suggestion.field_name === 'email'));
+      assert.ok(body.suggestions.every((suggestion) => suggestion.status === 'pending'));
+    } finally {
+      globalThis.fetch = originalFetch;
+      await app.close();
+    }
+  });
+
+  it('accepts and rejects enrichment suggestions without automatic overwrite', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('<html><body>Contact visible contact@suggestion.test city: Lyon</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      });
+    const app = await createAuthTestApp();
+    try {
+      const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+      const prospect = await createTestProspect(app, token, {
+        organizationId: ORG_A,
+        pseudo: 'suggest_profile',
+        website: 'https://example.com/suggest'
+      });
+      const enriched = await app.inject({
+        method: 'POST',
+        url: `/admin-api/prospects/${prospect.id}/enrich`,
+        headers: { authorization: `Bearer ${token}` }
+      });
+      const suggestions = (enriched.json() as { suggestions: Array<{ id: string; field_name: string }> })
+        .suggestions;
+      const emailSuggestion = suggestions.find((suggestion) => suggestion.field_name === 'email');
+      assert.ok(emailSuggestion);
+      const beforeAccept = await app.inject({
+        method: 'GET',
+        url: `/admin-api/prospects/${prospect.id}`,
+        headers: { authorization: `Bearer ${token}` }
+      });
+      assert.equal((beforeAccept.json() as { prospect: { email: string | null } }).prospect.email, null);
+
+      const accepted = await app.inject({
+        method: 'POST',
+        url: `/admin-api/prospects/${prospect.id}/suggestions/${emailSuggestion.id}/accept`,
+        headers: { authorization: `Bearer ${token}` }
+      });
+      assert.equal(accepted.statusCode, 200);
+      assert.equal(
+        (accepted.json() as { prospect: { email: string }; aiAnalysisStale: boolean }).prospect
+          .email,
+        'contact@suggestion.test'
+      );
+      assert.equal(
+        (accepted.json() as { prospect: { email: string }; aiAnalysisStale: boolean })
+          .aiAnalysisStale,
+        true
+      );
+
+      const remaining = await app.inject({
+        method: 'GET',
+        url: `/admin-api/prospects/${prospect.id}/suggestions`,
+        headers: { authorization: `Bearer ${token}` }
+      });
+      const rejectable = (remaining.json() as { suggestions: Array<{ id: string; status: string }> })
+        .suggestions.find((suggestion) => suggestion.status === 'pending');
+      if (rejectable) {
+        const rejected = await app.inject({
+          method: 'POST',
+          url: `/admin-api/prospects/${prospect.id}/suggestions/${rejectable.id}/reject`,
+          headers: { authorization: `Bearer ${token}` }
+        });
+        assert.equal(rejected.statusCode, 200);
+        assert.equal((rejected.json() as { suggestion: { status: string } }).suggestion.status, 'rejected');
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      await app.close();
+    }
+  });
+
+  it('keeps enrichments isolated by organization and records blocked sources', async () => {
+    const app = await createAuthTestApp();
+    const adminToken = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const superToken = await jwtLogin(app, 'super@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, superToken, {
+      organizationId: ORG_B,
+      pseudo: 'blocked_profile',
+      website: 'https://example.com/login/private'
+    });
+    const crossTenant = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/enrich`,
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    const blocked = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/enrich`,
+      headers: { authorization: `Bearer ${superToken}` }
+    });
+
+    assert.equal(crossTenant.statusCode, 404);
+    assert.equal(blocked.statusCode, 200);
+    assert.equal(
+      (blocked.json() as { enrichments: Array<{ status: string }> }).enrichments[0]?.status,
+      'blocked'
+    );
+    await app.close();
+  });
+
+  it('runs public enrichment batch and updates dashboard metrics', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response('<html><title>Batch</title><body>hello@batch.test Instagram city: Albi</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      });
+    const app = await createAuthTestApp();
+    try {
+      const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+      await createTestProspect(app, token, {
+        organizationId: ORG_A,
+        pseudo: 'enrich_batch_one',
+        website: 'https://example.com/one'
+      });
+      await createTestProspect(app, token, {
+        organizationId: ORG_A,
+        pseudo: 'enrich_batch_two',
+        linktree: 'batchtwo'
+      });
+      const started = await app.inject({
+        method: 'POST',
+        url: '/admin-api/prospects/enrich-batch',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { mode: 'all' }
+      });
+      const jobId = (started.json() as { job: { id: string } }).job.id;
+      let job = await app.inject({
+        method: 'GET',
+        url: `/admin-api/prospects/enrich-batch/${jobId}`,
+        headers: { authorization: `Bearer ${token}` }
+      });
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        if ((job.json() as { job: { status: string } }).job.status === 'completed') break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        job = await app.inject({
+          method: 'GET',
+          url: `/admin-api/prospects/enrich-batch/${jobId}`,
+          headers: { authorization: `Bearer ${token}` }
+        });
+      }
+      const dashboard = await app.inject({
+        method: 'GET',
+        url: '/admin-api/dashboard',
+        headers: { authorization: `Bearer ${token}` }
+      });
+
+      assert.equal(started.statusCode, 200);
+      assert.equal(job.statusCode, 200);
+      assert.equal((job.json() as { job: { status: string } }).job.status, 'completed');
+      assert.ok(
+        (dashboard.json() as { enrichments: { enrichedProspects: number } }).enrichments
+          .enrichedProspects >= 2
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      await app.close();
+    }
+  });
+
   it('logs in with valid credentials and exposes current user', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'admin@example.com', 'test-password-123');
@@ -1014,6 +1210,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const messageTemplates = new Map<string, Record<string, unknown>>();
   const messageTemplateUsage = new Map<string, Record<string, unknown>>();
   const prospectAiAnalysis = new Map<string, Record<string, unknown>>();
+  const prospectEnrichments = new Map<string, Record<string, unknown>>();
+  const prospectFieldSuggestions = new Map<string, Record<string, unknown>>();
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -1288,6 +1486,140 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         );
       }
 
+      if (sql.includes('insert into prospect_enrichments')) {
+        const row = prospectEnrichmentFromValues(values);
+        prospectEnrichments.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('insert into prospect_field_suggestions')) {
+        const row = prospectFieldSuggestionFromValues(values);
+        prospectFieldSuggestions.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('from prospect_enrichments e') && sql.includes('enriched_prospects')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const rows = filterProspectEnrichments(prospectEnrichments, organizationId);
+        const suggestions = filterProspectFieldSuggestions(prospectFieldSuggestions, organizationId);
+        return result([
+          {
+            enriched_prospects: String(new Set(rows.map((row) => row.prospect_id)).size),
+            successful: String(rows.filter((row) => row.status === 'success').length),
+            partial: String(rows.filter((row) => row.status === 'partial').length),
+            blocked: String(rows.filter((row) => row.status === 'blocked').length),
+            pending_suggestions: String(
+              suggestions.filter((row) => row.status === 'pending').length
+            ),
+            detected_emails: String(
+              rows.reduce((sum, row) => sum + parseJsonArray(row.detected_emails).length, 0)
+            ),
+            detected_phones: String(
+              rows.reduce((sum, row) => sum + parseJsonArray(row.detected_phones).length, 0)
+            )
+          }
+        ]);
+      }
+
+      if (sql.includes('jsonb_array_elements_text(e.detected_platforms)')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const counts = new Map<string, number>();
+        for (const row of filterProspectEnrichments(prospectEnrichments, organizationId)) {
+          for (const platform of parseJsonArray(row.detected_platforms)) {
+            const platformName = valueToString(platform);
+            counts.set(platformName, (counts.get(platformName) ?? 0) + 1);
+          }
+        }
+        return result(
+          [...counts.entries()].map(([platform, count]) => ({ platform, count: String(count) }))
+        );
+      }
+
+      if (sql.includes('select * from prospect_enrichments where id')) {
+        const row = prospectEnrichments.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          optional(
+            row && (!organizationId || row.organization_id === organizationId) ? row : undefined
+          )
+        );
+      }
+
+      if (sql.includes('from prospect_enrichments') && sql.includes('where prospect_id')) {
+        const prospectId = valueToString(values[0]);
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          filterProspectEnrichments(prospectEnrichments, organizationId).filter(
+            (row) => row.prospect_id === prospectId
+          )
+        );
+      }
+
+      if (sql.includes('from prospect_field_suggestions') && sql.includes('where prospect_id')) {
+        const prospectId = valueToString(values[0]);
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          filterProspectFieldSuggestions(prospectFieldSuggestions, organizationId).filter(
+            (row) => row.prospect_id === prospectId
+          )
+        );
+      }
+
+      if (sql.includes('select * from prospect_field_suggestions where id')) {
+        const row = prospectFieldSuggestions.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          optional(
+            row && (!organizationId || row.organization_id === organizationId) ? row : undefined
+          )
+        );
+      }
+
+      if (sql.includes("set status = 'accepted'") && sql.includes('prospect_field_suggestions')) {
+        const row = prospectFieldSuggestions.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row.status = 'accepted';
+        row.updated_at = new Date();
+        return result([row]);
+      }
+
+      if (sql.includes("set status = 'rejected'") && sql.includes('prospect_field_suggestions')) {
+        const row = prospectFieldSuggestions.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row.status = 'rejected';
+        row.updated_at = new Date();
+        return result([row]);
+      }
+
+      if (sql.includes('delete from prospect_enrichments')) {
+        const row = prospectEnrichments.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) {
+          return { ...result([]), rowCount: 0 };
+        }
+        prospectEnrichments.delete(String(values[0]));
+        return { ...result([]), rowCount: 1 };
+      }
+
+      if (sql.includes('from prospect_enrichments') && sql.includes('order by created_at')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const status = values[1] ? valueToString(values[1]) : null;
+        const sourceType = values[2] ? valueToString(values[2]) : null;
+        const confidenceMin = values[3] === null || values[3] === undefined ? null : Number(values[3]);
+        const city = valueToString(values[4] ?? '').replaceAll('%', '').toLowerCase();
+        const platform = values[5] ? valueToString(values[5]) : null;
+        return result(
+          filterProspectEnrichments(prospectEnrichments, organizationId).filter(
+            (row) =>
+              (!status || row.status === status) &&
+              (!sourceType || row.source_type === sourceType) &&
+              (confidenceMin === null || Number(row.confidence_score) >= confidenceMin) &&
+              (!city || valueToString(row.detected_location).toLowerCase().includes(city)) &&
+              (!platform || parseJsonArray(row.detected_platforms).includes(platform))
+          )
+        );
+      }
+
       if (sql.includes('from contact_history') && sql.includes('total_contacts')) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const rows = filterContactHistory(contactHistory, organizationId);
@@ -1392,6 +1724,14 @@ async function createAuthMemoryDatabase(): Promise<Database> {
           prospect.updated_at = new Date();
         }
         return result([]);
+      }
+
+      if (sql.includes('update prospects') && sql.includes('email = case')) {
+        const row = prospects.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row[String(values[2])] = values[3];
+        row.updated_at = new Date();
+        return result([row]);
       }
 
       if (sql.includes('from prospects') && sql.includes('count(*) filter')) {
@@ -1883,6 +2223,64 @@ function filterProspectAiAnalysis(
   organizationId: string | null
 ): Record<string, unknown>[] {
   return [...prospectAiAnalysis.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
+}
+
+function prospectEnrichmentFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    prospect_id: values[2],
+    source_type: values[3],
+    source_url: values[4],
+    page_title: values[5],
+    meta_description: values[6],
+    detected_emails: parseJsonArray(values[7]),
+    detected_phones: parseJsonArray(values[8]),
+    detected_social_links: parseJsonArray(values[9]),
+    detected_platforms: parseJsonArray(values[10]),
+    detected_location: values[11],
+    detected_activity: values[12],
+    extracted_summary: values[13],
+    confidence_score: values[14],
+    status: values[15],
+    error_message: values[16],
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+}
+
+function prospectFieldSuggestionFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    prospect_id: values[2],
+    field_name: values[3],
+    current_value: values[4],
+    suggested_value: values[5],
+    source_url: values[6],
+    confidence_score: values[7],
+    status: values[8] ?? 'pending',
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+}
+
+function filterProspectEnrichments(
+  prospectEnrichments: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...prospectEnrichments.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
+}
+
+function filterProspectFieldSuggestions(
+  prospectFieldSuggestions: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...prospectFieldSuggestions.values()].filter(
     (row) => !organizationId || row.organization_id === organizationId
   );
 }

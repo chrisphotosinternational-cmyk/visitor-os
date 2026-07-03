@@ -12,6 +12,7 @@ import { userRoles, userStatuses, type UserRole } from '../users/user-model.js';
 import {
   ProspectRepository,
   prospectStatuses,
+  type ProspectRecord,
   type ProspectInput
 } from '../prospects/prospect-repository.js';
 import {
@@ -27,6 +28,12 @@ import {
   type MessageTemplateInput
 } from '../message-templates/message-template-repository.js';
 import { AIQualificationService } from '../ai-qualification/ai-qualification-service.js';
+import {
+  PublicEnrichmentService,
+  enrichmentSourceTypes,
+  enrichmentStatuses,
+  type EnrichmentListFilters
+} from '../public-enrichment/public-enrichment-service.js';
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
@@ -168,6 +175,21 @@ const analyzeBatchSchema = z.object({
   all: z.boolean().default(false)
 });
 
+const enrichmentListQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  status: z.enum(enrichmentStatuses).optional(),
+  sourceType: z.enum(enrichmentSourceTypes).optional(),
+  city: z.string().optional(),
+  platform: z.string().optional(),
+  confidenceMin: z.coerce.number().int().min(0).max(100).optional()
+});
+
+const enrichmentBatchSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  prospectIds: z.array(z.string().uuid()).optional(),
+  mode: z.enum(['not_enriched', 'high_score', 'url_missing_data', 'all']).default('not_enriched')
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -179,6 +201,7 @@ export function registerAdminManagementRoutes(
   const contactHistory = new ContactHistoryRepository(database);
   const messageTemplates = new MessageTemplateRepository(database);
   const aiQualification = new AIQualificationService(database);
+  const enrichments = new PublicEnrichmentService(database);
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
@@ -198,6 +221,7 @@ export function registerAdminManagementRoutes(
       contactHistory: await contactHistory.metrics(organizationId),
       messageTemplates: await messageTemplates.metrics(organizationId),
       aiQualification: await aiQualification.metrics(organizationId),
+      enrichments: await enrichments.metrics(organizationId),
       role: context.user.role,
       organizationId: context.user.organization_id
     };
@@ -390,6 +414,45 @@ export function registerAdminManagementRoutes(
     reply.header('Content-Disposition', 'attachment; filename="visitor-os-contact-history.csv"');
 
     return csv;
+  });
+
+  app.get('/admin-api/enrichments', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = enrichmentListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return {
+      enrichments: await enrichments.list(toEnrichmentFilters(organizationId, query)),
+      statuses: enrichmentStatuses,
+      sourceTypes: enrichmentSourceTypes
+    };
+  });
+
+  app.get('/admin-api/enrichments/:enrichmentId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ enrichmentId: z.string().uuid() }).parse(request.params);
+    const enrichment = await enrichments.find(
+      params.enrichmentId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+    );
+    if (!enrichment) throw notFound('Enrichment not found', 'ENRICHMENT_NOT_FOUND');
+
+    return { enrichment };
+  });
+
+  app.delete('/admin-api/enrichments/:enrichmentId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ enrichmentId: z.string().uuid() }).parse(request.params);
+
+    return {
+      deleted: await enrichments.delete(
+        params.enrichmentId,
+        context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+      )
+    };
   });
 
   app.get('/admin-api/message-templates', async (request) => {
@@ -652,6 +715,119 @@ export function registerAdminManagementRoutes(
     return { job };
   });
 
+  app.post('/admin-api/prospects/enrich-batch', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const body = enrichmentBatchSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    const baseProspects = body.prospectIds?.length
+      ? (
+          await Promise.all(
+            body.prospectIds.map((prospectId) => prospects.findCore(prospectId, organizationId))
+          )
+        ).filter((prospect): prospect is NonNullable<typeof prospect> => Boolean(prospect))
+      : await prospects.listAllCore(organizationId);
+    const selectedProspects = filterProspectsForEnrichmentMode(baseProspects, body.mode);
+    const job = enrichments.createBatchJob(organizationId, selectedProspects.length);
+    void enrichments.runBatch(job.id, selectedProspects);
+
+    return { job };
+  });
+
+  app.get('/admin-api/prospects/enrich-batch/:jobId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ jobId: z.string().uuid() }).parse(request.params);
+    const job = enrichments.getBatchJob(params.jobId);
+    if (!job) throw notFound('Enrichment batch not found', 'ENRICHMENT_BATCH_NOT_FOUND');
+    requireOrganizationAccess(context.user, job.organizationId);
+
+    return { job };
+  });
+
+  app.post('/admin-api/prospects/:prospectId/enrich', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return {
+      enrichments: await enrichments.enrichProspect(prospect),
+      suggestions: await enrichments.suggestionsForProspect(prospect.id, prospect.organization_id)
+    };
+  });
+
+  app.get('/admin-api/prospects/:prospectId/enrichments', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return {
+      enrichments: await enrichments.listForProspect(prospect.id, prospect.organization_id),
+      suggestions: await enrichments.suggestionsForProspect(prospect.id, prospect.organization_id)
+    };
+  });
+
+  app.get('/admin-api/prospects/:prospectId/suggestions', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return {
+      suggestions: await enrichments.suggestionsForProspect(prospect.id, prospect.organization_id)
+    };
+  });
+
+  app.post('/admin-api/prospects/:prospectId/suggestions/:suggestionId/accept', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z
+      .object({ prospectId: z.string().uuid(), suggestionId: z.string().uuid() })
+      .parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const accepted = await enrichments.acceptSuggestion(params.suggestionId, prospect);
+    if (!accepted.suggestion) throw notFound('Suggestion not found', 'SUGGESTION_NOT_FOUND');
+
+    return {
+      ...accepted,
+      aiAnalysisStale: true,
+      message: 'Suggestion accepted. Recalculate AI analysis manually when ready.'
+    };
+  });
+
+  app.post('/admin-api/prospects/:prospectId/suggestions/:suggestionId/reject', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z
+      .object({ prospectId: z.string().uuid(), suggestionId: z.string().uuid() })
+      .parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const suggestion = await enrichments.rejectSuggestion(
+      params.suggestionId,
+      prospect.organization_id
+    );
+    if (!suggestion) throw notFound('Suggestion not found', 'SUGGESTION_NOT_FOUND');
+
+    return { suggestion };
+  });
+
   app.get('/admin-api/prospects/:prospectId/history', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:read');
@@ -876,6 +1052,43 @@ function toContactHistoryFilters(
     ...(query.scoreLabel ? { scoreLabel: query.scoreLabel } : {}),
     ...(query.status ? { status: query.status } : {})
   };
+}
+
+function toEnrichmentFilters(
+  organizationId: string,
+  query: z.infer<typeof enrichmentListQuerySchema>
+): EnrichmentListFilters {
+  return {
+    organizationId,
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.sourceType ? { sourceType: query.sourceType } : {}),
+    ...(query.city ? { city: query.city } : {}),
+    ...(query.platform ? { platform: query.platform } : {}),
+    ...(query.confidenceMin !== undefined ? { confidenceMin: query.confidenceMin } : {})
+  };
+}
+
+function filterProspectsForEnrichmentMode(
+  prospects: ProspectRecord[],
+  mode: z.infer<typeof enrichmentBatchSchema>['mode']
+) {
+  return prospects.filter((prospect) => {
+    const hasUrl = Boolean(
+      prospect.website ||
+        prospect.instagram ||
+        prospect.twitter_x ||
+        prospect.linktree ||
+        prospect.allmylinks ||
+        prospect.mym ||
+        prospect.onlyfans ||
+        prospect.source_url
+    );
+    if (!hasUrl) return false;
+    if (mode === 'all' || mode === 'not_enriched') return true;
+    if (mode === 'high_score') return prospect.score >= 60;
+    if (mode === 'url_missing_data') return !prospect.email || !prospect.phone || !prospect.city;
+    return true;
+  });
 }
 
 function optional<T>(value: T | null): T[] {

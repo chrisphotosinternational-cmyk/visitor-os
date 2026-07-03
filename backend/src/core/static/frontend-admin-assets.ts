@@ -68,6 +68,13 @@ createApp({
       renderedMessage: '',
       prospectAiAnalysis: null,
       aiBatchJob: null,
+      prospectEnrichments: [],
+      prospectSuggestions: [],
+      enrichments: [],
+      enrichmentStatuses: [],
+      enrichmentSourceTypes: [],
+      enrichmentFilters: { status: '', sourceType: '', city: '', platform: '', confidenceMin: '' },
+      enrichmentBatchJob: null,
       loading: false,
       error: '',
       sessionTimer: null
@@ -155,7 +162,7 @@ createApp({
       try {
         const [meResponse, dashboardResponse] = await Promise.all([
           this.apiRequest('/me', { authenticated: true }),
-          this.apiRequest('/dashboard', { authenticated: true })
+          this.apiRequest('/admin-api/dashboard', { authenticated: true })
         ]);
         if (!meResponse.ok || !dashboardResponse.ok) throw new Error('Session expiree ou invalide.');
         const me = await meResponse.json();
@@ -169,7 +176,8 @@ createApp({
           this.loadUsers(),
           this.loadProspects(),
           this.loadFollowUps(),
-          this.loadMessageTemplates()
+          this.loadMessageTemplates(),
+          this.loadEnrichments()
         ]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
@@ -297,7 +305,7 @@ createApp({
       await Promise.all([this.loadUsers(), this.refreshDashboard()]);
     },
     async refreshDashboard() {
-      const response = await this.apiRequest('/dashboard', { authenticated: true });
+      const response = await this.apiRequest('/admin-api/dashboard', { authenticated: true });
       if (response.ok) this.dashboard = await response.json();
     },
     async loadProspects() {
@@ -342,6 +350,7 @@ createApp({
       this.prospectForm = prospectToForm(prospect);
       void this.loadProspectHistory(prospect.id);
       void this.loadProspectAnalysis(prospect.id);
+      void this.loadProspectEnrichments(prospect.id);
       this.navigate('prospect-detail', prospect.id);
     },
     newProspect() {
@@ -579,6 +588,72 @@ createApp({
       this.aiBatchJob = data.job;
       await this.refreshDashboard();
     },
+    async loadProspectEnrichments(prospectId) {
+      const response = await this.apiRequest('/admin-api/prospects/' + prospectId + '/enrichments', { authenticated: true });
+      if (!response.ok) throw new Error('Chargement enrichissement impossible.');
+      const data = await response.json();
+      this.prospectEnrichments = data.enrichments;
+      this.prospectSuggestions = data.suggestions;
+    },
+    async enrichSelectedProspect() {
+      if (!this.selectedProspect) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/enrich', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Enrichissement impossible.');
+      const data = await response.json();
+      this.prospectEnrichments = data.enrichments;
+      this.prospectSuggestions = data.suggestions;
+      await Promise.all([this.loadEnrichments(), this.refreshDashboard()]);
+    },
+    async acceptSuggestion(suggestion) {
+      if (!this.selectedProspect) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/suggestions/' + suggestion.id + '/accept', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Acceptation suggestion impossible.');
+      const data = await response.json();
+      this.selectedProspect = data.prospect ?? this.selectedProspect;
+      this.prospectForm = prospectToForm(this.selectedProspect);
+      await Promise.all([this.loadProspectEnrichments(this.selectedProspect.id), this.loadProspects(), this.refreshDashboard()]);
+    },
+    async rejectSuggestion(suggestion) {
+      if (!this.selectedProspect) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/suggestions/' + suggestion.id + '/reject', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Rejet suggestion impossible.');
+      await this.loadProspectEnrichments(this.selectedProspect.id);
+    },
+    async loadEnrichments() {
+      if (!this.token) return;
+      const params = new URLSearchParams();
+      if (this.enrichmentFilters.status) params.set('status', this.enrichmentFilters.status);
+      if (this.enrichmentFilters.sourceType) params.set('sourceType', this.enrichmentFilters.sourceType);
+      if (this.enrichmentFilters.city) params.set('city', this.enrichmentFilters.city);
+      if (this.enrichmentFilters.platform) params.set('platform', this.enrichmentFilters.platform);
+      if (this.enrichmentFilters.confidenceMin) params.set('confidenceMin', this.enrichmentFilters.confidenceMin);
+      const response = await this.apiRequest('/admin-api/enrichments' + (params.toString() ? '?' + params.toString() : ''), { authenticated: true });
+      if (!response.ok) throw new Error('Chargement enrichissements impossible.');
+      const data = await response.json();
+      this.enrichments = data.enrichments;
+      this.enrichmentStatuses = data.statuses;
+      this.enrichmentSourceTypes = data.sourceTypes;
+    },
+    async enrichProspectBatch() {
+      const response = await this.apiRequest('/admin-api/prospects/enrich-batch', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ mode: 'not_enriched' })
+      });
+      if (!response.ok) throw new Error('Batch enrichissement impossible.');
+      const data = await response.json();
+      this.enrichmentBatchJob = data.job;
+      await Promise.all([this.loadEnrichments(), this.refreshDashboard()]);
+    },
     async exportMessageTemplates() {
       const response = await this.apiRequest('/admin-api/message-templates/export-csv', { authenticated: true });
       if (!response.ok) throw new Error('Export templates impossible.');
@@ -663,6 +738,7 @@ createApp({
           <button :class="['nav-item', { active: route === 'organizations' }]" type="button" @click="navigate('organizations')">Organisations</button>
           <button :class="['nav-item', { active: route === 'users' }]" type="button" @click="navigate('users')">Utilisateurs</button>
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" type="button" @click="navigate('prospects')">Prospects</button>
+          <button :class="['nav-item', { active: route === 'enrichments' }]" type="button" @click="navigate('enrichments')">Enrichments</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" type="button" @click="navigate('follow-ups')">Relances</button>
           <button :class="['nav-item', { active: route.startsWith('message-template') }]" type="button" @click="navigate('message-templates')">Messages</button>
           <button :class="['nav-item', { active: route === 'settings' }]" type="button" @click="navigate('settings')">Parametres</button>
@@ -703,6 +779,13 @@ createApp({
           <article class="metric"><span>Analyses en attente</span><strong>{{ dashboard?.aiQualification?.pendingAnalyses ?? 0 }}</strong><small>A traiter</small></article>
           <article class="metric"><span>Score IA moyen</span><strong>{{ dashboard?.aiQualification?.averageConfidence ?? 0 }}</strong><small>Confiance</small></article>
           <article class="metric"><span>Opportunités IA</span><strong>{{ dashboard?.aiQualification?.priorityOpportunities ?? 0 }}</strong><small>high / very_high</small></article>
+          <article class="metric"><span>Prospects enrichis</span><strong>{{ dashboard?.enrichments?.enrichedProspects ?? 0 }}</strong><small>Public</small></article>
+          <article class="metric"><span>Enrichissements OK</span><strong>{{ dashboard?.enrichments?.successful ?? 0 }}</strong><small>success</small></article>
+          <article class="metric"><span>Enrichissements partiels</span><strong>{{ dashboard?.enrichments?.partial ?? 0 }}</strong><small>partial</small></article>
+          <article class="metric"><span>Bloques</span><strong>{{ dashboard?.enrichments?.blocked ?? 0 }}</strong><small>Protection</small></article>
+          <article class="metric"><span>Suggestions</span><strong>{{ dashboard?.enrichments?.pendingSuggestions ?? 0 }}</strong><small>En attente</small></article>
+          <article class="metric"><span>Emails detectes</span><strong>{{ dashboard?.enrichments?.detectedEmails ?? 0 }}</strong><small>Public</small></article>
+          <article class="metric"><span>Telephones detectes</span><strong>{{ dashboard?.enrichments?.detectedPhones ?? 0 }}</strong><small>Public</small></article>
         </section>
 
         <section v-if="route === 'dashboard' && dashboard?.aiQualification?.topProspects?.length" class="panel">
@@ -714,6 +797,18 @@ createApp({
                 <td><span class="badge">{{ prospect.priority }}</span></td>
                 <td><span class="score-pill">{{ prospect.confidence }}/100</span></td>
                 <td>{{ prospect.recommendedOffer }}</td>
+              </tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="route === 'dashboard' && dashboard?.enrichments?.topPlatforms?.length" class="panel">
+          <div class="panel-header"><h2>Plateformes detectees</h2><span class="badge">Enrichissement public</span></div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Plateforme</th><th>Occurrences</th></tr></thead>
+              <tbody><tr v-for="platform in dashboard.enrichments.topPlatforms" :key="platform.platform">
+                <td><strong>{{ platform.platform }}</strong></td>
+                <td><span class="score-pill">{{ platform.count }}</span></td>
               </tr></tbody>
             </table>
           </div>
@@ -830,6 +925,35 @@ createApp({
           </form>
           <section v-if="route === 'prospect-detail'" class="timeline-section">
             <div class="panel-header">
+              <h2>Enrichment</h2>
+              <div class="inline-actions">
+                <button type="button" @click="enrichSelectedProspect">Enrichir ce prospect</button>
+                <button type="button" @click="enrichProspectBatch">Enrichir batch</button>
+              </div>
+            </div>
+            <div class="analysis-grid">
+              <article class="analysis-main">
+                <h3>Suggestions</h3>
+                <p v-if="!prospectSuggestions.length">Aucune suggestion en attente.</p>
+                <ul v-else>
+                  <li v-for="suggestion in prospectSuggestions" :key="suggestion.id">
+                    <strong>{{ suggestion.field_name }}</strong> : {{ suggestion.suggested_value }}
+                    <span class="badge">{{ suggestion.status }}</span>
+                    <button v-if="suggestion.status === 'pending'" type="button" @click="acceptSuggestion(suggestion)">Accepter</button>
+                    <button v-if="suggestion.status === 'pending'" type="button" @click="rejectSuggestion(suggestion)">Rejeter</button>
+                  </li>
+                </ul>
+              </article>
+              <article v-for="enrichment in prospectEnrichments" :key="enrichment.id">
+                <h3>{{ enrichment.source_type }}</h3>
+                <p><span class="badge">{{ enrichment.status }}</span> <span class="score-pill">{{ enrichment.confidence_score }}/100</span></p>
+                <p>{{ enrichment.extracted_summary || enrichment.error_message || enrichment.meta_description || '-' }}</p>
+                <p v-if="enrichment.detected_emails?.length"><strong>Emails :</strong> {{ enrichment.detected_emails.join(', ') }}</p>
+                <p v-if="enrichment.detected_phones?.length"><strong>Telephones :</strong> {{ enrichment.detected_phones.join(', ') }}</p>
+                <p v-if="enrichment.detected_platforms?.length"><strong>Plateformes :</strong> {{ enrichment.detected_platforms.join(', ') }}</p>
+              </article>
+            </div>
+            <div class="panel-header">
               <h2>AI Analysis</h2>
               <div class="inline-actions">
                 <button type="button" @click="analyzeSelectedProspect">Recalculer l'analyse</button>
@@ -892,6 +1016,34 @@ createApp({
               </article>
             </div>
           </section>
+        </section>
+
+        <section v-if="route === 'enrichments'" class="panel">
+          <div class="panel-header">
+            <h2>Enrichissements publics</h2>
+            <div class="inline-actions">
+              <button type="button" @click="loadEnrichments">Actualiser</button>
+              <button type="button" @click="enrichProspectBatch">Batch prospects</button>
+            </div>
+          </div>
+          <form class="filters" @submit.prevent="loadEnrichments">
+            <select v-model="enrichmentFilters.status" @change="loadEnrichments"><option value="">Tous statuts</option><option v-for="status in enrichmentStatuses" :key="status" :value="status">{{ status }}</option></select>
+            <select v-model="enrichmentFilters.sourceType" @change="loadEnrichments"><option value="">Toutes sources</option><option v-for="sourceType in enrichmentSourceTypes" :key="sourceType" :value="sourceType">{{ sourceType }}</option></select>
+            <input v-model="enrichmentFilters.city" @input="loadEnrichments" placeholder="Ville detectee" />
+            <input v-model="enrichmentFilters.platform" @input="loadEnrichments" placeholder="Plateforme" />
+            <input v-model="enrichmentFilters.confidenceMin" @input="loadEnrichments" type="number" min="0" max="100" placeholder="Score min" />
+          </form>
+          <div class="table-wrap">
+            <table><thead><tr><th>Source</th><th>Statut</th><th>Confiance</th><th>Donnees</th><th>Erreur</th></tr></thead>
+              <tbody><tr v-for="enrichment in enrichments" :key="enrichment.id">
+                <td><strong>{{ enrichment.source_type }}</strong><small>{{ enrichment.source_url }}</small></td>
+                <td><span class="badge">{{ enrichment.status }}</span></td>
+                <td><span class="score-pill">{{ enrichment.confidence_score }}/100</span></td>
+                <td><small>{{ [...(enrichment.detected_emails || []), ...(enrichment.detected_phones || []), ...(enrichment.detected_platforms || [])].join(', ') || '-' }}</small></td>
+                <td>{{ enrichment.error_message || '-' }}</td>
+              </tr></tbody>
+            </table>
+          </div>
         </section>
 
         <section v-if="route === 'message-templates'" class="panel">
@@ -983,6 +1135,7 @@ function normalizeRoute(pathname) {
   if (pathname === '/prospects/new') return 'prospect-new';
   if (pathname === '/prospects/import') return 'prospect-import';
   if (pathname.startsWith('/prospects/')) return 'prospect-detail';
+  if (pathname === '/enrichments') return 'enrichments';
   if (pathname === '/follow-ups') return 'follow-ups';
   if (pathname === '/message-templates') return 'message-templates';
   if (pathname === '/message-templates/new') return 'message-template-new';
@@ -1011,6 +1164,7 @@ function routeTitle(route) {
     'prospect-new': 'Nouveau prospect',
     'prospect-detail': 'Prospect',
     'prospect-import': 'Import CSV',
+    enrichments: 'Enrichissements',
     'follow-ups': 'Relances',
     'message-templates': 'Messages',
     'message-template-new': 'Nouveau message',

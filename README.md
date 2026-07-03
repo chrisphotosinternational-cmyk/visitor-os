@@ -355,6 +355,70 @@ Limits:
 - the analysis is a decision-support signal, not an automatic commercial decision;
 - the administrator remains responsible for checking the data and using it lawfully.
 
+## Public Profile Enrichment
+
+Sprint 10 adds a public-only enrichment layer for prospects. It uses URLs already stored on a prospect record and extracts only information that is visible without authentication.
+
+Supported sources:
+
+```text
+website, instagram_public, x_public, linktree, allmylinks,
+mym_public, onlyfans_public, other
+```
+
+The enrichment engine can detect:
+
+- page title and meta description;
+- visible email addresses;
+- visible phone numbers;
+- public social links;
+- public platforms;
+- possible location and activity;
+- a short extracted summary;
+- a confidence score from 0 to 100.
+
+Admin routes are protected by JWT/RBAC:
+
+- `POST /admin-api/prospects/:id/enrich`;
+- `GET /admin-api/prospects/:id/enrichments`;
+- `POST /admin-api/prospects/enrich-batch`;
+- `GET /admin-api/prospects/enrich-batch/:jobId`;
+- `GET /admin-api/enrichments`;
+- `GET /admin-api/enrichments/:id`;
+- `DELETE /admin-api/enrichments/:id`;
+- `GET /admin-api/prospects/:id/suggestions`;
+- `POST /admin-api/prospects/:id/suggestions/:suggestionId/accept`;
+- `POST /admin-api/prospects/:id/suggestions/:suggestionId/reject`.
+
+Enrichment never overwrites a prospect automatically. Detected values are stored as field suggestions with a `pending`, `accepted`, or `rejected` status. A human administrator must explicitly accept a suggestion before the prospect record is updated.
+
+Batch enrichment is available for:
+
+- selected prospects;
+- prospects with public URLs;
+- high-score prospects;
+- prospects with URLs but missing contact data.
+
+Operational safeguards:
+
+- configurable request timeout;
+- configurable maximum public pages per prospect;
+- explicit VISITOR-OS user agent;
+- simple per-organization batch control;
+- blocked status for login, account, checkout, captcha, paywall, 401, 403, or 429 responses.
+
+Compliance limits:
+
+- no login;
+- no captcha solving;
+- no paywall bypass;
+- no private account access;
+- no aggressive scraping;
+- no automatic outreach;
+- no automatic AI recalculation after enrichment.
+
+When a suggestion is accepted, the prospect can be marked as needing a fresh AI analysis. The recalculation remains a manual user action.
+
 ## Development Rule
 
 VISITOR-OS must stay simple, modular, and maintainable by one person. Avoid unnecessary infrastructure, premature microservices, and business-specific code in the core engine.
