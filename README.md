@@ -19,6 +19,7 @@ The first working MVP is available:
 - multi-tenant foundation with organizations and sites;
 - configurable business engine per site.
 - protected admin authentication and RBAC.
+- organizations, users, and prospects administration through the production admin UI.
 - AI Provider Engine with mock fallback and OpenAI-ready abstraction.
 - advanced CRM foundation with scoring, tags, notes, follow-ups and exports.
 - Notification Engine with internal alerts, email mock/Resend provider, webhooks and history.
@@ -125,6 +126,67 @@ open deployment/RAILWAY.md
 ```
 
 Docker Compose files are kept for local validation/reference, not for OVH Web mutualise.
+
+## CRM Prospects Core
+
+Sprint 6 introduces the first production CRM layer for public prospect management.
+
+Admin routes are protected by JWT and RBAC under `/admin-api/prospects`. The admin interface exposes:
+
+- `/prospects` for list, search, filters, CSV export;
+- `/prospects/new` for manual creation;
+- `/prospects/:id` for editing;
+- `/prospects/import` for CSV import.
+
+Prospects are always scoped by `organization_id`. SuperAdmin can filter globally; Admin, Manager, Agent, and Viewer remain limited to their organization according to their permissions.
+
+Expected CRM fields:
+
+- identity: `first_name`, `last_name`, `pseudo`, `company`;
+- contact: `email`, `phone`, `website`;
+- social/platforms: `instagram`, `twitter_x`, `mym`, `onlyfans`, `linktree`, `allmylinks`;
+- qualification: `city`, `activity`, `description`, `source_url`, `status`, `notes`;
+- scoring: `score`, `score_label`.
+
+Statuses:
+
+```text
+new, to_qualify, to_contact, contacted, interested, refused,
+follow_up, potential_client, signed_client, blacklist
+```
+
+Scoring is deliberately simple and explainable:
+
+- city: +10;
+- email: +15;
+- phone: +15;
+- Instagram or Twitter/X: +10;
+- MYM or OnlyFans: +20;
+- website, portfolio, Linktree, or AllMyLinks: +10;
+- coherent description: +10;
+- no contact method: -25;
+- probable duplicate during import: merged instead of blindly created.
+
+Score labels:
+
+```text
+80-100 very_high
+60-79  high
+40-59  medium
+20-39  low
+0-19   ignore
+```
+
+CSV import accepts the same field names. Deduplication is performed by email, phone, source URL, then pseudo + city. Existing prospects are not deleted: missing fields are merged and the most complete text value is preserved.
+
+CSV export returns the filtered prospect list.
+
+Compliance limits:
+
+- VISITOR-OS does not send automatic prospect outreach in this sprint.
+- VISITOR-OS must only store data the administrator is allowed to process.
+- No private account access, scraping bypass, or hidden data collection is part of the product.
+- Public data imports remain the responsibility of the administrator and must respect applicable laws and platform terms.
 
 ## Development Rule
 

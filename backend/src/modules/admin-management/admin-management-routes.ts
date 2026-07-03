@@ -9,6 +9,11 @@ import {
 } from '../organizations/organization-repository.js';
 import { UserRepository, type UserRecord } from '../users/user-repository.js';
 import { userRoles, userStatuses, type UserRole } from '../users/user-model.js';
+import {
+  ProspectRepository,
+  prospectStatuses,
+  type ProspectInput
+} from '../prospects/prospect-repository.js';
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
@@ -41,6 +46,56 @@ const listQuerySchema = z.object({
   search: z.string().optional()
 });
 
+const scoreLabels = ['very_high', 'high', 'medium', 'low', 'ignore'] as const;
+const platformFilters = [
+  'instagram',
+  'twitter_x',
+  'mym',
+  'onlyfans',
+  'website',
+  'linktree',
+  'allmylinks'
+] as const;
+
+const prospectPayloadSchema = z.object({
+  organizationId: z.string().uuid(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  pseudo: z.string().optional(),
+  company: z.string().optional(),
+  email: z.string().email().optional().or(z.literal('')),
+  phone: z.string().optional(),
+  website: z.string().optional(),
+  instagram: z.string().optional(),
+  twitterX: z.string().optional(),
+  mym: z.string().optional(),
+  onlyfans: z.string().optional(),
+  linktree: z.string().optional(),
+  allmylinks: z.string().optional(),
+  city: z.string().optional(),
+  activity: z.string().optional(),
+  description: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  status: z.enum(prospectStatuses).default('new'),
+  notes: z.string().optional()
+});
+
+const prospectListQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  search: z.string().optional(),
+  status: z.enum(prospectStatuses).optional(),
+  city: z.string().optional(),
+  scoreLabel: z.enum(scoreLabels).optional(),
+  platform: z.enum(platformFilters).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(25)
+});
+
+const csvImportSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  csv: z.string().min(1)
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -48,6 +103,7 @@ export function registerAdminManagementRoutes(
 ): void {
   const organizations = new OrganizationRepository(database);
   const users = new UserRepository(database);
+  const prospects = new ProspectRepository(database);
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
@@ -62,6 +118,7 @@ export function registerAdminManagementRoutes(
             ? 1
             : 0,
       usersCount: await users.count(organizationId),
+      prospects: await prospects.metrics(organizationId),
       role: context.user.role,
       organizationId: context.user.organization_id
     };
@@ -189,6 +246,92 @@ export function registerAdminManagementRoutes(
 
     return { user: user ? toPublicUser(user) : null };
   });
+
+  app.get('/admin-api/prospects', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = prospectListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return {
+      ...(await prospects.listCore(toProspectFilters(organizationId, query))),
+      statuses: coreProspectStatuses(),
+      scoreLabels,
+      platforms: platformFilters
+    };
+  });
+
+  app.get('/admin-api/prospects/export-csv', async (request, reply) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'data:export');
+    const query = prospectListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    const csv = await prospects.exportCsv(toProspectFilters(organizationId, query));
+
+    reply.type('text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="visitor-os-prospects.csv"');
+
+    return csv;
+  });
+
+  app.post('/admin-api/prospects/import-csv', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const body = csvImportSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+
+    return { import: await prospects.importCsv(organizationId, body.csv) };
+  });
+
+  app.post('/admin-api/prospects', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const body = prospectPayloadSchema.parse(request.body);
+    requireOrganizationAccess(context.user, body.organizationId);
+
+    return { prospect: await prospects.createCore(toProspectInput(body)) };
+  });
+
+  app.get('/admin-api/prospects/:prospectId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const query = z.object({ organizationId: z.string().uuid().optional() }).parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return { prospect, statuses: coreProspectStatuses(), scoreLabels };
+  });
+
+  app.patch('/admin-api/prospects/:prospectId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const body = prospectPayloadSchema.parse(request.body);
+    requireOrganizationAccess(context.user, body.organizationId);
+    const prospect = await prospects.updateCore(
+      params.prospectId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id,
+      toProspectInput(body)
+    );
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return { prospect };
+  });
+
+  app.delete('/admin-api/prospects/:prospectId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+
+    return {
+      deleted: await prospects.deleteCore(
+        params.prospectId,
+        context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+      )
+    };
+  });
 }
 
 async function resolveContext(
@@ -218,6 +361,15 @@ function requireOrganizationAccess(user: UserRecord, organizationId: string): vo
       code: 'ORGANIZATION_ACCESS_DENIED'
     });
   }
+}
+
+function resolveOrganizationFilter(user: UserRecord, requestedOrganizationId?: string): string {
+  if (user.role === 'SuperAdmin') {
+    return requestedOrganizationId ?? user.organization_id;
+  }
+
+  if (requestedOrganizationId) requireOrganizationAccess(user, requestedOrganizationId);
+  return user.organization_id;
 }
 
 function resolveAssignableRole(user: UserRecord, role: UserRole): UserRole {
@@ -268,8 +420,53 @@ function toUserListInput(organizationId?: string, search?: string): { organizati
   };
 }
 
+function toProspectFilters(
+  organizationId: string,
+  query: z.infer<typeof prospectListQuerySchema>
+) {
+  return {
+    organizationId,
+    page: query.page,
+    pageSize: query.pageSize,
+    ...(query.search ? { search: query.search } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.city ? { city: query.city } : {}),
+    ...(query.scoreLabel ? { scoreLabel: query.scoreLabel } : {}),
+    ...(query.platform ? { platform: query.platform } : {})
+  };
+}
+
 function optional<T>(value: T | null): T[] {
   return value ? [value] : [];
+}
+
+function coreProspectStatuses() {
+  return prospectStatuses.filter((status) => status === status.toLowerCase());
+}
+
+function toProspectInput(input: z.infer<typeof prospectPayloadSchema>): ProspectInput {
+  return {
+    organizationId: input.organizationId,
+    status: input.status,
+    ...(input.firstName ? { firstName: input.firstName } : {}),
+    ...(input.lastName ? { lastName: input.lastName } : {}),
+    ...(input.pseudo ? { pseudo: input.pseudo } : {}),
+    ...(input.company ? { company: input.company } : {}),
+    ...(input.email ? { email: input.email } : {}),
+    ...(input.phone ? { phone: input.phone } : {}),
+    ...(input.website ? { website: input.website } : {}),
+    ...(input.instagram ? { instagram: input.instagram } : {}),
+    ...(input.twitterX ? { twitterX: input.twitterX } : {}),
+    ...(input.mym ? { mym: input.mym } : {}),
+    ...(input.onlyfans ? { onlyfans: input.onlyfans } : {}),
+    ...(input.linktree ? { linktree: input.linktree } : {}),
+    ...(input.allmylinks ? { allmylinks: input.allmylinks } : {}),
+    ...(input.city ? { city: input.city } : {}),
+    ...(input.activity ? { activity: input.activity } : {}),
+    ...(input.description ? { description: input.description } : {}),
+    ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+    ...(input.notes ? { notes: input.notes } : {})
+  };
 }
 
 function notFound(message: string, code: string): AppError {

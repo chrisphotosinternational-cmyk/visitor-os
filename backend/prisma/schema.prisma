@@ -12,6 +12,7 @@ model Organization {
   name      String
   slug      String   @unique
   users     User[]
+  prospects Prospect[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("organizations")
@@ -47,4 +48,59 @@ enum UserStatus {
   inactive
   invited
   suspended
+}
+
+model Prospect {
+  id             String              @id @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  firstName      String?             @map("first_name")
+  lastName       String?             @map("last_name")
+  pseudo         String?
+  company        String?
+  email          String?
+  phone          String?
+  website        String?
+  instagram      String?
+  twitterX       String?             @map("twitter_x")
+  mym            String?
+  onlyfans       String?
+  linktree       String?
+  allmylinks     String?
+  city           String?
+  activity       String?
+  description    String?
+  sourceUrl      String?             @map("source_url")
+  status         ProspectStatus      @default(new)
+  score          Int                 @default(40)
+  scoreLabel     ProspectScoreLabel  @default(medium) @map("score_label")
+  notes          String?
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime            @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization        @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId, status])
+  @@index([organizationId, scoreLabel])
+  @@index([organizationId, city])
+  @@map("prospects")
+}
+
+enum ProspectStatus {
+  new
+  to_qualify
+  to_contact
+  contacted
+  interested
+  refused
+  follow_up
+  potential_client
+  signed_client
+  blacklist
+}
+
+enum ProspectScoreLabel {
+  very_high
+  high
+  medium
+  low
+  ignore
 }

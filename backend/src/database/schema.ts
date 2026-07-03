@@ -199,12 +199,28 @@ export async function initializeSchema(database: Database): Promise<void> {
       visitor_id uuid references visitors(id),
       first_name text,
       last_name text,
+      pseudo text,
+      company text,
       display_name text not null,
       email text,
       phone text,
+      website text,
+      instagram text,
+      twitter_x text,
+      mym text,
+      onlyfans text,
+      linktree text,
+      allmylinks text,
+      city text,
+      activity text,
+      description text,
+      source_url text,
       status text not null default 'Nouveau',
       temperature text not null default 'tiede',
       score_current integer not null default 40,
+      score integer not null default 40,
+      score_label text not null default 'medium',
+      notes text,
       source text not null default 'widget',
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
@@ -212,6 +228,22 @@ export async function initializeSchema(database: Database): Promise<void> {
 
     alter table prospects add column if not exists first_name text;
     alter table prospects add column if not exists last_name text;
+    alter table prospects add column if not exists pseudo text;
+    alter table prospects add column if not exists company text;
+    alter table prospects add column if not exists website text;
+    alter table prospects add column if not exists instagram text;
+    alter table prospects add column if not exists twitter_x text;
+    alter table prospects add column if not exists mym text;
+    alter table prospects add column if not exists onlyfans text;
+    alter table prospects add column if not exists linktree text;
+    alter table prospects add column if not exists allmylinks text;
+    alter table prospects add column if not exists city text;
+    alter table prospects add column if not exists activity text;
+    alter table prospects add column if not exists description text;
+    alter table prospects add column if not exists source_url text;
+    alter table prospects add column if not exists score integer not null default 40;
+    alter table prospects add column if not exists score_label text not null default 'medium';
+    alter table prospects add column if not exists notes text;
 
     create table if not exists lead_score_history (
       id uuid primary key,

@@ -5,6 +5,7 @@ import type { AppConfig } from '../../core/config/env.js';
 import type { Database } from '../../database/client.js';
 import { UserRepository, type UserRecord } from '../users/user-repository.js';
 import { OrganizationRepository } from '../organizations/organization-repository.js';
+import { ProspectRepository } from '../prospects/prospect-repository.js';
 import { verifyPassword } from './password.js';
 import { signJwt, verifyJwt, type JwtAuthContext } from './jwt.js';
 
@@ -20,6 +21,7 @@ export function registerJwtAuthRoutes(
 ): void {
   const users = new UserRepository(database);
   const organizations = new OrganizationRepository(database);
+  const prospects = new ProspectRepository(database);
 
   app.post('/login', async (request) => {
     const body = loginSchema.parse(request.body);
@@ -61,7 +63,8 @@ export function registerJwtAuthRoutes(
       user: context.user,
       organizationsCount:
         context.user.role === 'SuperAdmin' ? await organizations.count() : context.user.organizationId ? 1 : 0,
-      usersCount: await users.count(organizationId)
+      usersCount: await users.count(organizationId),
+      prospects: await prospects.metrics(organizationId)
     };
   });
 }

@@ -44,6 +44,15 @@ createApp({
       userStatuses: [],
       userSearch: '',
       userForm: emptyUserForm(),
+      prospects: [],
+      prospectStatuses: [],
+      prospectScoreLabels: [],
+      prospectPlatforms: [],
+      prospectSearch: '',
+      prospectFilters: { status: '', city: '', scoreLabel: '', platform: '' },
+      prospectForm: emptyProspectForm(),
+      prospectImportCsv: '',
+      selectedProspect: null,
       loading: false,
       error: '',
       sessionTimer: null
@@ -69,6 +78,9 @@ createApp({
     },
     canWriteUsers() {
       return ['SuperAdmin', 'Admin'].includes(this.user?.role);
+    },
+    canWriteProspects() {
+      return ['SuperAdmin', 'Admin', 'Manager', 'Agent'].includes(this.user?.role);
     }
   },
   async mounted() {
@@ -111,6 +123,7 @@ createApp({
       this.dashboard = null;
       this.organizations = [];
       this.users = [];
+      this.prospects = [];
       this.route = 'login';
       sessionStorage.removeItem(TOKEN_STORAGE_KEY);
       if (this.sessionTimer) window.clearInterval(this.sessionTimer);
@@ -134,7 +147,7 @@ createApp({
         this.user = { ...(this.user ?? {}), ...me.user };
         if (this.route === 'login') this.navigate('dashboard');
         this.startSessionWatcher();
-        await Promise.all([this.refreshTechnicalStatus(), this.loadOrganizations(), this.loadUsers()]);
+        await Promise.all([this.refreshTechnicalStatus(), this.loadOrganizations(), this.loadUsers(), this.loadProspects()]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
         this.logout(false);
@@ -264,9 +277,88 @@ createApp({
       const response = await this.apiRequest('/dashboard', { authenticated: true });
       if (response.ok) this.dashboard = await response.json();
     },
+    async loadProspects() {
+      if (!this.token) return;
+      const params = new URLSearchParams();
+      if (this.prospectSearch) params.set('search', this.prospectSearch);
+      if (this.prospectFilters.status) params.set('status', this.prospectFilters.status);
+      if (this.prospectFilters.city) params.set('city', this.prospectFilters.city);
+      if (this.prospectFilters.scoreLabel) params.set('scoreLabel', this.prospectFilters.scoreLabel);
+      if (this.prospectFilters.platform) params.set('platform', this.prospectFilters.platform);
+      const response = await this.apiRequest('/admin-api/prospects' + (params.toString() ? '?' + params.toString() : ''), { authenticated: true });
+      if (!response.ok) throw new Error('Chargement des prospects impossible.');
+      const data = await response.json();
+      this.prospects = data.prospects;
+      this.prospectStatuses = data.statuses;
+      this.prospectScoreLabels = data.scoreLabels;
+      this.prospectPlatforms = data.platforms;
+      if (!this.prospectForm.organizationId && this.user?.organizationId) {
+        this.prospectForm.organizationId = this.user.organizationId;
+      }
+    },
+    async saveProspect() {
+      if (!this.canWriteProspects) return;
+      const editing = Boolean(this.prospectForm.id);
+      const response = await this.apiRequest(
+        editing ? '/admin-api/prospects/' + this.prospectForm.id : '/admin-api/prospects',
+        {
+          method: editing ? 'PATCH' : 'POST',
+          authenticated: true,
+          body: JSON.stringify(this.prospectForm)
+        }
+      );
+      if (!response.ok) throw new Error('Enregistrement prospect impossible.');
+      const data = await response.json();
+      this.selectedProspect = data.prospect;
+      this.prospectForm = emptyProspectForm(this.user?.organizationId);
+      await Promise.all([this.loadProspects(), this.refreshDashboard()]);
+      this.navigate('prospects');
+    },
+    editProspect(prospect) {
+      this.selectedProspect = prospect;
+      this.prospectForm = prospectToForm(prospect);
+      this.navigate('prospect-detail', prospect.id);
+    },
+    newProspect() {
+      this.selectedProspect = null;
+      this.prospectForm = emptyProspectForm(this.user?.organizationId);
+      this.navigate('prospect-new');
+    },
+    async deleteProspect(prospect) {
+      const response = await this.apiRequest('/admin-api/prospects/' + prospect.id, {
+        method: 'DELETE',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Suppression prospect impossible.');
+      await Promise.all([this.loadProspects(), this.refreshDashboard()]);
+    },
+    async importProspects() {
+      const response = await this.apiRequest('/admin-api/prospects/import-csv', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          organizationId: this.user?.organizationId,
+          csv: this.prospectImportCsv
+        })
+      });
+      if (!response.ok) throw new Error('Import CSV impossible.');
+      this.prospectImportCsv = '';
+      await Promise.all([this.loadProspects(), this.refreshDashboard()]);
+      this.navigate('prospects');
+    },
+    async exportProspects() {
+      const response = await this.apiRequest('/admin-api/prospects/export-csv', { authenticated: true });
+      if (!response.ok) throw new Error('Export CSV impossible.');
+      const blob = new Blob([await response.text()], { type: 'text/csv;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'visitor-os-prospects.csv';
+      link.click();
+      URL.revokeObjectURL(link.href);
+    },
     navigate(route) {
       this.route = route;
-      const path = route === 'dashboard' ? '/' : '/' + route;
+      const path = routePath(route, arguments[1]);
       if (window.location.pathname !== path) window.history.pushState({}, '', path);
     },
     syncRouteFromLocation() {
@@ -327,6 +419,7 @@ createApp({
           <button :class="['nav-item', { active: route === 'dashboard' }]" type="button" @click="navigate('dashboard')">Dashboard</button>
           <button :class="['nav-item', { active: route === 'organizations' }]" type="button" @click="navigate('organizations')">Organisations</button>
           <button :class="['nav-item', { active: route === 'users' }]" type="button" @click="navigate('users')">Utilisateurs</button>
+          <button :class="['nav-item', { active: route.startsWith('prospect') }]" type="button" @click="navigate('prospects')">Prospects</button>
           <button :class="['nav-item', { active: route === 'settings' }]" type="button" @click="navigate('settings')">Parametres</button>
         </nav>
       </aside>
@@ -344,6 +437,14 @@ createApp({
           <article class="metric"><span>Organisation</span><strong>{{ user?.organizationId }}</strong><small>Contexte actif</small></article>
           <article class="metric"><span>API</span><strong>{{ apiStatus }}</strong><small>{{ apiBaseUrl }}</small></article>
           <article class="metric"><span>PostgreSQL</span><strong>{{ databaseStatus }}</strong><small>/ready</small></article>
+          <article class="metric"><span>Prospects</span><strong>{{ dashboard?.prospects?.total ?? 0 }}</strong><small>Total CRM</small></article>
+          <article class="metric"><span>A contacter</span><strong>{{ dashboard?.prospects?.toContact ?? 0 }}</strong><small>Relance commerciale</small></article>
+          <article class="metric"><span>Interessés</span><strong>{{ dashboard?.prospects?.interested ?? 0 }}</strong><small>Potentiel</small></article>
+          <article class="metric"><span>Blacklist</span><strong>{{ dashboard?.prospects?.blacklist ?? 0 }}</strong><small>A exclure</small></article>
+          <article class="metric"><span>Score élevé</span><strong>{{ dashboard?.prospects?.highScore ?? 0 }}</strong><small>high / very_high</small></article>
+          <article class="metric"><span>Email</span><strong>{{ dashboard?.prospects?.withEmail ?? 0 }}</strong><small>Contactable</small></article>
+          <article class="metric"><span>Téléphone</span><strong>{{ dashboard?.prospects?.withPhone ?? 0 }}</strong><small>Contactable</small></article>
+          <article class="metric"><span>MYM / OnlyFans</span><strong>{{ dashboard?.prospects?.premiumPlatforms ?? 0 }}</strong><small>Plateformes</small></article>
         </section>
 
         <section v-if="route === 'organizations'" class="panel">
@@ -397,6 +498,75 @@ createApp({
           </div>
         </section>
 
+        <section v-if="route === 'prospects'" class="panel">
+          <div class="panel-header">
+            <h2>Prospects</h2>
+            <div class="inline-actions">
+              <input v-model="prospectSearch" @input="loadProspects" placeholder="Rechercher" />
+              <button v-if="canWriteProspects" type="button" @click="newProspect">Nouveau</button>
+              <button type="button" @click="navigate('prospect-import')">Import CSV</button>
+              <button type="button" @click="exportProspects">Export CSV</button>
+            </div>
+          </div>
+          <form class="filters" @submit.prevent="loadProspects">
+            <select v-model="prospectFilters.status" @change="loadProspects"><option value="">Tous statuts</option><option v-for="status in prospectStatuses" :key="status" :value="status">{{ status }}</option></select>
+            <input v-model="prospectFilters.city" @input="loadProspects" placeholder="Ville" />
+            <select v-model="prospectFilters.scoreLabel" @change="loadProspects"><option value="">Tous scores</option><option v-for="label in prospectScoreLabels" :key="label" :value="label">{{ label }}</option></select>
+            <select v-model="prospectFilters.platform" @change="loadProspects"><option value="">Toutes plateformes</option><option v-for="platform in prospectPlatforms" :key="platform" :value="platform">{{ platform }}</option></select>
+          </form>
+          <div class="table-wrap">
+            <table><thead><tr><th>Prospect</th><th>Contact</th><th>Ville</th><th>Statut</th><th>Score</th><th></th></tr></thead>
+              <tbody><tr v-for="prospect in prospects" :key="prospect.id">
+                <td><strong>{{ prospect.display_name }}</strong><small>{{ prospect.pseudo || prospect.company || prospect.source_url || '-' }}</small></td>
+                <td>{{ prospect.email || prospect.phone || '-' }}</td>
+                <td>{{ prospect.city || '-' }}</td>
+                <td><span class="badge">{{ prospect.status }}</span></td>
+                <td><span class="score-pill">{{ prospect.score }} / {{ prospect.score_label }}</span></td>
+                <td class="actions"><button type="button" @click="editProspect(prospect)">Ouvrir</button><button v-if="canWriteProspects" type="button" @click="deleteProspect(prospect)">Supprimer</button></td>
+              </tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="route === 'prospect-new' || route === 'prospect-detail'" class="panel">
+          <div class="panel-header"><h2>{{ prospectForm.id ? 'Modifier prospect' : 'Nouveau prospect' }}</h2><button type="button" @click="navigate('prospects')">Retour</button></div>
+          <form class="admin-form prospect-form" @submit.prevent="saveProspect">
+            <select v-model="prospectForm.organizationId" required>
+              <option value="" disabled>Organisation</option>
+              <option v-for="organization in organizations" :key="organization.id" :value="organization.id">{{ organization.name }}</option>
+            </select>
+            <input v-model="prospectForm.firstName" placeholder="Prenom" />
+            <input v-model="prospectForm.lastName" placeholder="Nom" />
+            <input v-model="prospectForm.pseudo" placeholder="Pseudo" />
+            <input v-model="prospectForm.company" placeholder="Societe" />
+            <input v-model="prospectForm.email" placeholder="Email" type="email" />
+            <input v-model="prospectForm.phone" placeholder="Telephone" />
+            <input v-model="prospectForm.city" placeholder="Ville" />
+            <input v-model="prospectForm.activity" placeholder="Activite" />
+            <input v-model="prospectForm.website" placeholder="Site / Portfolio" />
+            <input v-model="prospectForm.instagram" placeholder="Instagram" />
+            <input v-model="prospectForm.twitterX" placeholder="Twitter / X" />
+            <input v-model="prospectForm.mym" placeholder="MYM" />
+            <input v-model="prospectForm.onlyfans" placeholder="OnlyFans" />
+            <input v-model="prospectForm.linktree" placeholder="Linktree" />
+            <input v-model="prospectForm.allmylinks" placeholder="AllMyLinks" />
+            <input v-model="prospectForm.sourceUrl" placeholder="URL source" />
+            <select v-model="prospectForm.status"><option v-for="status in prospectStatuses" :key="status" :value="status">{{ status }}</option></select>
+            <textarea v-model="prospectForm.description" placeholder="Description"></textarea>
+            <textarea v-model="prospectForm.notes" placeholder="Notes internes"></textarea>
+            <button type="submit">{{ prospectForm.id ? 'Modifier' : 'Creer' }}</button>
+          </form>
+        </section>
+
+        <section v-if="route === 'prospect-import'" class="panel">
+          <div class="panel-header"><h2>Import CSV prospects</h2><button type="button" @click="navigate('prospects')">Retour</button></div>
+          <p class="muted">Champs acceptes : first_name, last_name, pseudo, company, email, phone, website, instagram, twitter_x, mym, onlyfans, linktree, allmylinks, city, activity, description, source_url, status, notes.</p>
+          <form class="import-form" @submit.prevent="importProspects">
+            <textarea v-model="prospectImportCsv" placeholder="Colle le contenu CSV ici" required></textarea>
+            <button type="submit">Importer</button>
+          </form>
+        </section>
+
         <section v-if="route === 'settings'" class="panel empty-panel">
           <h2>Parametres</h2>
           <p>Socle pret pour les prochains reglages administrateur.</p>
@@ -408,12 +578,33 @@ createApp({
 function normalizeRoute(pathname) {
   if (pathname === '/organizations') return 'organizations';
   if (pathname === '/users') return 'users';
+  if (pathname === '/prospects') return 'prospects';
+  if (pathname === '/prospects/new') return 'prospect-new';
+  if (pathname === '/prospects/import') return 'prospect-import';
+  if (pathname.startsWith('/prospects/')) return 'prospect-detail';
   if (pathname === '/settings') return 'settings';
   return 'dashboard';
 }
 
+function routePath(route, id) {
+  if (route === 'dashboard') return '/';
+  if (route === 'prospect-new') return '/prospects/new';
+  if (route === 'prospect-import') return '/prospects/import';
+  if (route === 'prospect-detail') return '/prospects/' + id;
+  return '/' + route;
+}
+
 function routeTitle(route) {
-  return { dashboard: 'Dashboard', organizations: 'Organisations', users: 'Utilisateurs', settings: 'Parametres' }[route] ?? 'Dashboard';
+  return {
+    dashboard: 'Dashboard',
+    organizations: 'Organisations',
+    users: 'Utilisateurs',
+    prospects: 'Prospects',
+    'prospect-new': 'Nouveau prospect',
+    'prospect-detail': 'Prospect',
+    'prospect-import': 'Import CSV',
+    settings: 'Parametres'
+  }[route] ?? 'Dashboard';
 }
 
 function emptyOrganizationForm() {
@@ -422,6 +613,58 @@ function emptyOrganizationForm() {
 
 function emptyUserForm(organizationId = '') {
   return { id: '', organizationId, firstName: '', lastName: '', email: '', password: '', role: 'Viewer', status: 'active' };
+}
+
+function emptyProspectForm(organizationId = '') {
+  return {
+    id: '',
+    organizationId,
+    firstName: '',
+    lastName: '',
+    pseudo: '',
+    company: '',
+    email: '',
+    phone: '',
+    website: '',
+    instagram: '',
+    twitterX: '',
+    mym: '',
+    onlyfans: '',
+    linktree: '',
+    allmylinks: '',
+    city: '',
+    activity: '',
+    description: '',
+    sourceUrl: '',
+    status: 'new',
+    notes: ''
+  };
+}
+
+function prospectToForm(prospect) {
+  return {
+    id: prospect.id,
+    organizationId: prospect.organization_id,
+    firstName: prospect.first_name ?? '',
+    lastName: prospect.last_name ?? '',
+    pseudo: prospect.pseudo ?? '',
+    company: prospect.company ?? '',
+    email: prospect.email ?? '',
+    phone: prospect.phone ?? '',
+    website: prospect.website ?? '',
+    instagram: prospect.instagram ?? '',
+    twitterX: prospect.twitter_x ?? '',
+    mym: prospect.mym ?? '',
+    onlyfans: prospect.onlyfans ?? '',
+    linktree: prospect.linktree ?? '',
+    allmylinks: prospect.allmylinks ?? '',
+    city: prospect.city ?? '',
+    activity: prospect.activity ?? '',
+    description: prospect.description ?? '',
+    sourceUrl: prospect.source_url ?? '',
+    status: prospect.status ?? 'new',
+    notes: prospect.notes ?? ''
+  };
 }
 
 async function responseJsonOrFallback(result, fallback) {
@@ -450,7 +693,7 @@ export const adminStylesCss = `:root {
 }
 * { box-sizing: border-box; }
 body { min-width: 320px; margin: 0; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button {
   min-height: 40px;
   border: 0;
@@ -478,7 +721,7 @@ button:disabled { color: #8b95a7; background: #e6eaf0; cursor: not-allowed; }
 h1, h2, p, .metric strong, .metric small { margin: 0; }
 .login-panel p, .eyebrow, .metric span, .metric small, td small { color: #647084; }
 .login-panel label { display: grid; gap: 7px; color: #354157; font-weight: 600; }
-.login-panel input, .admin-form input, .admin-form select, .panel-header input {
+.login-panel input, .admin-form input, .admin-form select, .admin-form textarea, .panel-header input, .filters input, .filters select, .import-form textarea {
   width: 100%;
   min-height: 42px;
   border: 1px solid #cfd7e3;
@@ -486,7 +729,8 @@ h1, h2, p, .metric strong, .metric small { margin: 0; }
   padding: 10px 12px;
   background: #fff;
 }
-input:focus, select:focus { outline: 3px solid rgba(22, 106, 91, 0.18); border-color: #166a5b; }
+textarea { resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91, 0.18); border-color: #166a5b; }
 .error-message { border: 1px solid #fecaca; border-radius: 6px; margin: 0 0 14px; padding: 10px 12px; color: #991b1b; background: #fff1f2; }
 .status-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 4px 0 0; }
 .status-strip div { border: 1px solid #e4e9f0; border-radius: 6px; padding: 10px; background: #f8fafc; }
@@ -521,17 +765,27 @@ input:focus, select:focus { outline: 3px solid rgba(22, 106, 91, 0.18); border-c
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e6ebf2; padding: 18px; }
 .panel-header input { max-width: 320px; }
 .admin-form { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 18px; border-bottom: 1px solid #e6ebf2; }
+.prospect-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.prospect-form textarea { grid-column: span 2; min-height: 92px; }
+.inline-actions, .filters { display: flex; flex-wrap: wrap; gap: 10px; }
+.filters { padding: 14px 18px; border-bottom: 1px solid #e6ebf2; }
+.filters input, .filters select { width: auto; min-width: 180px; }
+.import-form { display: grid; gap: 12px; padding: 18px; }
+.import-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.muted { padding: 0 18px; color: #647084; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid #edf1f6; padding: 12px 18px; text-align: left; vertical-align: top; }
 th { color: #647084; font-size: 13px; font-weight: 700; }
 td strong, td small { display: block; }
 .badge { display: inline-flex; border-radius: 999px; padding: 4px 8px; color: #075e51; background: #dff8ef; font-size: 12px; font-weight: 700; }
+.score-pill { display: inline-flex; border-radius: 999px; padding: 4px 8px; color: #1e3a8a; background: #dbeafe; font-size: 12px; font-weight: 700; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .actions button { min-height: 32px; padding: 7px 9px; font-size: 13px; }
 .empty-panel { display: grid; gap: 8px; padding: 18px; }
 @media (max-width: 1180px) {
-  .admin-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-form, .prospect-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .prospect-form textarea { grid-column: span 3; }
 }
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 190px minmax(0, 1fr); }
@@ -544,6 +798,8 @@ td strong, td small { display: block; }
   .content { padding: 16px; }
   .topbar, .panel-header { align-items: flex-start; flex-direction: column; }
   .topbar-actions, .panel-header input { width: 100%; max-width: none; }
-  .dashboard-grid, .status-strip, .admin-form { grid-template-columns: 1fr; }
+  .dashboard-grid, .status-strip, .admin-form, .prospect-form { grid-template-columns: 1fr; }
+  .prospect-form textarea { grid-column: span 1; }
+  .inline-actions, .filters, .filters input, .filters select { width: 100%; }
 }
 `;

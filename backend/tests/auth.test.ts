@@ -246,6 +246,132 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('creates and lists prospects through JWT admin management', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        firstName: 'Emma',
+        lastName: 'Studio',
+        pseudo: 'emma_photo',
+        email: 'emma@example.com',
+        phone: '+33600000000',
+        city: 'Albi',
+        instagram: '@emma',
+        mym: 'emma-mym',
+        website: 'https://emma.example',
+        description: 'Photographe portrait et studio a Albi',
+        status: 'to_contact'
+      }
+    });
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/admin-api/prospects?search=emma',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(createResponse.statusCode, 200);
+    assert.equal((createResponse.json() as { prospect: { score_label: string } }).prospect.score_label, 'very_high');
+    assert.equal(listResponse.statusCode, 200);
+    assert.equal((listResponse.json() as { prospects: unknown[] }).prospects.length, 1);
+    await app.close();
+  });
+
+  it('keeps prospects isolated by organization', async () => {
+    const app = await createAuthTestApp();
+    const adminToken = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const superToken = await jwtLogin(app, 'super@example.com', 'test-password-123');
+    await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects',
+      headers: { authorization: `Bearer ${superToken}` },
+      payload: {
+        organizationId: ORG_B,
+        pseudo: 'tenant_b',
+        city: 'Toulouse',
+        email: 'tenant-b@example.com'
+      }
+    });
+    const adminList = await app.inject({
+      method: 'GET',
+      url: '/admin-api/prospects',
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    assert.equal(adminList.statusCode, 200);
+    assert.equal((adminList.json() as { prospects: Array<{ organization_id: string }> }).prospects.length, 0);
+    await app.close();
+  });
+
+  it('imports CSV prospects, deduplicates and merges missing data', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const csv = [
+      'pseudo,email,phone,city,instagram,source_url,description',
+      'alice,alice@example.com,,Albi,@alice,https://source/a,Portrait mode et studio',
+      'alice,alice@example.com,+33700000000,Albi,@alice,https://source/a,Portrait mode et studio detaille avec booking'
+    ].join('\n');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects/import-csv',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { csv }
+    });
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/admin-api/prospects?search=alice',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(response.statusCode, 200);
+    const importResult = response.json() as { import: { created: number; merged: number; rows: number } };
+    assert.equal(importResult.import.created, 1);
+    assert.equal(importResult.import.merged, 1);
+    assert.equal(importResult.import.rows, 2);
+    const prospects = (listResponse.json() as { prospects: Array<{ phone: string }> }).prospects;
+    assert.equal(prospects.length, 1);
+    assert.equal(prospects[0]?.phone, '+33700000000');
+    await app.close();
+  });
+
+  it('filters and exports prospects as CSV', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        pseudo: 'mym_creator',
+        email: 'creator@example.com',
+        city: 'Albi',
+        mym: 'creator-mym',
+        status: 'interested'
+      }
+    });
+    const filtered = await app.inject({
+      method: 'GET',
+      url: '/admin-api/prospects?status=interested&platform=mym',
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/admin-api/prospects/export-csv?status=interested',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(filtered.statusCode, 200);
+    assert.equal((filtered.json() as { prospects: unknown[] }).prospects.length, 1);
+    assert.equal(exported.statusCode, 200);
+    assert.match(exported.body, /creator@example.com/);
+    await app.close();
+  });
+
   it('logs in with valid credentials and exposes current user', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'admin@example.com', 'test-password-123');
@@ -435,6 +561,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   ]);
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
+  const prospects = new Map<string, Record<string, unknown>>();
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -561,6 +688,90 @@ async function createAuthMemoryDatabase(): Promise<Database> {
 
       if (sql.includes('from sites where organization_id')) {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      }
+
+      if (sql.includes('from prospects') && sql.includes('count(*) filter')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const rows = filterProspects(prospects, organizationId);
+        return result([
+          {
+            total: String(rows.length),
+            to_contact: String(rows.filter((row) => ['to_contact', 'follow_up'].includes(valueToString(row.status))).length),
+            interested: String(rows.filter((row) => ['interested', 'potential_client'].includes(valueToString(row.status))).length),
+            blacklist: String(rows.filter((row) => row.status === 'blacklist').length),
+            high_score: String(rows.filter((row) => ['high', 'very_high'].includes(valueToString(row.score_label))).length),
+            with_email: String(rows.filter((row) => Boolean(row.email)).length),
+            with_phone: String(rows.filter((row) => Boolean(row.phone)).length),
+            premium_platforms: String(rows.filter((row) => Boolean(row.mym) || Boolean(row.onlyfans)).length)
+          }
+        ]);
+      }
+
+      if (sql.includes('from prospects') && sql.includes('group by city')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const counts = new Map<string, number>();
+        for (const row of filterProspects(prospects, organizationId)) {
+          const city = valueToString(row.city);
+          if (city) counts.set(city, (counts.get(city) ?? 0) + 1);
+        }
+        return result(
+          [...counts.entries()].map(([city, count]) => ({ city, count: String(count) }))
+        );
+      }
+
+      if (sql.includes('select count(*)::text as count from prospects')) {
+        const rows = filterProspectsForCore(prospects, values);
+        return result([{ count: String(rows.length) }]);
+      }
+
+      if (sql.includes('select *') && sql.includes('from prospects') && sql.includes('where organization_id')) {
+        const duplicate = [...prospects.values()].find(
+          (row) =>
+            row.organization_id === values[0] &&
+            ((values[1] && valueToString(row.email).toLowerCase() === valueToString(values[1]).toLowerCase()) ||
+              (values[2] && row.phone === values[2]) ||
+              (values[3] && row.source_url === values[3]) ||
+              (values[4] &&
+                values[5] &&
+                valueToString(row.pseudo).toLowerCase() === valueToString(values[4]).toLowerCase() &&
+                valueToString(row.city).toLowerCase() === valueToString(values[5]).toLowerCase()))
+        );
+        return result(optional(duplicate));
+      }
+
+      if (sql.includes('select *') && sql.includes('from prospects') && sql.includes('order by updated_at')) {
+        const rows = filterProspectsForCore(prospects, values);
+        return result(rows);
+      }
+
+      if (sql.includes('select * from prospects where id')) {
+        const prospect = prospects.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(optional(prospect && (!organizationId || prospect.organization_id === organizationId) ? prospect : undefined));
+      }
+
+      if (sql.includes('insert into prospects')) {
+        const row = prospectFromValues(values);
+        prospects.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('update prospects') && sql.includes('set') && sql.includes('display_name')) {
+        const row = prospects.get(String(values[24]));
+        const organizationId = values[25] ? valueToString(values[25]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) return result([]);
+        Object.assign(row, prospectUpdateFromValues(values), { updated_at: new Date() });
+        return result([row]);
+      }
+
+      if (sql.includes('delete from prospects')) {
+        const row = prospects.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) {
+          return { ...result([]), rowCount: 0 };
+        }
+        prospects.delete(String(values[0]));
+        return { ...result([]), rowCount: 1 };
       }
 
       if (sql.includes('select count(*)::text as count from organizations')) {
@@ -707,6 +918,115 @@ function site(
     widget_enabled: true,
     created_at: new Date()
   };
+}
+
+function prospectFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    site_id: null,
+    visitor_id: null,
+    first_name: values[2],
+    last_name: values[3],
+    pseudo: values[4],
+    company: values[5],
+    display_name: values[6],
+    email: values[7],
+    phone: values[8],
+    website: values[9],
+    instagram: values[10],
+    twitter_x: values[11],
+    mym: values[12],
+    onlyfans: values[13],
+    linktree: values[14],
+    allmylinks: values[15],
+    city: values[16],
+    activity: values[17],
+    description: values[18],
+    source_url: values[19],
+    status: values[20],
+    temperature: 'tiede',
+    score_current: values[21],
+    score: values[22],
+    score_label: values[23],
+    notes: values[24],
+    source: 'admin',
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+}
+
+function prospectUpdateFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    organization_id: values[0],
+    first_name: values[1],
+    last_name: values[2],
+    pseudo: values[3],
+    company: values[4],
+    display_name: values[5],
+    email: values[6],
+    phone: values[7],
+    website: values[8],
+    instagram: values[9],
+    twitter_x: values[10],
+    mym: values[11],
+    onlyfans: values[12],
+    linktree: values[13],
+    allmylinks: values[14],
+    city: values[15],
+    activity: values[16],
+    description: values[17],
+    source_url: values[18],
+    status: values[19],
+    score_current: values[20],
+    score: values[21],
+    score_label: values[22],
+    notes: values[23]
+  };
+}
+
+function filterProspects(
+  prospects: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...prospects.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
+}
+
+function filterProspectsForCore(
+  prospects: Map<string, Record<string, unknown>>,
+  values: unknown[]
+): Record<string, unknown>[] {
+  const organizationId = values[0] ? valueToString(values[0]) : null;
+  const search = valueToString(values[1] ?? '').replaceAll('%', '').toLowerCase();
+  const status = values[2] ? valueToString(values[2]) : null;
+  const city = valueToString(values[3] ?? '').replaceAll('%', '').toLowerCase();
+  const scoreLabel = values[4] ? valueToString(values[4]) : null;
+  const platform = values[5] ? valueToString(values[5]) : null;
+
+  return filterProspects(prospects, organizationId).filter((row) => {
+    const searchable = [
+      row.first_name,
+      row.last_name,
+      row.display_name,
+      row.pseudo,
+      row.email,
+      row.phone,
+      row.city
+    ]
+      .map(valueToString)
+      .join(' ')
+      .toLowerCase();
+
+    return (
+      (!search || searchable.includes(search)) &&
+      (!status || row.status === status) &&
+      (!city || valueToString(row.city).toLowerCase().includes(city)) &&
+      (!scoreLabel || row.score_label === scoreLabel) &&
+      (!platform || Boolean(row[platform]))
+    );
+  });
 }
 
 function optional<T>(value: T | undefined): T[] {
