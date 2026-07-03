@@ -372,6 +372,117 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('creates contact history and updates prospect status automatically', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'follow_creator',
+      email: 'follow@example.com',
+      city: 'Albi'
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/history`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: 'email',
+        outcome: 'interested',
+        messageUsed: 'Bonjour, votre profil nous interesse.',
+        response: 'Oui, envoyez les infos.',
+        notes: 'Bon signal'
+      }
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal((response.json() as { prospect: { status: string } }).prospect.status, 'interested');
+    await app.close();
+  });
+
+  it('keeps contact history isolated by organization', async () => {
+    const app = await createAuthTestApp();
+    const adminToken = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const superToken = await jwtLogin(app, 'super@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, superToken, {
+      organizationId: ORG_B,
+      pseudo: 'tenant_b_history',
+      email: 'history-b@example.com'
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin-api/prospects/${prospect.id}/history`,
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    assert.equal(response.statusCode, 404);
+    await app.close();
+  });
+
+  it('lists follow-ups and exports contact history', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'reminder_creator',
+      email: 'reminder@example.com',
+      city: 'Albi'
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/history`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        channel: 'instagram_manual',
+        outcome: 'follow_up_needed',
+        nextAction: 'Relancer demain',
+        followUpDate: new Date(Date.now() - 60_000).toISOString(),
+        notes: 'Premiere relance'
+      }
+    });
+    const followUps = await app.inject({
+      method: 'GET',
+      url: '/admin-api/contact-history/follow-ups?overdue=true',
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const exported = await app.inject({
+      method: 'GET',
+      url: '/admin-api/contact-history/export-csv?overdue=true',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(followUps.statusCode, 200);
+    assert.equal((followUps.json() as { followUps: unknown[] }).followUps.length, 1);
+    assert.equal(exported.statusCode, 200);
+    assert.match(exported.body, /Relancer demain/);
+    await app.close();
+  });
+
+  it('deletes contact history entries', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'delete_history',
+      email: 'delete-history@example.com'
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/history`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { channel: 'phone', outcome: 'no_response' }
+    });
+    const entryId = (created.json() as { entry: { id: string } }).entry.id;
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/admin-api/contact-history/${entryId}`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(deleted.statusCode, 200);
+    assert.equal((deleted.json() as { deleted: boolean }).deleted, true);
+    await app.close();
+  });
+
   it('logs in with valid credentials and exposes current user', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'admin@example.com', 'test-password-123');
@@ -550,6 +661,22 @@ async function jwtLogin(
   return (response.json() as { token: string }).token;
 }
 
+async function createTestProspect(
+  app: Awaited<ReturnType<typeof createAuthTestApp>>,
+  token: string,
+  payload: Record<string, unknown>
+): Promise<{ id: string }> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/admin-api/prospects',
+    headers: { authorization: `Bearer ${token}` },
+    payload
+  });
+  assert.equal(response.statusCode, 200);
+
+  return (response.json() as { prospect: { id: string } }).prospect;
+}
+
 async function createAuthMemoryDatabase(): Promise<Database> {
   const organizations = new Map<string, Record<string, unknown>>([
     [ORG_A, organization(ORG_A, 'Org A', 'org-a')],
@@ -562,6 +689,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
   const prospects = new Map<string, Record<string, unknown>>();
+  const contactHistory = new Map<string, Record<string, unknown>>();
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -688,6 +816,110 @@ async function createAuthMemoryDatabase(): Promise<Database> {
 
       if (sql.includes('from sites where organization_id')) {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      }
+
+      if (sql.includes('from contact_history') && sql.includes('total_contacts')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const rows = filterContactHistory(contactHistory, organizationId);
+        const now = Date.now();
+        const today = new Date().toISOString().slice(0, 10);
+        const positive = rows.filter((row) =>
+          ['positive', 'interested', 'booked'].includes(valueToString(row.outcome))
+        ).length;
+        return result([
+          {
+            due_today: String(rows.filter((row) => dateKey(row.follow_up_date) === today).length),
+            overdue: String(rows.filter((row) => toTime(row.follow_up_date) < now).length),
+            no_response: String(rows.filter((row) => row.outcome === 'no_response').length),
+            interested: String(rows.filter((row) => row.outcome === 'interested').length),
+            positive: String(positive),
+            total_contacts: String(rows.length),
+            contacts_this_week: String(rows.length),
+            never_contacted: String(
+              filterProspects(prospects, organizationId).filter(
+                (prospect) => !rows.some((row) => row.prospect_id === prospect.id)
+              ).length
+            )
+          }
+        ]);
+      }
+
+      if (sql.includes('from contact_history') && sql.includes('join prospects')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const overdueOnly = values[1] === true;
+        const upcomingOnly = values[2] === true;
+        const city = valueToString(values[3] ?? '').replaceAll('%', '').toLowerCase();
+        const scoreLabel = values[4] ? valueToString(values[4]) : null;
+        const status = values[5] ? valueToString(values[5]) : null;
+        const now = Date.now();
+        return result(
+          filterContactHistory(contactHistory, organizationId)
+            .filter((row) => row.follow_up_date)
+            .map((row): Record<string, unknown> => {
+              const prospect = prospects.get(String(row.prospect_id));
+              return {
+                ...row,
+                prospect_display_name: prospect?.display_name ?? null,
+                prospect_city: prospect?.city ?? null,
+                prospect_score: prospect?.score ?? null,
+                prospect_status: prospect?.status ?? null,
+                prospect_score_label: prospect?.score_label ?? null
+              };
+            })
+            .filter(
+              (row) =>
+                (!overdueOnly || toTime(row.follow_up_date) < now) &&
+                (!upcomingOnly || toTime(row.follow_up_date) >= now) &&
+                (!city || valueToString(row.prospect_city).toLowerCase().includes(city)) &&
+                (!scoreLabel || row.prospect_score_label === scoreLabel) &&
+                (!status || row.prospect_status === status)
+            )
+        );
+      }
+
+      if (sql.includes('from contact_history') && sql.includes('where prospect_id')) {
+        const prospectId = valueToString(values[0]);
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          [...contactHistory.values()].filter(
+            (row) =>
+              row.prospect_id === prospectId &&
+              (!organizationId || row.organization_id === organizationId)
+          )
+        );
+      }
+
+      if (sql.includes('insert into contact_history')) {
+        const row = contactHistoryFromValues(values);
+        contactHistory.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('update contact_history')) {
+        const row = contactHistory.get(String(values[8]));
+        const organizationId = values[9] ? valueToString(values[9]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) return result([]);
+        Object.assign(row, contactHistoryUpdateFromValues(values), { updated_at: new Date() });
+        return result([row]);
+      }
+
+      if (sql.includes('delete from contact_history')) {
+        const row = contactHistory.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) {
+          return { ...result([]), rowCount: 0 };
+        }
+        contactHistory.delete(String(values[0]));
+        return { ...result([]), rowCount: 1 };
+      }
+
+      if (sql.includes('update prospects') && sql.includes('set status = coalesce')) {
+        const prospect = prospects.get(String(values[1]));
+        if (prospect && prospect.organization_id === values[2] && values[0]) {
+          prospect.status = values[0];
+          prospect.updated_at = new Date();
+        }
+        return result([]);
       }
 
       if (sql.includes('from prospects') && sql.includes('count(*) filter')) {
@@ -1027,6 +1259,60 @@ function filterProspectsForCore(
       (!platform || Boolean(row[platform]))
     );
   });
+}
+
+function contactHistoryFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    prospect_id: values[2],
+    user_id: values[3],
+    contact_date: values[4] ?? new Date(),
+    channel: values[5],
+    message_used: values[6],
+    response: values[7],
+    outcome: values[8],
+    next_action: values[9],
+    follow_up_date: values[10],
+    notes: values[11],
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+}
+
+function contactHistoryUpdateFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    contact_date: values[0],
+    channel: values[1],
+    message_used: values[2],
+    response: values[3],
+    outcome: values[4],
+    next_action: values[5],
+    follow_up_date: values[6],
+    notes: values[7]
+  };
+}
+
+function filterContactHistory(
+  contactHistory: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...contactHistory.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
+}
+
+function toTime(value: unknown): number {
+  if (!value) return Number.POSITIVE_INFINITY;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string') return new Date(value).getTime();
+  return Number.POSITIVE_INFINITY;
+}
+
+function dateKey(value: unknown): string {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(valueToString(value));
+  return date.toISOString().slice(0, 10);
 }
 
 function optional<T>(value: T | undefined): T[] {

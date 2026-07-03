@@ -14,6 +14,12 @@ import {
   prospectStatuses,
   type ProspectInput
 } from '../prospects/prospect-repository.js';
+import {
+  ContactHistoryRepository,
+  contactChannels,
+  contactOutcomes,
+  type ContactHistoryInput
+} from '../contact-history/contact-history-repository.js';
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
@@ -96,6 +102,26 @@ const csvImportSchema = z.object({
   csv: z.string().min(1)
 });
 
+const contactHistoryPayloadSchema = z.object({
+  contactDate: z.coerce.date().optional(),
+  channel: z.enum(contactChannels),
+  messageUsed: z.string().optional(),
+  response: z.string().optional(),
+  outcome: z.enum(contactOutcomes),
+  nextAction: z.string().optional(),
+  followUpDate: z.coerce.date().optional().nullable(),
+  notes: z.string().optional()
+});
+
+const followUpQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  overdue: z.coerce.boolean().optional(),
+  upcoming: z.coerce.boolean().optional(),
+  city: z.string().optional(),
+  scoreLabel: z.enum(scoreLabels).optional(),
+  status: z.enum(prospectStatuses).optional()
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -104,6 +130,7 @@ export function registerAdminManagementRoutes(
   const organizations = new OrganizationRepository(database);
   const users = new UserRepository(database);
   const prospects = new ProspectRepository(database);
+  const contactHistory = new ContactHistoryRepository(database);
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
@@ -119,6 +146,7 @@ export function registerAdminManagementRoutes(
             : 0,
       usersCount: await users.count(organizationId),
       prospects: await prospects.metrics(organizationId),
+      contactHistory: await contactHistory.metrics(organizationId),
       role: context.user.role,
       organizationId: context.user.organization_id
     };
@@ -283,6 +311,32 @@ export function registerAdminManagementRoutes(
     return { import: await prospects.importCsv(organizationId, body.csv) };
   });
 
+  app.get('/admin-api/contact-history/follow-ups', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = followUpQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return {
+      followUps: await contactHistory.followUps(toContactHistoryFilters(organizationId, query)),
+      channels: contactChannels,
+      outcomes: contactOutcomes
+    };
+  });
+
+  app.get('/admin-api/contact-history/export-csv', async (request, reply) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'data:export');
+    const query = followUpQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    const csv = await contactHistory.exportCsv(toContactHistoryFilters(organizationId, query));
+
+    reply.type('text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="visitor-os-contact-history.csv"');
+
+    return csv;
+  });
+
   app.post('/admin-api/prospects', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:write');
@@ -290,6 +344,69 @@ export function registerAdminManagementRoutes(
     requireOrganizationAccess(context.user, body.organizationId);
 
     return { prospect: await prospects.createCore(toProspectInput(body)) };
+  });
+
+  app.get('/admin-api/prospects/:prospectId/history', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return {
+      history: await contactHistory.listForProspect(params.prospectId, organizationId),
+      channels: contactChannels,
+      outcomes: contactOutcomes
+    };
+  });
+
+  app.post('/admin-api/prospects/:prospectId/history', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const body = contactHistoryPayloadSchema.parse(request.body);
+    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return {
+      entry: await contactHistory.create(
+        toContactHistoryInput(prospect.organization_id, params.prospectId, context.user.id, body)
+      ),
+      prospect: await prospects.findCore(params.prospectId, organizationId)
+    };
+  });
+
+  app.patch('/admin-api/contact-history/:historyId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ historyId: z.string().uuid() }).parse(request.params);
+    const body = contactHistoryPayloadSchema
+      .extend({ organizationId: z.string().uuid(), prospectId: z.string().uuid() })
+      .parse(request.body);
+    requireOrganizationAccess(context.user, body.organizationId);
+    const entry = await contactHistory.update(
+      params.historyId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id,
+      toContactHistoryInput(body.organizationId, body.prospectId, context.user.id, body)
+    );
+    if (!entry) throw notFound('Contact history not found', 'CONTACT_HISTORY_NOT_FOUND');
+
+    return { entry };
+  });
+
+  app.delete('/admin-api/contact-history/:historyId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ historyId: z.string().uuid() }).parse(request.params);
+
+    return {
+      deleted: await contactHistory.delete(
+        params.historyId,
+        context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+      )
+    };
   });
 
   app.get('/admin-api/prospects/:prospectId', async (request) => {
@@ -436,6 +553,20 @@ function toProspectFilters(
   };
 }
 
+function toContactHistoryFilters(
+  organizationId: string,
+  query: z.infer<typeof followUpQuerySchema>
+) {
+  return {
+    organizationId,
+    ...(query.overdue ? { overdueOnly: query.overdue } : {}),
+    ...(query.upcoming ? { upcomingOnly: query.upcoming } : {}),
+    ...(query.city ? { city: query.city } : {}),
+    ...(query.scoreLabel ? { scoreLabel: query.scoreLabel } : {}),
+    ...(query.status ? { status: query.status } : {})
+  };
+}
+
 function optional<T>(value: T | null): T[] {
   return value ? [value] : [];
 }
@@ -465,6 +596,27 @@ function toProspectInput(input: z.infer<typeof prospectPayloadSchema>): Prospect
     ...(input.activity ? { activity: input.activity } : {}),
     ...(input.description ? { description: input.description } : {}),
     ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+    ...(input.notes ? { notes: input.notes } : {})
+  };
+}
+
+function toContactHistoryInput(
+  organizationId: string,
+  prospectId: string,
+  userId: string,
+  input: z.infer<typeof contactHistoryPayloadSchema>
+): ContactHistoryInput {
+  return {
+    organizationId,
+    prospectId,
+    userId,
+    channel: input.channel,
+    outcome: input.outcome,
+    ...(input.contactDate ? { contactDate: input.contactDate } : {}),
+    ...(input.messageUsed ? { messageUsed: input.messageUsed } : {}),
+    ...(input.response ? { response: input.response } : {}),
+    ...(input.nextAction ? { nextAction: input.nextAction } : {}),
+    ...(input.followUpDate ? { followUpDate: input.followUpDate } : {}),
     ...(input.notes ? { notes: input.notes } : {})
   };
 }

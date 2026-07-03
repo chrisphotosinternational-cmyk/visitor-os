@@ -20,6 +20,7 @@ The first working MVP is available:
 - configurable business engine per site.
 - protected admin authentication and RBAC.
 - organizations, users, and prospects administration through the production admin UI.
+- contact history, manual follow-ups, and prospect timeline for commercial tracking.
 - AI Provider Engine with mock fallback and OpenAI-ready abstraction.
 - advanced CRM foundation with scoring, tags, notes, follow-ups and exports.
 - Notification Engine with internal alerts, email mock/Resend provider, webhooks and history.
@@ -187,6 +188,67 @@ Compliance limits:
 - VISITOR-OS must only store data the administrator is allowed to process.
 - No private account access, scraping bypass, or hidden data collection is part of the product.
 - Public data imports remain the responsibility of the administrator and must respect applicable laws and platform terms.
+
+## Contact History And Follow-Ups
+
+Sprint 7 adds manual commercial tracking to the prospect CRM.
+
+Each prospect can now have a structured contact timeline:
+
+- contact date;
+- manual channel;
+- message used;
+- prospect response;
+- outcome;
+- next action;
+- follow-up date;
+- internal notes.
+
+Supported manual channels:
+
+```text
+email, phone, whatsapp_manual, instagram_manual, x_manual,
+mym_manual, onlyfans_manual, website_form, other
+```
+
+Supported outcomes:
+
+```text
+no_response, positive, negative, interested, not_now,
+booked, blacklist, follow_up_needed
+```
+
+Automatic prospect status updates:
+
+- `follow_up_date` present -> `follow_up`;
+- `blacklist` outcome -> `blacklist`;
+- `booked` outcome -> `signed_client`;
+- `interested` or `positive` outcome -> `interested`;
+- `negative` outcome -> `refused`;
+- `follow_up_needed` outcome -> `follow_up`.
+
+Admin routes are protected by JWT/RBAC:
+
+- `GET /admin-api/prospects/:id/history`;
+- `POST /admin-api/prospects/:id/history`;
+- `PATCH /admin-api/contact-history/:id`;
+- `DELETE /admin-api/contact-history/:id`;
+- `GET /admin-api/contact-history/follow-ups`;
+- `GET /admin-api/contact-history/export-csv`.
+
+The admin interface exposes:
+
+- timeline inside `/prospects/:id`;
+- manual interaction form;
+- `/follow-ups` page for upcoming and overdue reminders;
+- CSV export for follow-ups/history.
+
+Compliance limits:
+
+- no automatic email, WhatsApp, Instagram, MYM, OnlyFans, or X sending;
+- VISITOR-OS only records manual contact actions done outside the system;
+- no private account access or automated platform interaction is included;
+- the operator remains responsible for lawful and proportionate prospecting.
 
 ## Development Rule
 

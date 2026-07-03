@@ -13,6 +13,7 @@ model Organization {
   slug      String   @unique
   users     User[]
   prospects Prospect[]
+  contactHistory ContactHistory[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("organizations")
@@ -30,6 +31,7 @@ model User {
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz
   organization   Organization @relation(fields: [organizationId], references: [id])
+  contactHistory ContactHistory[]
 
   @@unique([organizationId, email])
   @@map("users")
@@ -77,6 +79,7 @@ model Prospect {
   createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime            @default(now()) @map("updated_at") @db.Timestamptz
   organization   Organization        @relation(fields: [organizationId], references: [id])
+  contactHistory ContactHistory[]
 
   @@index([organizationId, status])
   @@index([organizationId, scoreLabel])
@@ -103,4 +106,52 @@ enum ProspectScoreLabel {
   medium
   low
   ignore
+}
+
+model ContactHistory {
+  id             String         @id @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  prospectId     String         @map("prospect_id") @db.Uuid
+  userId         String?        @map("user_id") @db.Uuid
+  contactDate    DateTime       @default(now()) @map("contact_date") @db.Timestamptz
+  channel        ContactChannel
+  messageUsed    String?        @map("message_used")
+  response       String?
+  outcome        ContactOutcome
+  nextAction     String?        @map("next_action")
+  followUpDate   DateTime?      @map("follow_up_date") @db.Timestamptz
+  notes          String?
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  prospect       Prospect       @relation(fields: [prospectId], references: [id])
+  user           User?          @relation(fields: [userId], references: [id])
+
+  @@index([prospectId, contactDate])
+  @@index([organizationId, followUpDate])
+  @@index([organizationId, outcome])
+  @@map("contact_history")
+}
+
+enum ContactChannel {
+  email
+  phone
+  whatsapp_manual
+  instagram_manual
+  x_manual
+  mym_manual
+  onlyfans_manual
+  website_form
+  other
+}
+
+enum ContactOutcome {
+  no_response
+  positive
+  negative
+  interested
+  not_now
+  booked
+  blacklist
+  follow_up_needed
 }

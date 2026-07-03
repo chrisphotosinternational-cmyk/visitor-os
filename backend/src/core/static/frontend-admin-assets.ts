@@ -53,6 +53,12 @@ createApp({
       prospectForm: emptyProspectForm(),
       prospectImportCsv: '',
       selectedProspect: null,
+      contactHistory: [],
+      contactChannels: [],
+      contactOutcomes: [],
+      contactHistoryForm: emptyContactHistoryForm(),
+      followUps: [],
+      followUpFilters: { overdue: false, upcoming: false, city: '', scoreLabel: '', status: '' },
       loading: false,
       error: '',
       sessionTimer: null
@@ -147,7 +153,7 @@ createApp({
         this.user = { ...(this.user ?? {}), ...me.user };
         if (this.route === 'login') this.navigate('dashboard');
         this.startSessionWatcher();
-        await Promise.all([this.refreshTechnicalStatus(), this.loadOrganizations(), this.loadUsers(), this.loadProspects()]);
+        await Promise.all([this.refreshTechnicalStatus(), this.loadOrganizations(), this.loadUsers(), this.loadProspects(), this.loadFollowUps()]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
         this.logout(false);
@@ -317,6 +323,7 @@ createApp({
     editProspect(prospect) {
       this.selectedProspect = prospect;
       this.prospectForm = prospectToForm(prospect);
+      void this.loadProspectHistory(prospect.id);
       this.navigate('prospect-detail', prospect.id);
     },
     newProspect() {
@@ -345,6 +352,79 @@ createApp({
       this.prospectImportCsv = '';
       await Promise.all([this.loadProspects(), this.refreshDashboard()]);
       this.navigate('prospects');
+    },
+    async loadProspectHistory(prospectId) {
+      const response = await this.apiRequest('/admin-api/prospects/' + prospectId + '/history', { authenticated: true });
+      if (!response.ok) throw new Error('Chargement historique impossible.');
+      const data = await response.json();
+      this.contactHistory = data.history;
+      this.contactChannels = data.channels;
+      this.contactOutcomes = data.outcomes;
+      this.contactHistoryForm = emptyContactHistoryForm();
+    },
+    async saveContactHistory() {
+      if (!this.selectedProspect) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/history', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify(this.contactHistoryForm)
+      });
+      if (!response.ok) throw new Error('Ajout historique impossible.');
+      const data = await response.json();
+      this.selectedProspect = data.prospect ?? this.selectedProspect;
+      await Promise.all([this.loadProspectHistory(this.selectedProspect.id), this.loadProspects(), this.loadFollowUps(), this.refreshDashboard()]);
+    },
+    async deleteContactHistory(entry) {
+      const response = await this.apiRequest('/admin-api/contact-history/' + entry.id, {
+        method: 'DELETE',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Suppression historique impossible.');
+      if (this.selectedProspect) await this.loadProspectHistory(this.selectedProspect.id);
+      await Promise.all([this.loadFollowUps(), this.refreshDashboard()]);
+    },
+    async markFollowedUp(entry) {
+      this.selectedProspect = {
+        id: entry.prospect_id,
+        organization_id: entry.organization_id,
+        display_name: entry.prospect_display_name
+      };
+      this.contactHistoryForm = {
+        channel: entry.channel || 'other',
+        outcome: 'follow_up_needed',
+        contactDate: new Date().toISOString().slice(0, 16),
+        messageUsed: '',
+        response: '',
+        nextAction: '',
+        followUpDate: '',
+        notes: 'Relance effectuee'
+      };
+      await this.saveContactHistory();
+    },
+    async loadFollowUps() {
+      if (!this.token) return;
+      const params = new URLSearchParams();
+      if (this.followUpFilters.overdue) params.set('overdue', 'true');
+      if (this.followUpFilters.upcoming) params.set('upcoming', 'true');
+      if (this.followUpFilters.city) params.set('city', this.followUpFilters.city);
+      if (this.followUpFilters.scoreLabel) params.set('scoreLabel', this.followUpFilters.scoreLabel);
+      if (this.followUpFilters.status) params.set('status', this.followUpFilters.status);
+      const response = await this.apiRequest('/admin-api/contact-history/follow-ups' + (params.toString() ? '?' + params.toString() : ''), { authenticated: true });
+      if (!response.ok) throw new Error('Chargement relances impossible.');
+      const data = await response.json();
+      this.followUps = data.followUps;
+      this.contactChannels = data.channels;
+      this.contactOutcomes = data.outcomes;
+    },
+    async exportContactHistory() {
+      const response = await this.apiRequest('/admin-api/contact-history/export-csv', { authenticated: true });
+      if (!response.ok) throw new Error('Export historique impossible.');
+      const blob = new Blob([await response.text()], { type: 'text/csv;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'visitor-os-contact-history.csv';
+      link.click();
+      URL.revokeObjectURL(link.href);
     },
     async exportProspects() {
       const response = await this.apiRequest('/admin-api/prospects/export-csv', { authenticated: true });
@@ -420,6 +500,7 @@ createApp({
           <button :class="['nav-item', { active: route === 'organizations' }]" type="button" @click="navigate('organizations')">Organisations</button>
           <button :class="['nav-item', { active: route === 'users' }]" type="button" @click="navigate('users')">Utilisateurs</button>
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" type="button" @click="navigate('prospects')">Prospects</button>
+          <button :class="['nav-item', { active: route === 'follow-ups' }]" type="button" @click="navigate('follow-ups')">Relances</button>
           <button :class="['nav-item', { active: route === 'settings' }]" type="button" @click="navigate('settings')">Parametres</button>
         </nav>
       </aside>
@@ -445,6 +526,12 @@ createApp({
           <article class="metric"><span>Email</span><strong>{{ dashboard?.prospects?.withEmail ?? 0 }}</strong><small>Contactable</small></article>
           <article class="metric"><span>Téléphone</span><strong>{{ dashboard?.prospects?.withPhone ?? 0 }}</strong><small>Contactable</small></article>
           <article class="metric"><span>MYM / OnlyFans</span><strong>{{ dashboard?.prospects?.premiumPlatforms ?? 0 }}</strong><small>Plateformes</small></article>
+          <article class="metric"><span>Relances aujourd'hui</span><strong>{{ dashboard?.contactHistory?.dueToday ?? 0 }}</strong><small>A traiter</small></article>
+          <article class="metric"><span>Relances en retard</span><strong>{{ dashboard?.contactHistory?.overdue ?? 0 }}</strong><small>Urgent</small></article>
+          <article class="metric"><span>Sans réponse</span><strong>{{ dashboard?.contactHistory?.noResponse ?? 0 }}</strong><small>Historique</small></article>
+          <article class="metric"><span>Taux positif</span><strong>{{ dashboard?.contactHistory?.positiveRate ?? 0 }}%</strong><small>Simple</small></article>
+          <article class="metric"><span>Contacts semaine</span><strong>{{ dashboard?.contactHistory?.contactsThisWeek ?? 0 }}</strong><small>7 jours</small></article>
+          <article class="metric"><span>Jamais contactés</span><strong>{{ dashboard?.contactHistory?.neverContacted ?? 0 }}</strong><small>A qualifier</small></article>
         </section>
 
         <section v-if="route === 'organizations'" class="panel">
@@ -556,6 +643,31 @@ createApp({
             <textarea v-model="prospectForm.notes" placeholder="Notes internes"></textarea>
             <button type="submit">{{ prospectForm.id ? 'Modifier' : 'Creer' }}</button>
           </form>
+          <section v-if="route === 'prospect-detail'" class="timeline-section">
+            <div class="panel-header"><h2>Timeline / Historique</h2><span class="badge">{{ contactHistory.length }} interaction(s)</span></div>
+            <form class="admin-form prospect-form" @submit.prevent="saveContactHistory">
+              <input v-model="contactHistoryForm.contactDate" type="datetime-local" />
+              <select v-model="contactHistoryForm.channel"><option v-for="channel in contactChannels" :key="channel" :value="channel">{{ channel }}</option></select>
+              <select v-model="contactHistoryForm.outcome"><option v-for="outcome in contactOutcomes" :key="outcome" :value="outcome">{{ outcome }}</option></select>
+              <input v-model="contactHistoryForm.followUpDate" type="datetime-local" />
+              <input v-model="contactHistoryForm.nextAction" placeholder="Prochaine action" />
+              <textarea v-model="contactHistoryForm.messageUsed" placeholder="Message utilise"></textarea>
+              <textarea v-model="contactHistoryForm.response" placeholder="Reponse"></textarea>
+              <textarea v-model="contactHistoryForm.notes" placeholder="Notes"></textarea>
+              <button type="submit">Ajouter interaction</button>
+            </form>
+            <div class="timeline">
+              <article v-for="entry in contactHistory" :key="entry.id" class="timeline-item">
+                <header><strong>{{ entry.channel }}</strong><span class="badge">{{ entry.outcome }}</span><small>{{ entry.contact_date }}</small></header>
+                <p v-if="entry.message_used">{{ entry.message_used }}</p>
+                <p v-if="entry.response"><strong>Reponse :</strong> {{ entry.response }}</p>
+                <p v-if="entry.next_action"><strong>Prochaine action :</strong> {{ entry.next_action }}</p>
+                <p v-if="entry.follow_up_date"><strong>Relance :</strong> {{ entry.follow_up_date }}</p>
+                <p v-if="entry.notes">{{ entry.notes }}</p>
+                <button v-if="canWriteProspects" type="button" @click="deleteContactHistory(entry)">Supprimer</button>
+              </article>
+            </div>
+          </section>
         </section>
 
         <section v-if="route === 'prospect-import'" class="panel">
@@ -565,6 +677,31 @@ createApp({
             <textarea v-model="prospectImportCsv" placeholder="Colle le contenu CSV ici" required></textarea>
             <button type="submit">Importer</button>
           </form>
+        </section>
+
+        <section v-if="route === 'follow-ups'" class="panel">
+          <div class="panel-header">
+            <h2>Relances</h2>
+            <div class="inline-actions"><button type="button" @click="exportContactHistory">Export CSV</button></div>
+          </div>
+          <form class="filters" @submit.prevent="loadFollowUps">
+            <label><input v-model="followUpFilters.overdue" type="checkbox" @change="loadFollowUps" /> En retard</label>
+            <label><input v-model="followUpFilters.upcoming" type="checkbox" @change="loadFollowUps" /> A venir</label>
+            <input v-model="followUpFilters.city" @input="loadFollowUps" placeholder="Ville" />
+            <select v-model="followUpFilters.scoreLabel" @change="loadFollowUps"><option value="">Tous scores</option><option v-for="label in prospectScoreLabels" :key="label" :value="label">{{ label }}</option></select>
+            <select v-model="followUpFilters.status" @change="loadFollowUps"><option value="">Tous statuts</option><option v-for="status in prospectStatuses" :key="status" :value="status">{{ status }}</option></select>
+          </form>
+          <div class="table-wrap">
+            <table><thead><tr><th>Prospect</th><th>Relance</th><th>Outcome</th><th>Action</th><th></th></tr></thead>
+              <tbody><tr v-for="entry in followUps" :key="entry.id">
+                <td><strong>{{ entry.prospect_display_name || entry.prospect_id }}</strong><small>{{ entry.prospect_city || '-' }} · score {{ entry.prospect_score ?? '-' }}</small></td>
+                <td>{{ entry.follow_up_date }}</td>
+                <td><span class="badge">{{ entry.outcome }}</span></td>
+                <td>{{ entry.next_action || entry.notes || '-' }}</td>
+                <td class="actions"><button type="button" @click="markFollowedUp(entry)">Marquer relancé</button></td>
+              </tr></tbody>
+            </table>
+          </div>
         </section>
 
         <section v-if="route === 'settings'" class="panel empty-panel">
@@ -582,6 +719,7 @@ function normalizeRoute(pathname) {
   if (pathname === '/prospects/new') return 'prospect-new';
   if (pathname === '/prospects/import') return 'prospect-import';
   if (pathname.startsWith('/prospects/')) return 'prospect-detail';
+  if (pathname === '/follow-ups') return 'follow-ups';
   if (pathname === '/settings') return 'settings';
   return 'dashboard';
 }
@@ -591,6 +729,7 @@ function routePath(route, id) {
   if (route === 'prospect-new') return '/prospects/new';
   if (route === 'prospect-import') return '/prospects/import';
   if (route === 'prospect-detail') return '/prospects/' + id;
+  if (route === 'follow-ups') return '/follow-ups';
   return '/' + route;
 }
 
@@ -603,6 +742,7 @@ function routeTitle(route) {
     'prospect-new': 'Nouveau prospect',
     'prospect-detail': 'Prospect',
     'prospect-import': 'Import CSV',
+    'follow-ups': 'Relances',
     settings: 'Parametres'
   }[route] ?? 'Dashboard';
 }
@@ -664,6 +804,19 @@ function prospectToForm(prospect) {
     sourceUrl: prospect.source_url ?? '',
     status: prospect.status ?? 'new',
     notes: prospect.notes ?? ''
+  };
+}
+
+function emptyContactHistoryForm() {
+  return {
+    contactDate: new Date().toISOString().slice(0, 16),
+    channel: 'email',
+    outcome: 'no_response',
+    messageUsed: '',
+    response: '',
+    nextAction: '',
+    followUpDate: '',
+    notes: ''
   };
 }
 
@@ -769,10 +922,17 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91,
 .prospect-form textarea { grid-column: span 2; min-height: 92px; }
 .inline-actions, .filters { display: flex; flex-wrap: wrap; gap: 10px; }
 .filters { padding: 14px 18px; border-bottom: 1px solid #e6ebf2; }
+.filters label { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; color: #354157; }
+.filters label input { width: auto; }
 .filters input, .filters select { width: auto; min-width: 180px; }
 .import-form { display: grid; gap: 12px; padding: 18px; }
 .import-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .muted { padding: 0 18px; color: #647084; }
+.timeline-section { border-top: 1px solid #e6ebf2; }
+.timeline { display: grid; gap: 12px; padding: 18px; }
+.timeline-item { display: grid; gap: 8px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
+.timeline-item header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.timeline-item p { color: #354157; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid #edf1f6; padding: 12px 18px; text-align: left; vertical-align: top; }
