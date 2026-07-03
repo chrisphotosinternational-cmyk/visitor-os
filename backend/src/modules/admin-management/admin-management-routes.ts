@@ -26,6 +26,7 @@ import {
   messageTemplatePurposes,
   type MessageTemplateInput
 } from '../message-templates/message-template-repository.js';
+import { AIQualificationService } from '../ai-qualification/ai-qualification-service.js';
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
@@ -161,6 +162,12 @@ const saveRenderedMessageSchema = z.object({
   notes: z.string().optional()
 });
 
+const analyzeBatchSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  prospectIds: z.array(z.string().uuid()).optional(),
+  all: z.boolean().default(false)
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -171,6 +178,7 @@ export function registerAdminManagementRoutes(
   const prospects = new ProspectRepository(database);
   const contactHistory = new ContactHistoryRepository(database);
   const messageTemplates = new MessageTemplateRepository(database);
+  const aiQualification = new AIQualificationService(database);
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
@@ -189,6 +197,7 @@ export function registerAdminManagementRoutes(
       prospects: await prospects.metrics(organizationId),
       contactHistory: await contactHistory.metrics(organizationId),
       messageTemplates: await messageTemplates.metrics(organizationId),
+      aiQualification: await aiQualification.metrics(organizationId),
       role: context.user.role,
       organizationId: context.user.organization_id
     };
@@ -584,6 +593,63 @@ export function registerAdminManagementRoutes(
       entry,
       prospect: await prospects.findCore(params.prospectId, prospect.organization_id)
     };
+  });
+
+  app.get('/admin-api/prospects/:prospectId/analysis', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return {
+      analysis: await aiQualification.latestForProspect(params.prospectId, prospect.organization_id)
+    };
+  });
+
+  app.post('/admin-api/prospects/:prospectId/analyze', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await prospects.findCore(params.prospectId, organizationId);
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return { analysis: await aiQualification.analyzeProspect(prospect) };
+  });
+
+  app.post('/admin-api/prospects/analyze-batch', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const body = analyzeBatchSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    const selectedProspects = body.prospectIds?.length
+      ? (
+          await Promise.all(
+            body.prospectIds.map((prospectId) => prospects.findCore(prospectId, organizationId))
+          )
+        ).filter((prospect): prospect is NonNullable<typeof prospect> => Boolean(prospect))
+      : body.all
+        ? await prospects.listAllCore(organizationId)
+        : (await prospects.listCore({ organizationId, page: 1, pageSize: 25 })).prospects;
+    const job = aiQualification.createBatchJob(organizationId, selectedProspects.length);
+    void aiQualification.runBatch(job.id, selectedProspects);
+
+    return { job };
+  });
+
+  app.get('/admin-api/prospects/analyze-batch/:jobId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ jobId: z.string().uuid() }).parse(request.params);
+    const job = aiQualification.getBatchJob(params.jobId);
+    if (!job) throw notFound('Analysis batch not found', 'AI_ANALYSIS_BATCH_NOT_FOUND');
+    requireOrganizationAccess(context.user, job.organizationId);
+
+    return { job };
   });
 
   app.get('/admin-api/prospects/:prospectId/history', async (request) => {

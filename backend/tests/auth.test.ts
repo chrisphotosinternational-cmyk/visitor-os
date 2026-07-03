@@ -671,6 +671,139 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('analyzes a prospect and stores the latest AI qualification', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      firstName: 'Emma',
+      pseudo: 'emma_content',
+      email: 'emma-content@example.com',
+      instagram: '@emma',
+      mym: 'emma-mym',
+      city: 'Albi',
+      activity: 'Creatrice de contenu portrait',
+      description: 'Profil actif avec contenu premium et portfolio regulier pour shooting.'
+    });
+    const analyzed = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/analyze`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const latest = await app.inject({
+      method: 'GET',
+      url: `/admin-api/prospects/${prospect.id}/analysis`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(analyzed.statusCode, 200);
+    const analysis = analyzed.json() as {
+      analysis: { recommended_offer: string; confidence: number; strengths: string[] };
+    };
+    assert.match(analysis.analysis.recommended_offer, /Pack MYM/);
+    assert.ok(analysis.analysis.confidence > 60);
+    assert.ok(analysis.analysis.strengths.length > 0);
+    assert.equal(latest.statusCode, 200);
+    assert.equal(
+      (latest.json() as { analysis: { prospect_id: string } }).analysis.prospect_id,
+      prospect.id
+    );
+    await app.close();
+  });
+
+  it('recalculates and keeps AI qualification history', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'recalc_ai',
+      email: 'recalc@example.com',
+      website: 'https://recalc.example',
+      city: 'Albi'
+    });
+    const first = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/analyze`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/analyze`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(first.statusCode, 200);
+    assert.equal(second.statusCode, 200);
+    assert.notEqual(
+      (first.json() as { analysis: { id: string } }).analysis.id,
+      (second.json() as { analysis: { id: string } }).analysis.id
+    );
+    await app.close();
+  });
+
+  it('keeps AI qualification isolated by organization', async () => {
+    const app = await createAuthTestApp();
+    const adminToken = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const superToken = await jwtLogin(app, 'super@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, superToken, {
+      organizationId: ORG_B,
+      pseudo: 'tenant_b_ai',
+      email: 'tenant-b-ai@example.com'
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/analyze`,
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    assert.equal(response.statusCode, 404);
+    await app.close();
+  });
+
+  it('runs AI qualification batch and updates dashboard metrics', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'batch_one',
+      email: 'batch-one@example.com',
+      instagram: '@batchone'
+    });
+    await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'batch_two',
+      phone: '+33611111111',
+      onlyfans: 'batch-two'
+    });
+    const started = await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects/analyze-batch',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { all: true }
+    });
+    const jobId = (started.json() as { job: { id: string } }).job.id;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const job = await app.inject({
+      method: 'GET',
+      url: `/admin-api/prospects/analyze-batch/${jobId}`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const dashboard = await app.inject({
+      method: 'GET',
+      url: '/admin-api/dashboard',
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(started.statusCode, 200);
+    assert.equal(job.statusCode, 200);
+    assert.equal((job.json() as { job: { status: string } }).job.status, 'completed');
+    assert.ok(
+      (dashboard.json() as { aiQualification: { analyzedProspects: number } }).aiQualification
+        .analyzedProspects >= 2
+    );
+    await app.close();
+  });
+
   it('logs in with valid credentials and exposes current user', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'admin@example.com', 'test-password-123');
@@ -880,6 +1013,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const contactHistory = new Map<string, Record<string, unknown>>();
   const messageTemplates = new Map<string, Record<string, unknown>>();
   const messageTemplateUsage = new Map<string, Record<string, unknown>>();
+  const prospectAiAnalysis = new Map<string, Record<string, unknown>>();
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -1096,6 +1230,62 @@ async function createAuthMemoryDatabase(): Promise<Database> {
           })
         );
         return result(rows);
+      }
+
+      if (sql.includes('insert into prospect_ai_analysis')) {
+        const row = prospectAiAnalysisFromValues(values);
+        prospectAiAnalysis.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('from prospect_ai_analysis') && sql.includes('where prospect_id')) {
+        const prospectId = valueToString(values[0]);
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          filterProspectAiAnalysis(prospectAiAnalysis, organizationId).filter(
+            (row) => row.prospect_id === prospectId
+          )
+        );
+      }
+
+      if (sql.includes('analyzed_prospects') && sql.includes('from prospect_ai_analysis a')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const analyses = filterProspectAiAnalysis(prospectAiAnalysis, organizationId);
+        const analyzedProspectIds = new Set(analyses.map((row) => row.prospect_id));
+        const orgProspects = filterProspects(prospects, organizationId);
+        const average =
+          analyses.length > 0
+            ? Math.round(
+                analyses.reduce((sum, row) => sum + Number(row.confidence ?? 0), 0) /
+                  analyses.length
+              )
+            : 0;
+        return result([
+          {
+            analyzed_prospects: String(analyzedProspectIds.size),
+            pending_analyses: String(
+              orgProspects.filter((prospect) => !analyzedProspectIds.has(prospect.id)).length
+            ),
+            average_confidence: String(average),
+            priority_opportunities: String(
+              analyses.filter((row) => ['very_high', 'high'].includes(valueToString(row.priority)))
+                .length
+            )
+          }
+        ]);
+      }
+
+      if (sql.includes('from prospect_ai_analysis a') && sql.includes('join prospects p')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        return result(
+          filterProspectAiAnalysis(prospectAiAnalysis, organizationId).map((row) => ({
+            prospect_id: row.prospect_id,
+            display_name: prospects.get(String(row.prospect_id))?.display_name ?? 'Prospect',
+            priority: row.priority,
+            confidence: row.confidence,
+            recommended_offer: row.recommended_offer
+          }))
+        );
       }
 
       if (sql.includes('from contact_history') && sql.includes('total_contacts')) {
@@ -1670,6 +1860,33 @@ function filterMessageTemplateUsage(
   );
 }
 
+function prospectAiAnalysisFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    prospect_id: values[2],
+    summary: values[3],
+    strengths: parseJsonArray(values[4]),
+    weaknesses: parseJsonArray(values[5]),
+    opportunities: parseJsonArray(values[6]),
+    risks: parseJsonArray(values[7]),
+    recommended_offer: values[8],
+    priority: values[9],
+    confidence: values[10],
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+}
+
+function filterProspectAiAnalysis(
+  prospectAiAnalysis: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...prospectAiAnalysis.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
+}
+
 function filterContactHistory(
   contactHistory: Map<string, Record<string, unknown>>,
   organizationId: string | null
@@ -1715,4 +1932,15 @@ function valueToString(value: unknown): string {
   }
 
   return '';
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }

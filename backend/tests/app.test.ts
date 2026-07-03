@@ -55,6 +55,8 @@ describe('createApp', () => {
     assert.equal(script.statusCode, 200);
     assert.match(script.headers['content-type'] ?? '', /application\/javascript/);
     assert.match(script.body, /POST/);
+    assert.match(script.body, /AI Analysis/);
+    assert.match(script.body, /Top prospects IA/);
     assert.equal(spaRoute.statusCode, 200);
     assert.match(spaRoute.body, /Connexion admin VISITOR-OS/);
     assert.equal(apiRoute.statusCode, 404);

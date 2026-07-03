@@ -66,6 +66,8 @@ createApp({
       selectedMessageTemplate: null,
       messageDraft: emptyMessageDraft(),
       renderedMessage: '',
+      prospectAiAnalysis: null,
+      aiBatchJob: null,
       loading: false,
       error: '',
       sessionTimer: null
@@ -339,6 +341,7 @@ createApp({
       this.selectedProspect = prospect;
       this.prospectForm = prospectToForm(prospect);
       void this.loadProspectHistory(prospect.id);
+      void this.loadProspectAnalysis(prospect.id);
       this.navigate('prospect-detail', prospect.id);
     },
     newProspect() {
@@ -548,6 +551,34 @@ createApp({
         this.refreshDashboard()
       ]);
     },
+    async loadProspectAnalysis(prospectId) {
+      const response = await this.apiRequest('/admin-api/prospects/' + prospectId + '/analysis', { authenticated: true });
+      if (!response.ok) throw new Error('Chargement analyse IA impossible.');
+      const data = await response.json();
+      this.prospectAiAnalysis = data.analysis;
+    },
+    async analyzeSelectedProspect() {
+      if (!this.selectedProspect) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/analyze', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Analyse IA impossible.');
+      const data = await response.json();
+      this.prospectAiAnalysis = data.analysis;
+      await this.refreshDashboard();
+    },
+    async analyzeProspectBatch() {
+      const response = await this.apiRequest('/admin-api/prospects/analyze-batch', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ all: true })
+      });
+      if (!response.ok) throw new Error('Batch analyse IA impossible.');
+      const data = await response.json();
+      this.aiBatchJob = data.job;
+      await this.refreshDashboard();
+    },
     async exportMessageTemplates() {
       const response = await this.apiRequest('/admin-api/message-templates/export-csv', { authenticated: true });
       if (!response.ok) throw new Error('Export templates impossible.');
@@ -668,6 +699,24 @@ createApp({
           <article class="metric"><span>Templates actifs</span><strong>{{ dashboard?.messageTemplates?.activeTemplates ?? 0 }}</strong><small>Messages</small></article>
           <article class="metric"><span>Messages copiés</span><strong>{{ dashboard?.messageTemplates?.copiedThisWeek ?? 0 }}</strong><small>7 jours</small></article>
           <article class="metric"><span>Messages historisés</span><strong>{{ dashboard?.messageTemplates?.historySavedThisWeek ?? 0 }}</strong><small>7 jours</small></article>
+          <article class="metric"><span>Prospects analysés</span><strong>{{ dashboard?.aiQualification?.analyzedProspects ?? 0 }}</strong><small>AI Analysis</small></article>
+          <article class="metric"><span>Analyses en attente</span><strong>{{ dashboard?.aiQualification?.pendingAnalyses ?? 0 }}</strong><small>A traiter</small></article>
+          <article class="metric"><span>Score IA moyen</span><strong>{{ dashboard?.aiQualification?.averageConfidence ?? 0 }}</strong><small>Confiance</small></article>
+          <article class="metric"><span>Opportunités IA</span><strong>{{ dashboard?.aiQualification?.priorityOpportunities ?? 0 }}</strong><small>high / very_high</small></article>
+        </section>
+
+        <section v-if="route === 'dashboard' && dashboard?.aiQualification?.topProspects?.length" class="panel">
+          <div class="panel-header"><h2>Top prospects IA</h2><span class="badge">Priorites commerciales</span></div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Prospect</th><th>Priorite</th><th>Confiance</th><th>Offre</th></tr></thead>
+              <tbody><tr v-for="prospect in dashboard.aiQualification.topProspects" :key="prospect.prospectId">
+                <td><strong>{{ prospect.displayName }}</strong></td>
+                <td><span class="badge">{{ prospect.priority }}</span></td>
+                <td><span class="score-pill">{{ prospect.confidence }}/100</span></td>
+                <td>{{ prospect.recommendedOffer }}</td>
+              </tr></tbody>
+            </table>
+          </div>
         </section>
 
         <section v-if="route === 'organizations'" class="panel">
@@ -780,6 +829,26 @@ createApp({
             <button type="submit">{{ prospectForm.id ? 'Modifier' : 'Creer' }}</button>
           </form>
           <section v-if="route === 'prospect-detail'" class="timeline-section">
+            <div class="panel-header">
+              <h2>AI Analysis</h2>
+              <div class="inline-actions">
+                <button type="button" @click="analyzeSelectedProspect">Recalculer l'analyse</button>
+                <button type="button" @click="analyzeProspectBatch">Analyser tous</button>
+              </div>
+            </div>
+            <div v-if="prospectAiAnalysis" class="analysis-grid">
+              <article class="analysis-main">
+                <h3>Résumé IA</h3>
+                <p>{{ prospectAiAnalysis.summary }}</p>
+                <dl class="status-strip"><div><dt>Offre</dt><dd>{{ prospectAiAnalysis.recommended_offer }}</dd></div><div><dt>Confiance</dt><dd>{{ prospectAiAnalysis.confidence }}/100</dd></div></dl>
+              </article>
+              <article><h3>Forces</h3><ul><li v-for="item in prospectAiAnalysis.strengths" :key="item">{{ item }}</li></ul></article>
+              <article><h3>Faiblesses</h3><ul><li v-for="item in prospectAiAnalysis.weaknesses" :key="item">{{ item }}</li></ul></article>
+              <article><h3>Opportunités</h3><ul><li v-for="item in prospectAiAnalysis.opportunities" :key="item">{{ item }}</li></ul></article>
+              <article><h3>Risques</h3><ul><li v-for="item in prospectAiAnalysis.risks" :key="item">{{ item }}</li></ul></article>
+              <article><h3>Priorité</h3><p><span class="score-pill">{{ prospectAiAnalysis.priority }}</span></p></article>
+            </div>
+            <div v-else class="empty-panel"><p>Aucune analyse IA pour ce prospect.</p></div>
             <div class="panel-header"><h2>Messages</h2><span class="badge">Copie manuelle uniquement</span></div>
             <form class="admin-form prospect-form" @submit.prevent="renderProspectMessage(false)">
               <select v-model="messageDraft.templateId" required>
@@ -1179,6 +1248,10 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91,
 .import-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .message-preview { display: grid; gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; background: #fbfcfe; }
 .message-preview textarea { min-height: 160px; }
+.analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; }
+.analysis-grid article { display: grid; gap: 8px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
+.analysis-grid .analysis-main { grid-column: span 2; }
+.analysis-grid ul { margin: 0; padding-left: 18px; color: #354157; }
 .muted { padding: 0 18px; color: #647084; }
 .timeline-section { border-top: 1px solid #e6ebf2; }
 .timeline { display: grid; gap: 12px; padding: 18px; }
@@ -1212,6 +1285,7 @@ td strong, td small { display: block; }
   .topbar-actions, .panel-header input { width: 100%; max-width: none; }
   .dashboard-grid, .status-strip, .admin-form, .prospect-form { grid-template-columns: 1fr; }
   .prospect-form textarea { grid-column: span 1; }
+  .analysis-grid, .analysis-grid .analysis-main { grid-template-columns: 1fr; grid-column: span 1; }
   .inline-actions, .filters, .filters input, .filters select { width: 100%; }
 }
 `;

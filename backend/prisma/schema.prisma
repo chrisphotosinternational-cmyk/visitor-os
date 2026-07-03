@@ -16,6 +16,7 @@ model Organization {
   contactHistory ContactHistory[]
   messageTemplates MessageTemplate[]
   messageTemplateUsage MessageTemplateUsage[]
+  prospectAiAnalysis ProspectAiAnalysis[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("organizations")
@@ -85,6 +86,7 @@ model Prospect {
   organization   Organization        @relation(fields: [organizationId], references: [id])
   contactHistory ContactHistory[]
   messageTemplateUsage MessageTemplateUsage[]
+  aiAnalysis      ProspectAiAnalysis[]
 
   @@index([organizationId, status])
   @@index([organizationId, scoreLabel])
@@ -220,4 +222,33 @@ enum MessageTemplatePurpose {
   thank_you
   refusal_response
   custom
+}
+
+model ProspectAiAnalysis {
+  id               String                 @id @db.Uuid
+  organizationId   String                 @map("organization_id") @db.Uuid
+  prospectId       String                 @map("prospect_id") @db.Uuid
+  summary          String
+  strengths        Json                   @default("[]")
+  weaknesses       Json                   @default("[]")
+  opportunities    Json                   @default("[]")
+  risks            Json                   @default("[]")
+  recommendedOffer String                 @map("recommended_offer")
+  priority         AiQualificationPriority
+  confidence       Int
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime               @default(now()) @map("updated_at") @db.Timestamptz
+  organization     Organization           @relation(fields: [organizationId], references: [id])
+  prospect         Prospect               @relation(fields: [prospectId], references: [id])
+
+  @@index([prospectId, createdAt])
+  @@index([organizationId, priority, confidence])
+  @@map("prospect_ai_analysis")
+}
+
+enum AiQualificationPriority {
+  very_high
+  high
+  medium
+  low
 }

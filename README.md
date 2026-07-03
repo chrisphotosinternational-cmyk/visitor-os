@@ -305,6 +305,56 @@ The admin interface exposes:
 
 Usage tracking records copies and history saves. It does not record any automatic send event because no send feature exists in this sprint.
 
+## AI Qualification Engine
+
+Sprint 9 adds a deterministic AI qualification layer for prospects. It analyzes the public CRM data already stored for a prospect and generates a commercial reading that can be reused by the administrator.
+
+The engine returns:
+
+- a concise summary;
+- strengths;
+- weaknesses;
+- opportunities;
+- risks;
+- a commercial opportunity;
+- a recommended offer;
+- a priority;
+- a confidence score from 0 to 100.
+
+Recommended offers are intentionally explainable:
+
+```text
+Shooting decouverte, Shooting premium, Creation de contenu,
+Pack MYM, Pack OnlyFans, Portrait professionnel,
+Publicite, Collaboration artistique
+```
+
+Admin routes are protected by JWT/RBAC:
+
+- `POST /admin-api/prospects/:id/analyze`;
+- `GET /admin-api/prospects/:id/analysis`;
+- `POST /admin-api/prospects/analyze-batch`;
+- `GET /admin-api/prospects/analyze-batch/:jobId`.
+
+Each analysis is stored in PostgreSQL in `prospect_ai_analysis`. Recalculation creates a new historical record instead of overwriting the previous one.
+
+The batch engine is intentionally simple in this sprint: it runs asynchronously in memory and exposes progress through a job id. It is ready to move later to a persistent queue if volume requires it.
+
+The admin interface exposes:
+
+- an `AI Analysis` block inside the prospect detail page;
+- a recalculation button;
+- batch analysis trigger;
+- dashboard metrics for analyzed prospects, pending analyses, average confidence and priority opportunities;
+- a top prospects AI table.
+
+Limits:
+
+- no external AI provider is required for this sprint;
+- no automatic outreach is sent;
+- the analysis is a decision-support signal, not an automatic commercial decision;
+- the administrator remains responsible for checking the data and using it lawfully.
+
 ## Development Rule
 
 VISITOR-OS must stay simple, modular, and maintainable by one person. Avoid unnecessary infrastructure, premature microservices, and business-specific code in the core engine.

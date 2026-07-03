@@ -342,6 +342,21 @@ export class ProspectRepository {
     return Number(result.rows[0]?.count ?? 0);
   }
 
+  async listAllCore(organizationId?: string): Promise<ProspectRecord[]> {
+    const result = await this.database.query<ProspectRecord>(
+      `
+      select *
+      from prospects
+      where ($1::uuid is null or organization_id = $1)
+      order by updated_at desc, created_at desc
+      limit 1000
+      `,
+      [organizationId ?? null]
+    );
+
+    return result.rows;
+  }
+
   async metrics(organizationId?: string): Promise<ProspectMetrics> {
     const [summary, cities] = await Promise.all([
       this.database.query<{
