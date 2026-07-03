@@ -419,6 +419,75 @@ Compliance limits:
 
 When a suggestion is accepted, the prospect can be marked as needing a fresh AI analysis. The recalculation remains a manual user action.
 
+## Sales Pipeline And Conversion Metrics
+
+Sprint 11 turns the CRM into a commercial steering tool. The pipeline is based on the existing prospect statuses and does not create a separate sales model.
+
+Pipeline stages:
+
+```text
+new, to_qualify, to_contact, contacted, follow_up,
+interested, potential_client, signed_client, refused, blacklist
+```
+
+Admin routes are protected by JWT/RBAC:
+
+- `GET /admin-api/pipeline`;
+- `GET /admin-api/pipeline/metrics`;
+- `PATCH /admin-api/prospects/:id/pipeline-stage`;
+- `GET /admin-api/pipeline/forecast`;
+- `GET /admin-api/pipeline/activity`.
+
+Pipeline filters:
+
+- city;
+- score label;
+- source;
+- platform;
+- user;
+- sort by score, follow-up date, or creation date.
+
+Conversion metrics are intentionally simple and explainable:
+
+- prospects by stage;
+- contacted to interested rate;
+- interested to signed client rate;
+- global new to signed client rate;
+- prospects stalled without action;
+- overdue follow-ups;
+- prospects never contacted;
+- top cities by potential;
+- top platforms by potential.
+
+Forecast configuration:
+
+```text
+averageDealValue
+lowConversionRate
+mediumConversionRate
+highConversionRate
+```
+
+The forecast estimates low, medium, and high potential revenue from high-priority uncontacted prospects, interested prospects, and potential clients. It is a planning indicator, not an accounting forecast.
+
+CRM activity is stored in `crm_activity_log` for events such as:
+
+- prospect created;
+- pipeline stage changed;
+- contact history added;
+- suggestion accepted;
+- AI analysis recalculated;
+- enrichment succeeded;
+- prospect signed;
+- prospect blacklisted.
+
+Limits:
+
+- no automatic outreach;
+- no automatic status progression outside explicit user actions and existing contact-history rules;
+- no predictive analytics;
+- forecast values must be configured and interpreted by the administrator.
+
 ## Development Rule
 
 VISITOR-OS must stay simple, modular, and maintainable by one person. Avoid unnecessary infrastructure, premature microservices, and business-specific code in the core engine.

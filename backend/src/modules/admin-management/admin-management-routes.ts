@@ -34,6 +34,12 @@ import {
   enrichmentStatuses,
   type EnrichmentListFilters
 } from '../public-enrichment/public-enrichment-service.js';
+import {
+  SalesPipelineService,
+  pipelineStages,
+  type ForecastConfig,
+  type PipelineFilters
+} from '../sales-pipeline/sales-pipeline-service.js';
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
@@ -190,6 +196,35 @@ const enrichmentBatchSchema = z.object({
   mode: z.enum(['not_enriched', 'high_score', 'url_missing_data', 'all']).default('not_enriched')
 });
 
+const pipelineQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  city: z.string().optional(),
+  scoreLabel: z.enum(scoreLabels).optional(),
+  source: z.string().optional(),
+  platform: z.enum(platformFilters).optional(),
+  userId: z.string().uuid().optional(),
+  sort: z.enum(['score', 'follow_up', 'created_at']).default('score')
+});
+
+const pipelineStageSchema = z.object({
+  stage: z.enum(pipelineStages)
+});
+
+const forecastQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  averageDealValue: z.coerce.number().nonnegative().optional(),
+  lowConversionRate: z.coerce.number().min(0).max(100).optional(),
+  mediumConversionRate: z.coerce.number().min(0).max(100).optional(),
+  highConversionRate: z.coerce.number().min(0).max(100).optional()
+});
+
+const activityQuerySchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  prospectId: z.string().uuid().optional(),
+  actionType: z.string().optional(),
+  userId: z.string().uuid().optional()
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -202,6 +237,7 @@ export function registerAdminManagementRoutes(
   const messageTemplates = new MessageTemplateRepository(database);
   const aiQualification = new AIQualificationService(database);
   const enrichments = new PublicEnrichmentService(database);
+  const pipeline = new SalesPipelineService(database);
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
@@ -222,8 +258,54 @@ export function registerAdminManagementRoutes(
       messageTemplates: await messageTemplates.metrics(organizationId),
       aiQualification: await aiQualification.metrics(organizationId),
       enrichments: await enrichments.metrics(organizationId),
+      pipeline: await pipeline.metrics(organizationId),
+      forecast: await pipeline.forecast(organizationId),
+      activity: await pipeline.activity(toActivityFilters({ organizationId })),
       role: context.user.role,
       organizationId: context.user.organization_id
+    };
+  });
+
+  app.get('/admin-api/pipeline', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = pipelineQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return await pipeline.list(toPipelineFilters(organizationId, query));
+  });
+
+  app.get('/admin-api/pipeline/metrics', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = pipelineQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return { metrics: await pipeline.metrics(organizationId) };
+  });
+
+  app.get('/admin-api/pipeline/forecast', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = forecastQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return { forecast: await pipeline.forecast(organizationId, toForecastConfig(query)) };
+  });
+
+  app.get('/admin-api/pipeline/activity', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = activityQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return {
+      activity: await pipeline.activity(toActivityFilters({
+        organizationId,
+        prospectId: query.prospectId,
+        actionType: query.actionType,
+        userId: query.userId
+      }))
     };
   });
 
@@ -589,8 +671,17 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'prospects:write');
     const body = prospectPayloadSchema.parse(request.body);
     requireOrganizationAccess(context.user, body.organizationId);
+    const prospect = await prospects.createCore(toProspectInput(body));
+    await pipeline.logActivity({
+      organizationId: prospect.organization_id,
+      userId: context.user.id,
+      prospectId: prospect.id,
+      actionType: 'prospect_created',
+      newValue: prospect.status,
+      metadata: { source: 'admin' }
+    });
 
-    return { prospect: await prospects.createCore(toProspectInput(body)) };
+    return { prospect };
   });
 
   app.post('/admin-api/prospects/:prospectId/render-message', async (request) => {
@@ -651,6 +742,15 @@ export function registerAdminManagementRoutes(
       action: 'history_saved',
       renderedContent: body.rendered
     });
+    await pipeline.logActivity({
+      organizationId: prospect.organization_id,
+      userId: context.user.id,
+      prospectId: prospect.id,
+      actionType: 'contact_history_added',
+      previousValue: prospect.status,
+      newValue: entry.outcome,
+      metadata: { channel: body.channel, fromTemplate: true }
+    });
 
     return {
       entry,
@@ -672,6 +772,24 @@ export function registerAdminManagementRoutes(
     };
   });
 
+  app.patch('/admin-api/prospects/:prospectId/pipeline-stage', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const body = pipelineStageSchema.parse(request.body);
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const prospect = await pipeline.moveStage({
+      prospectId: params.prospectId,
+      stage: body.stage,
+      userId: context.user.id,
+      ...(organizationId ? { organizationId } : {})
+    });
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+
+    return { prospect };
+  });
+
   app.post('/admin-api/prospects/:prospectId/analyze', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:write');
@@ -680,8 +798,17 @@ export function registerAdminManagementRoutes(
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const analysis = await aiQualification.analyzeProspect(prospect);
+    await pipeline.logActivity({
+      organizationId: prospect.organization_id,
+      userId: context.user.id,
+      prospectId: prospect.id,
+      actionType: 'ai_analysis_recalculated',
+      newValue: analysis.priority,
+      metadata: { confidence: analysis.confidence }
+    });
 
-    return { analysis: await aiQualification.analyzeProspect(prospect) };
+    return { analysis };
   });
 
   app.post('/admin-api/prospects/analyze-batch', async (request) => {
@@ -753,9 +880,20 @@ export function registerAdminManagementRoutes(
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const results = await enrichments.enrichProspect(prospect);
+    if (results.some((result) => result.status === 'success' || result.status === 'partial')) {
+      await pipeline.logActivity({
+        organizationId: prospect.organization_id,
+        userId: context.user.id,
+        prospectId: prospect.id,
+        actionType: 'enrichment_succeeded',
+        newValue: results.map((result) => result.status).join(','),
+        metadata: { sources: results.map((result) => result.source_type) }
+      });
+    }
 
     return {
-      enrichments: await enrichments.enrichProspect(prospect),
+      enrichments: results,
       suggestions: await enrichments.suggestionsForProspect(prospect.id, prospect.organization_id)
     };
   });
@@ -801,6 +939,15 @@ export function registerAdminManagementRoutes(
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
     const accepted = await enrichments.acceptSuggestion(params.suggestionId, prospect);
     if (!accepted.suggestion) throw notFound('Suggestion not found', 'SUGGESTION_NOT_FOUND');
+    await pipeline.logActivity({
+      organizationId: prospect.organization_id,
+      userId: context.user.id,
+      prospectId: prospect.id,
+      actionType: 'suggestion_accepted',
+      previousValue: accepted.suggestion.current_value,
+      newValue: accepted.suggestion.suggested_value,
+      metadata: { field: accepted.suggestion.field_name }
+    });
 
     return {
       ...accepted,
@@ -853,11 +1000,21 @@ export function registerAdminManagementRoutes(
       context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const entry = await contactHistory.create(
+      toContactHistoryInput(prospect.organization_id, params.prospectId, context.user.id, body)
+    );
+    await pipeline.logActivity({
+      organizationId: prospect.organization_id,
+      userId: context.user.id,
+      prospectId: prospect.id,
+      actionType: 'contact_history_added',
+      previousValue: prospect.status,
+      newValue: entry.outcome,
+      metadata: { channel: entry.channel, followUpDate: entry.follow_up_date }
+    });
 
     return {
-      entry: await contactHistory.create(
-        toContactHistoryInput(prospect.organization_id, params.prospectId, context.user.id, body)
-      ),
+      entry,
       prospect: await prospects.findCore(params.prospectId, organizationId)
     };
   });
@@ -976,6 +1133,15 @@ function resolveOrganizationFilter(user: UserRecord, requestedOrganizationId?: s
   return user.organization_id;
 }
 
+function resolveOrganizationScope(
+  user: UserRecord,
+  requestedOrganizationId?: string
+): string | undefined {
+  if (user.role === 'SuperAdmin') return requestedOrganizationId;
+  if (requestedOrganizationId) requireOrganizationAccess(user, requestedOrganizationId);
+  return user.organization_id;
+}
+
 function resolveAssignableRole(user: UserRecord, role: UserRole): UserRole {
   if (role === 'SuperAdmin' && user.role !== 'SuperAdmin') {
     throw new AppError('Only SuperAdmin can assign SuperAdmin role', {
@@ -1065,6 +1231,50 @@ function toEnrichmentFilters(
     ...(query.city ? { city: query.city } : {}),
     ...(query.platform ? { platform: query.platform } : {}),
     ...(query.confidenceMin !== undefined ? { confidenceMin: query.confidenceMin } : {})
+  };
+}
+
+function toPipelineFilters(
+  organizationId: string | undefined,
+  query: z.infer<typeof pipelineQuerySchema>
+): PipelineFilters {
+  return {
+    ...(organizationId ? { organizationId } : {}),
+    ...(query.city ? { city: query.city } : {}),
+    ...(query.scoreLabel ? { scoreLabel: query.scoreLabel } : {}),
+    ...(query.source ? { source: query.source } : {}),
+    ...(query.platform ? { platform: query.platform } : {}),
+    ...(query.userId ? { userId: query.userId } : {}),
+    sort: query.sort
+  };
+}
+
+function toForecastConfig(query: z.infer<typeof forecastQuerySchema>): ForecastConfig {
+  return {
+    ...(query.averageDealValue !== undefined ? { averageDealValue: query.averageDealValue } : {}),
+    ...(query.lowConversionRate !== undefined
+      ? { lowConversionRate: query.lowConversionRate }
+      : {}),
+    ...(query.mediumConversionRate !== undefined
+      ? { mediumConversionRate: query.mediumConversionRate }
+      : {}),
+    ...(query.highConversionRate !== undefined
+      ? { highConversionRate: query.highConversionRate }
+      : {})
+  };
+}
+
+function toActivityFilters(input: {
+  organizationId?: string | undefined;
+  prospectId?: string | undefined;
+  actionType?: string | undefined;
+  userId?: string | undefined;
+}) {
+  return {
+    ...(input.organizationId ? { organizationId: input.organizationId } : {}),
+    ...(input.prospectId ? { prospectId: input.prospectId } : {}),
+    ...(input.actionType ? { actionType: input.actionType } : {}),
+    ...(input.userId ? { userId: input.userId } : {})
   };
 }
 

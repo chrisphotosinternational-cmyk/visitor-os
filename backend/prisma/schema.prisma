@@ -19,6 +19,7 @@ model Organization {
   prospectAiAnalysis ProspectAiAnalysis[]
   prospectEnrichments ProspectEnrichment[]
   prospectFieldSuggestions ProspectFieldSuggestion[]
+  crmActivityLog CrmActivityLog[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("organizations")
@@ -39,6 +40,7 @@ model User {
   contactHistory ContactHistory[]
   messageTemplates MessageTemplate[]
   messageTemplateUsage MessageTemplateUsage[]
+  crmActivityLog CrmActivityLog[]
 
   @@unique([organizationId, email])
   @@map("users")
@@ -91,6 +93,7 @@ model Prospect {
   aiAnalysis      ProspectAiAnalysis[]
   enrichments     ProspectEnrichment[]
   fieldSuggestions ProspectFieldSuggestion[]
+  crmActivityLog   CrmActivityLog[]
 
   @@index([organizationId, status])
   @@index([organizationId, scoreLabel])
@@ -330,4 +333,24 @@ enum SuggestionStatus {
   pending
   accepted
   rejected
+}
+
+model CrmActivityLog {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userId         String?      @map("user_id") @db.Uuid
+  prospectId     String?      @map("prospect_id") @db.Uuid
+  actionType     String       @map("action_type")
+  previousValue  String?      @map("previous_value")
+  newValue       String?      @map("new_value")
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
+  prospect       Prospect?    @relation(fields: [prospectId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([prospectId, createdAt])
+  @@index([organizationId, actionType, createdAt])
+  @@map("crm_activity_log")
 }

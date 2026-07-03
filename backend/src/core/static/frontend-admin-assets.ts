@@ -75,6 +75,13 @@ createApp({
       enrichmentSourceTypes: [],
       enrichmentFilters: { status: '', sourceType: '', city: '', platform: '', confidenceMin: '' },
       enrichmentBatchJob: null,
+      pipelineColumns: [],
+      pipelineStages: [],
+      pipelineMetrics: null,
+      pipelineForecast: null,
+      pipelineActivity: [],
+      pipelineFilters: { city: '', scoreLabel: '', platform: '', sort: 'score' },
+      draggedProspectId: '',
       loading: false,
       error: '',
       sessionTimer: null
@@ -177,7 +184,8 @@ createApp({
           this.loadProspects(),
           this.loadFollowUps(),
           this.loadMessageTemplates(),
-          this.loadEnrichments()
+          this.loadEnrichments(),
+          this.loadPipeline()
         ]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
@@ -307,6 +315,47 @@ createApp({
     async refreshDashboard() {
       const response = await this.apiRequest('/admin-api/dashboard', { authenticated: true });
       if (response.ok) this.dashboard = await response.json();
+    },
+    async loadPipeline() {
+      if (!this.token) return;
+      const params = new URLSearchParams();
+      if (this.pipelineFilters.city) params.set('city', this.pipelineFilters.city);
+      if (this.pipelineFilters.scoreLabel) params.set('scoreLabel', this.pipelineFilters.scoreLabel);
+      if (this.pipelineFilters.platform) params.set('platform', this.pipelineFilters.platform);
+      if (this.pipelineFilters.sort) params.set('sort', this.pipelineFilters.sort);
+      const [pipelineResponse, metricsResponse, forecastResponse, activityResponse] = await Promise.all([
+        this.apiRequest('/admin-api/pipeline' + (params.toString() ? '?' + params.toString() : ''), { authenticated: true }),
+        this.apiRequest('/admin-api/pipeline/metrics', { authenticated: true }),
+        this.apiRequest('/admin-api/pipeline/forecast', { authenticated: true }),
+        this.apiRequest('/admin-api/pipeline/activity', { authenticated: true })
+      ]);
+      if (!pipelineResponse.ok || !metricsResponse.ok || !forecastResponse.ok || !activityResponse.ok) {
+        throw new Error('Chargement pipeline impossible.');
+      }
+      const pipelineData = await pipelineResponse.json();
+      this.pipelineColumns = pipelineData.columns;
+      this.pipelineStages = pipelineData.stages;
+      this.pipelineMetrics = (await metricsResponse.json()).metrics;
+      this.pipelineForecast = (await forecastResponse.json()).forecast;
+      this.pipelineActivity = (await activityResponse.json()).activity;
+    },
+    async moveProspectToStage(prospect, stage) {
+      if (!prospect || !stage || prospect.status === stage) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + prospect.id + '/pipeline-stage', {
+        method: 'PATCH',
+        authenticated: true,
+        body: JSON.stringify({ stage })
+      });
+      if (!response.ok) throw new Error('Changement d etape impossible.');
+      await Promise.all([this.loadPipeline(), this.loadProspects(), this.refreshDashboard()]);
+    },
+    startProspectDrag(prospect) {
+      this.draggedProspectId = prospect.id;
+    },
+    async dropProspectOnStage(stage) {
+      const prospect = this.pipelineColumns.flatMap((column) => column.prospects).find((item) => item.id === this.draggedProspectId);
+      this.draggedProspectId = '';
+      if (prospect) await this.moveProspectToStage(prospect, stage);
     },
     async loadProspects() {
       if (!this.token) return;
@@ -738,6 +787,7 @@ createApp({
           <button :class="['nav-item', { active: route === 'organizations' }]" type="button" @click="navigate('organizations')">Organisations</button>
           <button :class="['nav-item', { active: route === 'users' }]" type="button" @click="navigate('users')">Utilisateurs</button>
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" type="button" @click="navigate('prospects')">Prospects</button>
+          <button :class="['nav-item', { active: route === 'pipeline' }]" type="button" @click="navigate('pipeline')">Pipeline</button>
           <button :class="['nav-item', { active: route === 'enrichments' }]" type="button" @click="navigate('enrichments')">Enrichments</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" type="button" @click="navigate('follow-ups')">Relances</button>
           <button :class="['nav-item', { active: route.startsWith('message-template') }]" type="button" @click="navigate('message-templates')">Messages</button>
@@ -786,6 +836,30 @@ createApp({
           <article class="metric"><span>Suggestions</span><strong>{{ dashboard?.enrichments?.pendingSuggestions ?? 0 }}</strong><small>En attente</small></article>
           <article class="metric"><span>Emails detectes</span><strong>{{ dashboard?.enrichments?.detectedEmails ?? 0 }}</strong><small>Public</small></article>
           <article class="metric"><span>Telephones detectes</span><strong>{{ dashboard?.enrichments?.detectedPhones ?? 0 }}</strong><small>Public</small></article>
+          <article class="metric"><span>Conversion globale</span><strong>{{ dashboard?.pipeline?.newToSignedRate ?? 0 }}%</strong><small>new -> signed</small></article>
+          <article class="metric"><span>Bloques sans action</span><strong>{{ dashboard?.pipeline?.stalledProspects ?? 0 }}</strong><small>14 jours</small></article>
+          <article class="metric"><span>Forecast moyen</span><strong>{{ dashboard?.forecast?.mediumEstimate ?? 0 }} €</strong><small>Prévision simple</small></article>
+          <article class="metric"><span>Prioritaires non contactés</span><strong>{{ dashboard?.forecast?.highPriorityUncontacted ?? 0 }}</strong><small>high / very_high</small></article>
+        </section>
+
+        <section v-if="route === 'dashboard' && dashboard?.pipeline?.byStage?.length" class="panel">
+          <div class="panel-header"><h2>Pipeline par etape</h2><span class="badge">Conversion</span></div>
+          <div class="pipeline-mini">
+            <article v-for="stage in dashboard.pipeline.byStage" :key="stage.stage">
+              <span>{{ stage.stage }}</span><strong>{{ stage.count }}</strong>
+            </article>
+          </div>
+        </section>
+
+        <section v-if="route === 'dashboard' && dashboard?.activity?.length" class="panel">
+          <div class="panel-header"><h2>Activite recente</h2><span class="badge">CRM</span></div>
+          <div class="activity-list">
+            <article v-for="item in dashboard.activity.slice(0, 8)" :key="item.id">
+              <strong>{{ item.action_type }}</strong>
+              <span>{{ item.prospect_display_name || item.prospect_id || '-' }}</span>
+              <small>{{ item.created_at }}</small>
+            </article>
+          </div>
         </section>
 
         <section v-if="route === 'dashboard' && dashboard?.aiQualification?.topProspects?.length" class="panel">
@@ -812,6 +886,57 @@ createApp({
               </tr></tbody>
             </table>
           </div>
+        </section>
+
+        <section v-if="route === 'pipeline'" class="panel pipeline-panel">
+          <div class="panel-header">
+            <h2>Pipeline commercial</h2>
+            <div class="inline-actions">
+              <button type="button" @click="loadPipeline">Actualiser</button>
+            </div>
+          </div>
+          <form class="filters" @submit.prevent="loadPipeline">
+            <input v-model="pipelineFilters.city" @input="loadPipeline" placeholder="Ville" />
+            <select v-model="pipelineFilters.scoreLabel" @change="loadPipeline"><option value="">Tous scores</option><option v-for="label in prospectScoreLabels" :key="label" :value="label">{{ label }}</option></select>
+            <select v-model="pipelineFilters.platform" @change="loadPipeline"><option value="">Toutes plateformes</option><option v-for="platform in prospectPlatforms" :key="platform" :value="platform">{{ platform }}</option></select>
+            <select v-model="pipelineFilters.sort" @change="loadPipeline"><option value="score">Score</option><option value="follow_up">Relance</option><option value="created_at">Creation</option></select>
+          </form>
+          <div v-if="pipelineMetrics" class="dashboard-grid compact-grid">
+            <article class="metric"><span>Contacte -> Interesse</span><strong>{{ pipelineMetrics.contactedToInterestedRate }}%</strong><small>Conversion</small></article>
+            <article class="metric"><span>Interesse -> Client</span><strong>{{ pipelineMetrics.interestedToSignedRate }}%</strong><small>Conversion</small></article>
+            <article class="metric"><span>New -> Client</span><strong>{{ pipelineMetrics.newToSignedRate }}%</strong><small>Global</small></article>
+            <article class="metric"><span>Relances retard</span><strong>{{ pipelineMetrics.overdueFollowUps }}</strong><small>Critique</small></article>
+          </div>
+          <div v-if="pipelineForecast" class="dashboard-grid compact-grid">
+            <article class="metric"><span>Basse</span><strong>{{ pipelineForecast.lowEstimate }} €</strong><small>{{ pipelineForecast.lowConversionRate }}%</small></article>
+            <article class="metric"><span>Moyenne</span><strong>{{ pipelineForecast.mediumEstimate }} €</strong><small>{{ pipelineForecast.mediumConversionRate }}%</small></article>
+            <article class="metric"><span>Haute</span><strong>{{ pipelineForecast.highEstimate }} €</strong><small>{{ pipelineForecast.highConversionRate }}%</small></article>
+            <article class="metric"><span>Panier moyen</span><strong>{{ pipelineForecast.averageDealValue }} €</strong><small>Configurable API</small></article>
+          </div>
+          <div class="pipeline-board">
+            <section v-for="column in pipelineColumns" :key="column.stage" class="pipeline-column" @dragover.prevent @drop="dropProspectOnStage(column.stage)">
+              <header><strong>{{ column.label }}</strong><span class="badge">{{ column.count }}</span></header>
+              <article v-for="prospect in column.prospects" :key="prospect.id" class="pipeline-card" draggable="true" @dragstart="startProspectDrag(prospect)">
+                <div><strong>{{ prospect.display_name }}</strong><small>{{ prospect.city || '-' }} · {{ prospect.platform || '-' }}</small></div>
+                <p><span class="score-pill">{{ prospect.score }} / {{ prospect.score_label }}</span></p>
+                <p v-if="prospect.next_follow_up_at"><small>Relance : {{ prospect.next_follow_up_at }}</small></p>
+                <div class="inline-actions">
+                  <button type="button" @click="editProspect(prospect)">Ouvrir</button>
+                  <select :value="prospect.status" @change="moveProspectToStage(prospect, $event.target.value)">
+                    <option v-for="stage in pipelineStages" :key="stage" :value="stage">{{ stage }}</option>
+                  </select>
+                </div>
+              </article>
+            </section>
+          </div>
+          <section class="activity-list">
+            <h3>Activite pipeline</h3>
+            <article v-for="item in pipelineActivity" :key="item.id">
+              <strong>{{ item.action_type }}</strong>
+              <span>{{ item.prospect_display_name || item.prospect_id || '-' }}</span>
+              <small>{{ item.previous_value || '-' }} -> {{ item.new_value || '-' }}</small>
+            </article>
+          </section>
         </section>
 
         <section v-if="route === 'organizations'" class="panel">
@@ -1129,6 +1254,7 @@ createApp({
 }).mount('#app');
 
 function normalizeRoute(pathname) {
+  if (pathname === '/pipeline') return 'pipeline';
   if (pathname === '/organizations') return 'organizations';
   if (pathname === '/users') return 'users';
   if (pathname === '/prospects') return 'prospects';
@@ -1146,6 +1272,7 @@ function normalizeRoute(pathname) {
 
 function routePath(route, id) {
   if (route === 'dashboard') return '/';
+  if (route === 'pipeline') return '/pipeline';
   if (route === 'prospect-new') return '/prospects/new';
   if (route === 'prospect-import') return '/prospects/import';
   if (route === 'prospect-detail') return '/prospects/' + id;
@@ -1158,6 +1285,7 @@ function routePath(route, id) {
 function routeTitle(route) {
   return {
     dashboard: 'Dashboard',
+    pipeline: 'Pipeline',
     organizations: 'Organisations',
     users: 'Utilisateurs',
     prospects: 'Prospects',
@@ -1422,9 +1550,48 @@ td strong, td small { display: block; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .actions button { min-height: 32px; padding: 7px 9px; font-size: 13px; }
 .empty-panel { display: grid; gap: 8px; padding: 18px; }
+.compact-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pipeline-mini { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 18px; }
+.pipeline-mini article { display: grid; gap: 5px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 12px; background: #fbfcfe; }
+.pipeline-mini span { color: #647084; font-size: 12px; }
+.pipeline-mini strong { font-size: 20px; }
+.pipeline-board {
+  display: grid;
+  grid-auto-columns: minmax(230px, 1fr);
+  grid-auto-flow: column;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 18px;
+}
+.pipeline-column {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 280px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+.pipeline-column header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pipeline-card {
+  display: grid;
+  gap: 9px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(23, 32, 51, 0.05);
+}
+.pipeline-card small { display: block; color: #647084; }
+.pipeline-card select { min-width: 130px; border: 1px solid #cfd7e3; border-radius: 6px; padding: 8px 10px; background: #fff; }
+.activity-list { display: grid; gap: 10px; padding: 18px; }
+.activity-list article { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; border: 1px solid #e6ebf2; border-radius: 8px; padding: 12px; background: #fbfcfe; }
+.activity-list span, .activity-list small { color: #647084; }
 @media (max-width: 1180px) {
   .admin-form, .prospect-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .prospect-form textarea { grid-column: span 3; }
+  .compact-grid, .pipeline-mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 190px minmax(0, 1fr); }
@@ -1440,6 +1607,7 @@ td strong, td small { display: block; }
   .dashboard-grid, .status-strip, .admin-form, .prospect-form { grid-template-columns: 1fr; }
   .prospect-form textarea { grid-column: span 1; }
   .analysis-grid, .analysis-grid .analysis-main { grid-template-columns: 1fr; grid-column: span 1; }
+  .compact-grid, .pipeline-mini, .activity-list article { grid-template-columns: 1fr; }
   .inline-actions, .filters, .filters input, .filters select { width: 100%; }
 }
 `;
