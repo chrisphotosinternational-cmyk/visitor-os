@@ -14,6 +14,8 @@ model Organization {
   users     User[]
   prospects Prospect[]
   contactHistory ContactHistory[]
+  messageTemplates MessageTemplate[]
+  messageTemplateUsage MessageTemplateUsage[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("organizations")
@@ -32,6 +34,8 @@ model User {
   updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz
   organization   Organization @relation(fields: [organizationId], references: [id])
   contactHistory ContactHistory[]
+  messageTemplates MessageTemplate[]
+  messageTemplateUsage MessageTemplateUsage[]
 
   @@unique([organizationId, email])
   @@map("users")
@@ -80,6 +84,7 @@ model Prospect {
   updatedAt      DateTime            @default(now()) @map("updated_at") @db.Timestamptz
   organization   Organization        @relation(fields: [organizationId], references: [id])
   contactHistory ContactHistory[]
+  messageTemplateUsage MessageTemplateUsage[]
 
   @@index([organizationId, status])
   @@index([organizationId, scoreLabel])
@@ -154,4 +159,65 @@ enum ContactOutcome {
   booked
   blacklist
   follow_up_needed
+}
+
+model MessageTemplate {
+  id              String                 @id @db.Uuid
+  organizationId  String                 @map("organization_id") @db.Uuid
+  name            String
+  channel         MessageTemplateChannel
+  purpose         MessageTemplatePurpose
+  content         String
+  variables       Json                   @default("[]")
+  isActive        Boolean                @default(true) @map("is_active")
+  createdByUserId String?                @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime               @default(now()) @map("updated_at") @db.Timestamptz
+  organization    Organization           @relation(fields: [organizationId], references: [id])
+  createdBy       User?                  @relation(fields: [createdByUserId], references: [id])
+  usage           MessageTemplateUsage[]
+
+  @@index([organizationId, isActive])
+  @@map("message_templates")
+}
+
+model MessageTemplateUsage {
+  id              String          @id @db.Uuid
+  organizationId  String          @map("organization_id") @db.Uuid
+  templateId      String          @map("template_id") @db.Uuid
+  prospectId      String?         @map("prospect_id") @db.Uuid
+  userId          String?         @map("user_id") @db.Uuid
+  action          String
+  renderedContent String          @map("rendered_content")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  organization    Organization    @relation(fields: [organizationId], references: [id])
+  template        MessageTemplate @relation(fields: [templateId], references: [id])
+  prospect        Prospect?       @relation(fields: [prospectId], references: [id])
+  user            User?           @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([templateId, createdAt])
+  @@map("message_template_usage")
+}
+
+enum MessageTemplateChannel {
+  email
+  phone_script
+  whatsapp_manual
+  instagram_manual
+  x_manual
+  mym_manual
+  onlyfans_manual
+  website_form
+  other
+}
+
+enum MessageTemplatePurpose {
+  first_contact
+  follow_up
+  proposal
+  reactivation
+  thank_you
+  refusal_response
+  custom
 }

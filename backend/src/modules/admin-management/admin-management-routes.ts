@@ -20,6 +20,12 @@ import {
   contactOutcomes,
   type ContactHistoryInput
 } from '../contact-history/contact-history-repository.js';
+import {
+  MessageTemplateRepository,
+  messageTemplateChannels,
+  messageTemplatePurposes,
+  type MessageTemplateInput
+} from '../message-templates/message-template-repository.js';
 import { hashPassword } from '../auth/password.js';
 import { authenticateJwt } from '../auth/jwt-auth-routes.js';
 import { hasPermission } from '../auth/rbac.js';
@@ -122,6 +128,39 @@ const followUpQuerySchema = z.object({
   status: z.enum(prospectStatuses).optional()
 });
 
+const messageTemplatePayloadSchema = z.object({
+  organizationId: z.string().uuid(),
+  name: z.string().min(1),
+  channel: z.enum(messageTemplateChannels),
+  purpose: z.enum(messageTemplatePurposes),
+  content: z.string().min(1),
+  isActive: z.boolean().default(true)
+});
+
+const messageTemplateListQuerySchema = z.object({
+  organizationId: z.string().uuid().optional()
+});
+
+const renderTemplatePayloadSchema = z.object({
+  prospectId: z.string().uuid().optional(),
+  variables: z.record(z.string(), z.string()).default({}),
+  recordCopy: z.boolean().default(false)
+});
+
+const renderProspectMessageSchema = z.object({
+  templateId: z.string().uuid(),
+  recordCopy: z.boolean().default(false)
+});
+
+const saveRenderedMessageSchema = z.object({
+  templateId: z.string().uuid(),
+  rendered: z.string().min(1),
+  channel: z.enum(contactChannels),
+  outcome: z.enum(contactOutcomes),
+  followUpDate: z.coerce.date().optional().nullable(),
+  notes: z.string().optional()
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -131,11 +170,13 @@ export function registerAdminManagementRoutes(
   const users = new UserRepository(database);
   const prospects = new ProspectRepository(database);
   const contactHistory = new ContactHistoryRepository(database);
+  const messageTemplates = new MessageTemplateRepository(database);
 
   app.get('/admin-api/dashboard', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'organizations:read');
-    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
 
     return {
       organizationsCount:
@@ -147,6 +188,7 @@ export function registerAdminManagementRoutes(
       usersCount: await users.count(organizationId),
       prospects: await prospects.metrics(organizationId),
       contactHistory: await contactHistory.metrics(organizationId),
+      messageTemplates: await messageTemplates.metrics(organizationId),
       role: context.user.role,
       organizationId: context.user.organization_id
     };
@@ -181,7 +223,10 @@ export function registerAdminManagementRoutes(
     const params = z.object({ organizationId: z.string().uuid() }).parse(request.params);
     const body = organizationPayloadSchema.parse(request.body);
     requireOrganizationAccess(context.user, params.organizationId);
-    const organization = await organizations.update(params.organizationId, toOrganizationInput(body));
+    const organization = await organizations.update(
+      params.organizationId,
+      toOrganizationInput(body)
+    );
 
     if (!organization) throw notFound('Organization not found', 'ORGANIZATION_NOT_FOUND');
 
@@ -214,7 +259,8 @@ export function registerAdminManagementRoutes(
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'users:read');
     const query = listQuerySchema.parse(request.query);
-    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
 
     return {
       users: (await users.list(toUserListInput(organizationId, query.search))).map(toPublicUser),
@@ -337,6 +383,135 @@ export function registerAdminManagementRoutes(
     return csv;
   });
 
+  app.get('/admin-api/message-templates', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = messageTemplateListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await messageTemplates.ensureDefaults(organizationId, context.user.id);
+
+    return {
+      templates: await messageTemplates.list(organizationId),
+      channels: messageTemplateChannels,
+      purposes: messageTemplatePurposes
+    };
+  });
+
+  app.get('/admin-api/message-templates/export-csv', async (request, reply) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'data:export');
+    const query = messageTemplateListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    reply.type('text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="visitor-os-message-templates.csv"');
+
+    return messageTemplates.exportTemplatesCsv(organizationId);
+  });
+
+  app.get('/admin-api/message-templates/usage-csv', async (request, reply) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'data:export');
+    const query = messageTemplateListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    reply.type('text/csv; charset=utf-8');
+    reply.header('Content-Disposition', 'attachment; filename="visitor-os-message-usage.csv"');
+
+    return messageTemplates.exportUsageCsv(organizationId);
+  });
+
+  app.post('/admin-api/message-templates', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const body = messageTemplatePayloadSchema.parse(request.body);
+    requireOrganizationAccess(context.user, body.organizationId);
+
+    return {
+      template: await messageTemplates.create(toMessageTemplateInput(body, context.user.id))
+    };
+  });
+
+  app.get('/admin-api/message-templates/:templateId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ templateId: z.string().uuid() }).parse(request.params);
+    const query = messageTemplateListQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    const template = await messageTemplates.find(params.templateId, organizationId);
+    if (!template) throw notFound('Message template not found', 'MESSAGE_TEMPLATE_NOT_FOUND');
+
+    return { template, channels: messageTemplateChannels, purposes: messageTemplatePurposes };
+  });
+
+  app.patch('/admin-api/message-templates/:templateId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ templateId: z.string().uuid() }).parse(request.params);
+    const body = messageTemplatePayloadSchema.parse(request.body);
+    requireOrganizationAccess(context.user, body.organizationId);
+    const template = await messageTemplates.update(
+      params.templateId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id,
+      toMessageTemplateInput(body, context.user.id)
+    );
+    if (!template) throw notFound('Message template not found', 'MESSAGE_TEMPLATE_NOT_FOUND');
+
+    return { template };
+  });
+
+  app.delete('/admin-api/message-templates/:templateId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ templateId: z.string().uuid() }).parse(request.params);
+
+    return {
+      deleted: await messageTemplates.delete(
+        params.templateId,
+        context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+      )
+    };
+  });
+
+  app.post('/admin-api/message-templates/:templateId/render', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ templateId: z.string().uuid() }).parse(request.params);
+    const body = renderTemplatePayloadSchema.parse(request.body);
+    const template = await messageTemplates.find(
+      params.templateId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+    );
+    if (!template) throw notFound('Message template not found', 'MESSAGE_TEMPLATE_NOT_FOUND');
+    const prospect = body.prospectId
+      ? await prospects.findCore(
+          body.prospectId,
+          context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+        )
+      : null;
+    const rendered = prospect
+      ? await messageTemplates.render(params.templateId, prospect, prospect.organization_id)
+      : {
+          template,
+          variables: body.variables,
+          rendered: template.content.replace(
+            /\{([a-z_]+)\}/g,
+            (_match, variable: string) => body.variables[variable] ?? ''
+          )
+        };
+    if (!rendered) throw notFound('Message template not found', 'MESSAGE_TEMPLATE_NOT_FOUND');
+    if (body.recordCopy) {
+      await messageTemplates.recordUsage({
+        organizationId: template.organization_id,
+        templateId: template.id,
+        ...(body.prospectId ? { prospectId: body.prospectId } : {}),
+        userId: context.user.id,
+        action: 'copied',
+        renderedContent: rendered.rendered
+      });
+    }
+
+    return rendered;
+  });
+
   app.post('/admin-api/prospects', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:write');
@@ -346,11 +521,77 @@ export function registerAdminManagementRoutes(
     return { prospect: await prospects.createCore(toProspectInput(body)) };
   });
 
+  app.post('/admin-api/prospects/:prospectId/render-message', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const body = renderProspectMessageSchema.parse(request.body);
+    const prospect = await prospects.findCore(
+      params.prospectId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+    );
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const rendered = await messageTemplates.render(
+      body.templateId,
+      prospect,
+      prospect.organization_id
+    );
+    if (!rendered) throw notFound('Message template not found', 'MESSAGE_TEMPLATE_NOT_FOUND');
+    if (body.recordCopy) {
+      await messageTemplates.recordUsage({
+        organizationId: prospect.organization_id,
+        templateId: body.templateId,
+        prospectId: params.prospectId,
+        userId: context.user.id,
+        action: 'copied',
+        renderedContent: rendered.rendered
+      });
+    }
+
+    return rendered;
+  });
+
+  app.post('/admin-api/prospects/:prospectId/save-rendered-message', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
+    const body = saveRenderedMessageSchema.parse(request.body);
+    const prospect = await prospects.findCore(
+      params.prospectId,
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id
+    );
+    if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
+    const entry = await contactHistory.create({
+      organizationId: prospect.organization_id,
+      prospectId: prospect.id,
+      userId: context.user.id,
+      channel: body.channel,
+      outcome: body.outcome,
+      messageUsed: body.rendered,
+      ...(body.followUpDate ? { followUpDate: body.followUpDate } : {}),
+      ...(body.notes ? { notes: body.notes } : {})
+    });
+    await messageTemplates.recordUsage({
+      organizationId: prospect.organization_id,
+      templateId: body.templateId,
+      prospectId: prospect.id,
+      userId: context.user.id,
+      action: 'history_saved',
+      renderedContent: body.rendered
+    });
+
+    return {
+      entry,
+      prospect: await prospects.findCore(params.prospectId, prospect.organization_id)
+    };
+  });
+
   app.get('/admin-api/prospects/:prospectId/history', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:read');
     const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
-    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
 
@@ -366,7 +607,8 @@ export function registerAdminManagementRoutes(
     requirePermission(context.user, 'prospects:write');
     const params = z.object({ prospectId: z.string().uuid() }).parse(request.params);
     const body = contactHistoryPayloadSchema.parse(request.body);
-    const organizationId = context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
+    const organizationId =
+      context.user.role === 'SuperAdmin' ? undefined : context.user.organization_id;
     const prospect = await prospects.findCore(params.prospectId, organizationId);
     if (!prospect) throw notFound('Prospect not found', 'PROSPECT_NOT_FOUND');
 
@@ -465,7 +707,10 @@ async function resolveContext(
   return { user };
 }
 
-function requirePermission(user: UserRecord, permission: Parameters<typeof hasPermission>[1]): void {
+function requirePermission(
+  user: UserRecord,
+  permission: Parameters<typeof hasPermission>[1]
+): void {
   if (!hasPermission(user.role, permission)) {
     throw new AppError('Permission denied', { statusCode: 403, code: 'PERMISSION_DENIED' });
   }
@@ -530,17 +775,17 @@ function toOrganizationInput(input: z.infer<typeof organizationPayloadSchema>) {
   };
 }
 
-function toUserListInput(organizationId?: string, search?: string): { organizationId?: string; search?: string } {
+function toUserListInput(
+  organizationId?: string,
+  search?: string
+): { organizationId?: string; search?: string } {
   return {
     ...(organizationId ? { organizationId } : {}),
     ...(search ? { search } : {})
   };
 }
 
-function toProspectFilters(
-  organizationId: string,
-  query: z.infer<typeof prospectListQuerySchema>
-) {
+function toProspectFilters(organizationId: string, query: z.infer<typeof prospectListQuerySchema>) {
   return {
     organizationId,
     page: query.page,
@@ -618,6 +863,21 @@ function toContactHistoryInput(
     ...(input.nextAction ? { nextAction: input.nextAction } : {}),
     ...(input.followUpDate ? { followUpDate: input.followUpDate } : {}),
     ...(input.notes ? { notes: input.notes } : {})
+  };
+}
+
+function toMessageTemplateInput(
+  input: z.infer<typeof messageTemplatePayloadSchema>,
+  userId: string
+): MessageTemplateInput {
+  return {
+    organizationId: input.organizationId,
+    name: input.name,
+    channel: input.channel,
+    purpose: input.purpose,
+    content: input.content,
+    isActive: input.isActive,
+    createdByUserId: userId
   };
 }
 

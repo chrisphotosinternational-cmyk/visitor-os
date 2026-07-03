@@ -59,6 +59,13 @@ createApp({
       contactHistoryForm: emptyContactHistoryForm(),
       followUps: [],
       followUpFilters: { overdue: false, upcoming: false, city: '', scoreLabel: '', status: '' },
+      messageTemplates: [],
+      messageTemplateChannels: [],
+      messageTemplatePurposes: [],
+      messageTemplateForm: emptyMessageTemplateForm(),
+      selectedMessageTemplate: null,
+      messageDraft: emptyMessageDraft(),
+      renderedMessage: '',
       loading: false,
       error: '',
       sessionTimer: null
@@ -130,6 +137,7 @@ createApp({
       this.organizations = [];
       this.users = [];
       this.prospects = [];
+      this.messageTemplates = [];
       this.route = 'login';
       sessionStorage.removeItem(TOKEN_STORAGE_KEY);
       if (this.sessionTimer) window.clearInterval(this.sessionTimer);
@@ -153,7 +161,14 @@ createApp({
         this.user = { ...(this.user ?? {}), ...me.user };
         if (this.route === 'login') this.navigate('dashboard');
         this.startSessionWatcher();
-        await Promise.all([this.refreshTechnicalStatus(), this.loadOrganizations(), this.loadUsers(), this.loadProspects(), this.loadFollowUps()]);
+        await Promise.all([
+          this.refreshTechnicalStatus(),
+          this.loadOrganizations(),
+          this.loadUsers(),
+          this.loadProspects(),
+          this.loadFollowUps(),
+          this.loadMessageTemplates()
+        ]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
         this.logout(false);
@@ -426,6 +441,123 @@ createApp({
       link.click();
       URL.revokeObjectURL(link.href);
     },
+    async loadMessageTemplates() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/message-templates', { authenticated: true });
+      if (!response.ok) throw new Error('Chargement des messages impossible.');
+      const data = await response.json();
+      this.messageTemplates = data.templates;
+      this.messageTemplateChannels = data.channels;
+      this.messageTemplatePurposes = data.purposes;
+      if (!this.messageTemplateForm.organizationId && this.user?.organizationId) {
+        this.messageTemplateForm.organizationId = this.user.organizationId;
+      }
+      if (!this.messageDraft.templateId && this.messageTemplates[0]) {
+        this.messageDraft.templateId = this.messageTemplates[0].id;
+      }
+    },
+    newMessageTemplate() {
+      this.selectedMessageTemplate = null;
+      this.messageTemplateForm = emptyMessageTemplateForm(this.user?.organizationId);
+      this.navigate('message-template-new');
+    },
+    editMessageTemplate(template) {
+      this.selectedMessageTemplate = template;
+      this.messageTemplateForm = messageTemplateToForm(template);
+      this.navigate('message-template-detail', template.id);
+    },
+    async saveMessageTemplate() {
+      if (!this.canWriteProspects) return;
+      const editing = Boolean(this.messageTemplateForm.id);
+      const response = await this.apiRequest(
+        editing ? '/admin-api/message-templates/' + this.messageTemplateForm.id : '/admin-api/message-templates',
+        {
+          method: editing ? 'PATCH' : 'POST',
+          authenticated: true,
+          body: JSON.stringify({
+            ...this.messageTemplateForm,
+            variables: this.messageTemplateForm.variables
+              .split(',')
+              .map((item) => item.trim())
+              .filter(Boolean)
+          })
+        }
+      );
+      if (!response.ok) throw new Error('Enregistrement template impossible.');
+      this.messageTemplateForm = emptyMessageTemplateForm(this.user?.organizationId);
+      await Promise.all([this.loadMessageTemplates(), this.refreshDashboard()]);
+      this.navigate('message-templates');
+    },
+    async deleteMessageTemplate(template) {
+      const response = await this.apiRequest('/admin-api/message-templates/' + template.id, {
+        method: 'DELETE',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Suppression template impossible.');
+      await Promise.all([this.loadMessageTemplates(), this.refreshDashboard()]);
+    },
+    async renderProspectMessage(recordCopy = false) {
+      if (!this.selectedProspect || !this.messageDraft.templateId) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/render-message', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          templateId: this.messageDraft.templateId,
+          recordCopy
+        })
+      });
+      if (!response.ok) throw new Error('Rendu du message impossible.');
+      const data = await response.json();
+      this.renderedMessage = data.rendered;
+      const template = data.template ?? this.messageTemplates.find((item) => item.id === this.messageDraft.templateId);
+      if (template?.channel && this.contactChannels.includes(template.channel)) {
+        this.messageDraft.channel = template.channel;
+      }
+    },
+    async copyRenderedMessage() {
+      if (!this.renderedMessage) await this.renderProspectMessage(false);
+      if (!this.renderedMessage) return;
+      await navigator.clipboard.writeText(this.renderedMessage);
+      await this.renderProspectMessage(true);
+      await this.refreshDashboard();
+    },
+    async saveRenderedMessage() {
+      if (!this.selectedProspect || !this.messageDraft.templateId || !this.renderedMessage) return;
+      const response = await this.apiRequest('/admin-api/prospects/' + this.selectedProspect.id + '/save-rendered-message', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          templateId: this.messageDraft.templateId,
+          rendered: this.renderedMessage,
+          channel: this.messageDraft.channel,
+          outcome: this.messageDraft.outcome,
+          followUpDate: this.messageDraft.followUpDate || undefined,
+          notes: this.messageDraft.notes || undefined
+        })
+      });
+      if (!response.ok) throw new Error('Historisation du message impossible.');
+      const data = await response.json();
+      this.selectedProspect = data.prospect ?? this.selectedProspect;
+      this.messageDraft = emptyMessageDraft(this.messageDraft.templateId);
+      this.renderedMessage = '';
+      await Promise.all([
+        this.loadProspectHistory(this.selectedProspect.id),
+        this.loadProspects(),
+        this.loadFollowUps(),
+        this.loadMessageTemplates(),
+        this.refreshDashboard()
+      ]);
+    },
+    async exportMessageTemplates() {
+      const response = await this.apiRequest('/admin-api/message-templates/export-csv', { authenticated: true });
+      if (!response.ok) throw new Error('Export templates impossible.');
+      downloadCsv(await response.text(), 'visitor-os-message-templates.csv');
+    },
+    async exportMessageUsage() {
+      const response = await this.apiRequest('/admin-api/message-templates/usage-csv', { authenticated: true });
+      if (!response.ok) throw new Error('Export usages impossible.');
+      downloadCsv(await response.text(), 'visitor-os-message-usage.csv');
+    },
     async exportProspects() {
       const response = await this.apiRequest('/admin-api/prospects/export-csv', { authenticated: true });
       if (!response.ok) throw new Error('Export CSV impossible.');
@@ -501,6 +633,7 @@ createApp({
           <button :class="['nav-item', { active: route === 'users' }]" type="button" @click="navigate('users')">Utilisateurs</button>
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" type="button" @click="navigate('prospects')">Prospects</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" type="button" @click="navigate('follow-ups')">Relances</button>
+          <button :class="['nav-item', { active: route.startsWith('message-template') }]" type="button" @click="navigate('message-templates')">Messages</button>
           <button :class="['nav-item', { active: route === 'settings' }]" type="button" @click="navigate('settings')">Parametres</button>
         </nav>
       </aside>
@@ -532,6 +665,9 @@ createApp({
           <article class="metric"><span>Taux positif</span><strong>{{ dashboard?.contactHistory?.positiveRate ?? 0 }}%</strong><small>Simple</small></article>
           <article class="metric"><span>Contacts semaine</span><strong>{{ dashboard?.contactHistory?.contactsThisWeek ?? 0 }}</strong><small>7 jours</small></article>
           <article class="metric"><span>Jamais contactés</span><strong>{{ dashboard?.contactHistory?.neverContacted ?? 0 }}</strong><small>A qualifier</small></article>
+          <article class="metric"><span>Templates actifs</span><strong>{{ dashboard?.messageTemplates?.activeTemplates ?? 0 }}</strong><small>Messages</small></article>
+          <article class="metric"><span>Messages copiés</span><strong>{{ dashboard?.messageTemplates?.copiedThisWeek ?? 0 }}</strong><small>7 jours</small></article>
+          <article class="metric"><span>Messages historisés</span><strong>{{ dashboard?.messageTemplates?.historySavedThisWeek ?? 0 }}</strong><small>7 jours</small></article>
         </section>
 
         <section v-if="route === 'organizations'" class="panel">
@@ -644,6 +780,25 @@ createApp({
             <button type="submit">{{ prospectForm.id ? 'Modifier' : 'Creer' }}</button>
           </form>
           <section v-if="route === 'prospect-detail'" class="timeline-section">
+            <div class="panel-header"><h2>Messages</h2><span class="badge">Copie manuelle uniquement</span></div>
+            <form class="admin-form prospect-form" @submit.prevent="renderProspectMessage(false)">
+              <select v-model="messageDraft.templateId" required>
+                <option value="" disabled>Template</option>
+                <option v-for="template in messageTemplates" :key="template.id" :value="template.id">{{ template.name }}</option>
+              </select>
+              <select v-model="messageDraft.channel"><option v-for="channel in contactChannels" :key="channel" :value="channel">{{ channel }}</option></select>
+              <select v-model="messageDraft.outcome"><option v-for="outcome in contactOutcomes" :key="outcome" :value="outcome">{{ outcome }}</option></select>
+              <input v-model="messageDraft.followUpDate" type="datetime-local" />
+              <textarea v-model="messageDraft.notes" placeholder="Notes optionnelles"></textarea>
+              <button type="submit">Previsualiser</button>
+            </form>
+            <div v-if="renderedMessage" class="message-preview">
+              <textarea v-model="renderedMessage"></textarea>
+              <div class="inline-actions">
+                <button type="button" @click="copyRenderedMessage">Copier</button>
+                <button type="button" @click="saveRenderedMessage">Enregistrer dans l'historique</button>
+              </div>
+            </div>
             <div class="panel-header"><h2>Timeline / Historique</h2><span class="badge">{{ contactHistory.length }} interaction(s)</span></div>
             <form class="admin-form prospect-form" @submit.prevent="saveContactHistory">
               <input v-model="contactHistoryForm.contactDate" type="datetime-local" />
@@ -668,6 +823,46 @@ createApp({
               </article>
             </div>
           </section>
+        </section>
+
+        <section v-if="route === 'message-templates'" class="panel">
+          <div class="panel-header">
+            <h2>Messages</h2>
+            <div class="inline-actions">
+              <button v-if="canWriteProspects" type="button" @click="newMessageTemplate">Nouveau</button>
+              <button type="button" @click="exportMessageTemplates">Export templates</button>
+              <button type="button" @click="exportMessageUsage">Export usages</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Nom</th><th>Canal</th><th>Objectif</th><th>Statut</th><th></th></tr></thead>
+              <tbody><tr v-for="template in messageTemplates" :key="template.id">
+                <td><strong>{{ template.name }}</strong><small>{{ template.content.slice(0, 90) }}</small></td>
+                <td>{{ template.channel }}</td>
+                <td>{{ template.purpose }}</td>
+                <td><span class="badge">{{ template.is_active ? 'actif' : 'inactif' }}</span></td>
+                <td class="actions"><button type="button" @click="editMessageTemplate(template)">Ouvrir</button><button v-if="canWriteProspects" type="button" @click="deleteMessageTemplate(template)">Supprimer</button></td>
+              </tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="route === 'message-template-new' || route === 'message-template-detail'" class="panel">
+          <div class="panel-header"><h2>{{ messageTemplateForm.id ? 'Modifier message' : 'Nouveau message' }}</h2><button type="button" @click="navigate('message-templates')">Retour</button></div>
+          <form class="admin-form prospect-form" @submit.prevent="saveMessageTemplate">
+            <select v-model="messageTemplateForm.organizationId" required>
+              <option value="" disabled>Organisation</option>
+              <option v-for="organization in organizations" :key="organization.id" :value="organization.id">{{ organization.name }}</option>
+            </select>
+            <input v-model="messageTemplateForm.name" placeholder="Nom" required />
+            <select v-model="messageTemplateForm.channel"><option v-for="channel in messageTemplateChannels" :key="channel" :value="channel">{{ channel }}</option></select>
+            <select v-model="messageTemplateForm.purpose"><option v-for="purpose in messageTemplatePurposes" :key="purpose" :value="purpose">{{ purpose }}</option></select>
+            <label class="checkbox-field"><input v-model="messageTemplateForm.isActive" type="checkbox" /> Actif</label>
+            <input v-model="messageTemplateForm.variables" placeholder="Variables separees par virgule" />
+            <textarea v-model="messageTemplateForm.content" placeholder="Contenu du message" required></textarea>
+            <button type="submit">{{ messageTemplateForm.id ? 'Modifier' : 'Creer' }}</button>
+          </form>
+          <p class="muted">Variables disponibles : first_name, last_name, pseudo, city, activity, platform, website, instagram, mym, onlyfans, score_label.</p>
         </section>
 
         <section v-if="route === 'prospect-import'" class="panel">
@@ -720,6 +915,9 @@ function normalizeRoute(pathname) {
   if (pathname === '/prospects/import') return 'prospect-import';
   if (pathname.startsWith('/prospects/')) return 'prospect-detail';
   if (pathname === '/follow-ups') return 'follow-ups';
+  if (pathname === '/message-templates') return 'message-templates';
+  if (pathname === '/message-templates/new') return 'message-template-new';
+  if (pathname.startsWith('/message-templates/')) return 'message-template-detail';
   if (pathname === '/settings') return 'settings';
   return 'dashboard';
 }
@@ -730,6 +928,8 @@ function routePath(route, id) {
   if (route === 'prospect-import') return '/prospects/import';
   if (route === 'prospect-detail') return '/prospects/' + id;
   if (route === 'follow-ups') return '/follow-ups';
+  if (route === 'message-template-new') return '/message-templates/new';
+  if (route === 'message-template-detail') return '/message-templates/' + id;
   return '/' + route;
 }
 
@@ -743,6 +943,9 @@ function routeTitle(route) {
     'prospect-detail': 'Prospect',
     'prospect-import': 'Import CSV',
     'follow-ups': 'Relances',
+    'message-templates': 'Messages',
+    'message-template-new': 'Nouveau message',
+    'message-template-detail': 'Message',
     settings: 'Parametres'
   }[route] ?? 'Dashboard';
 }
@@ -820,6 +1023,51 @@ function emptyContactHistoryForm() {
   };
 }
 
+function emptyMessageTemplateForm(organizationId = '') {
+  return {
+    id: '',
+    organizationId,
+    name: '',
+    channel: 'email',
+    purpose: 'first_contact',
+    content: '',
+    variables: '',
+    isActive: true
+  };
+}
+
+function messageTemplateToForm(template) {
+  return {
+    id: template.id,
+    organizationId: template.organization_id,
+    name: template.name,
+    channel: template.channel,
+    purpose: template.purpose,
+    content: template.content,
+    variables: Array.isArray(template.variables) ? template.variables.join(', ') : '',
+    isActive: Boolean(template.is_active)
+  };
+}
+
+function emptyMessageDraft(templateId = '') {
+  return {
+    templateId,
+    channel: 'email',
+    outcome: 'no_response',
+    followUpDate: '',
+    notes: ''
+  };
+}
+
+function downloadCsv(content, filename) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 async function responseJsonOrFallback(result, fallback) {
   if (result.status !== 'fulfilled' || !result.value.ok) return fallback;
   return result.value.json();
@@ -874,7 +1122,7 @@ button:disabled { color: #8b95a7; background: #e6eaf0; cursor: not-allowed; }
 h1, h2, p, .metric strong, .metric small { margin: 0; }
 .login-panel p, .eyebrow, .metric span, .metric small, td small { color: #647084; }
 .login-panel label { display: grid; gap: 7px; color: #354157; font-weight: 600; }
-.login-panel input, .admin-form input, .admin-form select, .admin-form textarea, .panel-header input, .filters input, .filters select, .import-form textarea {
+.login-panel input, .admin-form input, .admin-form select, .admin-form textarea, .panel-header input, .filters input, .filters select, .import-form textarea, .message-preview textarea {
   width: 100%;
   min-height: 42px;
   border: 1px solid #cfd7e3;
@@ -924,9 +1172,13 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91,
 .filters { padding: 14px 18px; border-bottom: 1px solid #e6ebf2; }
 .filters label { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; color: #354157; }
 .filters label input { width: auto; }
+.checkbox-field { display: inline-flex; align-items: center; gap: 8px; color: #354157; }
+.checkbox-field input { width: auto; min-height: auto; }
 .filters input, .filters select { width: auto; min-width: 180px; }
 .import-form { display: grid; gap: 12px; padding: 18px; }
 .import-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.message-preview { display: grid; gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; background: #fbfcfe; }
+.message-preview textarea { min-height: 160px; }
 .muted { padding: 0 18px; color: #647084; }
 .timeline-section { border-top: 1px solid #e6ebf2; }
 .timeline { display: grid; gap: 12px; padding: 18px; }

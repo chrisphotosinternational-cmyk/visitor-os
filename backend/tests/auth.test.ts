@@ -275,7 +275,10 @@ describe('admin authentication and RBAC', () => {
     });
 
     assert.equal(createResponse.statusCode, 200);
-    assert.equal((createResponse.json() as { prospect: { score_label: string } }).prospect.score_label, 'very_high');
+    assert.equal(
+      (createResponse.json() as { prospect: { score_label: string } }).prospect.score_label,
+      'very_high'
+    );
     assert.equal(listResponse.statusCode, 200);
     assert.equal((listResponse.json() as { prospects: unknown[] }).prospects.length, 1);
     await app.close();
@@ -303,7 +306,10 @@ describe('admin authentication and RBAC', () => {
     });
 
     assert.equal(adminList.statusCode, 200);
-    assert.equal((adminList.json() as { prospects: Array<{ organization_id: string }> }).prospects.length, 0);
+    assert.equal(
+      (adminList.json() as { prospects: Array<{ organization_id: string }> }).prospects.length,
+      0
+    );
     await app.close();
   });
 
@@ -328,7 +334,9 @@ describe('admin authentication and RBAC', () => {
     });
 
     assert.equal(response.statusCode, 200);
-    const importResult = response.json() as { import: { created: number; merged: number; rows: number } };
+    const importResult = response.json() as {
+      import: { created: number; merged: number; rows: number };
+    };
     assert.equal(importResult.import.created, 1);
     assert.equal(importResult.import.merged, 1);
     assert.equal(importResult.import.rows, 2);
@@ -395,7 +403,10 @@ describe('admin authentication and RBAC', () => {
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal((response.json() as { prospect: { status: string } }).prospect.status, 'interested');
+    assert.equal(
+      (response.json() as { prospect: { status: string } }).prospect.status,
+      'interested'
+    );
     await app.close();
   });
 
@@ -480,6 +491,183 @@ describe('admin authentication and RBAC', () => {
 
     assert.equal(deleted.statusCode, 200);
     assert.equal((deleted.json() as { deleted: boolean }).deleted, true);
+    await app.close();
+  });
+
+  it('creates, lists, updates and deletes message templates', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/admin-api/message-templates',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        name: 'Premier message test',
+        channel: 'email',
+        purpose: 'first_contact',
+        content: 'Bonjour {first_name}',
+        variables: ['first_name']
+      }
+    });
+    const template = (created.json() as { template: { id: string } }).template;
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/message-templates/${template.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        name: 'Premier message modifie',
+        channel: 'instagram_manual',
+        purpose: 'follow_up',
+        content: 'Bonjour {pseudo}',
+        variables: ['pseudo'],
+        isActive: false
+      }
+    });
+    const fetched = await app.inject({
+      method: 'GET',
+      url: `/admin-api/message-templates/${template.id}`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/admin-api/message-templates/${template.id}`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(created.statusCode, 200);
+    assert.equal(updated.statusCode, 200);
+    assert.equal(
+      (updated.json() as { template: { name: string; is_active: boolean } }).template.name,
+      'Premier message modifie'
+    );
+    assert.equal(
+      (updated.json() as { template: { is_active: boolean } }).template.is_active,
+      false
+    );
+    assert.equal((fetched.json() as { template: { id: string } }).template.id, template.id);
+    assert.equal((deleted.json() as { deleted: boolean }).deleted, true);
+    await app.close();
+  });
+
+  it('keeps message templates isolated by organization', async () => {
+    const app = await createAuthTestApp();
+    const adminToken = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const superToken = await jwtLogin(app, 'super@example.com', 'test-password-123');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/admin-api/message-templates',
+      headers: { authorization: `Bearer ${superToken}` },
+      payload: {
+        organizationId: ORG_B,
+        name: 'Tenant B template',
+        channel: 'email',
+        purpose: 'first_contact',
+        content: 'Bonjour tenant B'
+      }
+    });
+    const template = (created.json() as { template: { id: string } }).template;
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin-api/message-templates/${template.id}`,
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    assert.equal(response.statusCode, 404);
+    await app.close();
+  });
+
+  it('renders message templates with prospect variables and missing values', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      firstName: 'Emma',
+      pseudo: 'emma_studio',
+      city: 'Albi',
+      mym: 'emma-mym',
+      scoreLabel: 'high'
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/admin-api/message-templates',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        name: 'Render test',
+        channel: 'instagram_manual',
+        purpose: 'first_contact',
+        content: 'Bonjour {first_name} {pseudo} a {city} via {platform}. OnlyFans: {onlyfans}.'
+      }
+    });
+    const template = (created.json() as { template: { id: string } }).template;
+    const rendered = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/render-message`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { templateId: template.id, recordCopy: true }
+    });
+
+    assert.equal(rendered.statusCode, 200);
+    const body = rendered.json() as { rendered: string };
+    assert.match(body.rendered, /Emma/);
+    assert.match(body.rendered, /emma_studio/);
+    assert.match(body.rendered, /MYM/);
+    assert.doesNotMatch(body.rendered, /\{onlyfans\}|undefined/);
+    await app.close();
+  });
+
+  it('saves rendered messages into contact history without sending anything', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'history_message',
+      email: 'history-message@example.com'
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/admin-api/message-templates',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        name: 'Historisation',
+        channel: 'email',
+        purpose: 'follow_up',
+        content: 'Bonjour {pseudo}'
+      }
+    });
+    const template = (created.json() as { template: { id: string } }).template;
+    const rendered = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/render-message`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { templateId: template.id }
+    });
+    const message = (rendered.json() as { rendered: string }).rendered;
+    const saved = await app.inject({
+      method: 'POST',
+      url: `/admin-api/prospects/${prospect.id}/save-rendered-message`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        templateId: template.id,
+        rendered: message,
+        channel: 'email',
+        outcome: 'interested',
+        notes: 'Copie manuelle'
+      }
+    });
+    const forbiddenSend = await app.inject({
+      method: 'POST',
+      url: `/admin-api/message-templates/${template.id}/send`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(saved.statusCode, 200);
+    assert.equal((saved.json() as { entry: { message_used: string } }).entry.message_used, message);
+    assert.equal((saved.json() as { prospect: { status: string } }).prospect.status, 'interested');
+    assert.equal(forbiddenSend.statusCode, 404);
     await app.close();
   });
 
@@ -690,6 +878,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const sessions = new Map<string, Record<string, unknown>>();
   const prospects = new Map<string, Record<string, unknown>>();
   const contactHistory = new Map<string, Record<string, unknown>>();
+  const messageTemplates = new Map<string, Record<string, unknown>>();
+  const messageTemplateUsage = new Map<string, Record<string, unknown>>();
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -708,7 +898,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       if (sql.includes('from users where lower(email)')) {
         return result(
           [...users.values()].filter(
-            (row) => valueToString(row.email).toLowerCase() === valueToString(values[0]).toLowerCase()
+            (row) =>
+              valueToString(row.email).toLowerCase() === valueToString(values[0]).toLowerCase()
           )
         );
       }
@@ -732,7 +923,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
 
       if (sql.includes('from users') && sql.includes('order by created_at')) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
-        const search = valueToString(values[1] ?? '').replaceAll('%', '').toLowerCase();
+        const search = valueToString(values[1] ?? '')
+          .replaceAll('%', '')
+          .toLowerCase();
         return result(
           [...users.values()].filter(
             (row) =>
@@ -818,6 +1011,93 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
       }
 
+      if (sql.includes('select count(*)::text as count from message_templates')) {
+        const organizationId = valueToString(values[0]);
+        return result([
+          {
+            count: String(
+              [...messageTemplates.values()].filter((row) => row.organization_id === organizationId)
+                .length
+            )
+          }
+        ]);
+      }
+
+      if (sql.includes('insert into message_templates')) {
+        const row = messageTemplateFromValues(values);
+        messageTemplates.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (
+        sql.includes('select *') &&
+        sql.includes('from message_templates') &&
+        sql.includes('order by created_at')
+      ) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        return result(filterMessageTemplates(messageTemplates, organizationId));
+      }
+
+      if (sql.includes('select * from message_templates where id')) {
+        const row = messageTemplates.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          optional(
+            row && (!organizationId || row.organization_id === organizationId) ? row : undefined
+          )
+        );
+      }
+
+      if (sql.includes('update message_templates')) {
+        const row = messageTemplates.get(String(values[7]));
+        const organizationId = values[8] ? valueToString(values[8]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) return result([]);
+        Object.assign(row, messageTemplateUpdateFromValues(values), { updated_at: new Date() });
+        return result([row]);
+      }
+
+      if (sql.includes('delete from message_templates')) {
+        const row = messageTemplates.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        if (!row || (organizationId && row.organization_id !== organizationId)) {
+          return { ...result([]), rowCount: 0 };
+        }
+        messageTemplates.delete(String(values[0]));
+        return { ...result([]), rowCount: 1 };
+      }
+
+      if (sql.includes('insert into message_template_usage')) {
+        const row = messageTemplateUsageFromValues(values);
+        messageTemplateUsage.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('active_templates') && sql.includes('from message_templates mt')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const templates = filterMessageTemplates(messageTemplates, organizationId);
+        const usage = filterMessageTemplateUsage(messageTemplateUsage, organizationId);
+        return result([
+          {
+            active_templates: String(templates.filter((row) => row.is_active === true).length),
+            copied_this_week: String(usage.filter((row) => row.action === 'copied').length),
+            history_saved_this_week: String(
+              usage.filter((row) => row.action === 'history_saved').length
+            )
+          }
+        ]);
+      }
+
+      if (sql.includes('from message_template_usage u') && sql.includes('join message_templates')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        const rows = filterMessageTemplateUsage(messageTemplateUsage, organizationId).map(
+          (row) => ({
+            ...row,
+            template_name: messageTemplates.get(String(row.template_id))?.name ?? null
+          })
+        );
+        return result(rows);
+      }
+
       if (sql.includes('from contact_history') && sql.includes('total_contacts')) {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const rows = filterContactHistory(contactHistory, organizationId);
@@ -848,7 +1128,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         const organizationId = values[0] ? valueToString(values[0]) : null;
         const overdueOnly = values[1] === true;
         const upcomingOnly = values[2] === true;
-        const city = valueToString(values[3] ?? '').replaceAll('%', '').toLowerCase();
+        const city = valueToString(values[3] ?? '')
+          .replaceAll('%', '')
+          .toLowerCase();
         const scoreLabel = values[4] ? valueToString(values[4]) : null;
         const status = values[5] ? valueToString(values[5]) : null;
         const now = Date.now();
@@ -928,13 +1210,25 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([
           {
             total: String(rows.length),
-            to_contact: String(rows.filter((row) => ['to_contact', 'follow_up'].includes(valueToString(row.status))).length),
-            interested: String(rows.filter((row) => ['interested', 'potential_client'].includes(valueToString(row.status))).length),
+            to_contact: String(
+              rows.filter((row) => ['to_contact', 'follow_up'].includes(valueToString(row.status)))
+                .length
+            ),
+            interested: String(
+              rows.filter((row) =>
+                ['interested', 'potential_client'].includes(valueToString(row.status))
+              ).length
+            ),
             blacklist: String(rows.filter((row) => row.status === 'blacklist').length),
-            high_score: String(rows.filter((row) => ['high', 'very_high'].includes(valueToString(row.score_label))).length),
+            high_score: String(
+              rows.filter((row) => ['high', 'very_high'].includes(valueToString(row.score_label)))
+                .length
+            ),
             with_email: String(rows.filter((row) => Boolean(row.email)).length),
             with_phone: String(rows.filter((row) => Boolean(row.phone)).length),
-            premium_platforms: String(rows.filter((row) => Boolean(row.mym) || Boolean(row.onlyfans)).length)
+            premium_platforms: String(
+              rows.filter((row) => Boolean(row.mym) || Boolean(row.onlyfans)).length
+            )
           }
         ]);
       }
@@ -956,22 +1250,32 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([{ count: String(rows.length) }]);
       }
 
-      if (sql.includes('select *') && sql.includes('from prospects') && sql.includes('where organization_id')) {
+      if (
+        sql.includes('select *') &&
+        sql.includes('from prospects') &&
+        sql.includes('where organization_id')
+      ) {
         const duplicate = [...prospects.values()].find(
           (row) =>
             row.organization_id === values[0] &&
-            ((values[1] && valueToString(row.email).toLowerCase() === valueToString(values[1]).toLowerCase()) ||
+            ((values[1] &&
+              valueToString(row.email).toLowerCase() === valueToString(values[1]).toLowerCase()) ||
               (values[2] && row.phone === values[2]) ||
               (values[3] && row.source_url === values[3]) ||
               (values[4] &&
                 values[5] &&
-                valueToString(row.pseudo).toLowerCase() === valueToString(values[4]).toLowerCase() &&
+                valueToString(row.pseudo).toLowerCase() ===
+                  valueToString(values[4]).toLowerCase() &&
                 valueToString(row.city).toLowerCase() === valueToString(values[5]).toLowerCase()))
         );
         return result(optional(duplicate));
       }
 
-      if (sql.includes('select *') && sql.includes('from prospects') && sql.includes('order by updated_at')) {
+      if (
+        sql.includes('select *') &&
+        sql.includes('from prospects') &&
+        sql.includes('order by updated_at')
+      ) {
         const rows = filterProspectsForCore(prospects, values);
         return result(rows);
       }
@@ -979,7 +1283,13 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       if (sql.includes('select * from prospects where id')) {
         const prospect = prospects.get(String(values[0]));
         const organizationId = values[1] ? valueToString(values[1]) : null;
-        return result(optional(prospect && (!organizationId || prospect.organization_id === organizationId) ? prospect : undefined));
+        return result(
+          optional(
+            prospect && (!organizationId || prospect.organization_id === organizationId)
+              ? prospect
+              : undefined
+          )
+        );
       }
 
       if (sql.includes('insert into prospects')) {
@@ -1021,7 +1331,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       }
 
       if (sql.includes('from organizations') && sql.includes('order by created_at')) {
-        const search = valueToString(values[0] ?? '').replaceAll('%', '').toLowerCase();
+        const search = valueToString(values[0] ?? '')
+          .replaceAll('%', '')
+          .toLowerCase();
         return result(
           [...organizations.values()].filter(
             (row) =>
@@ -1029,7 +1341,9 @@ async function createAuthMemoryDatabase(): Promise<Database> {
               (!search ||
                 valueToString(row.name).toLowerCase().includes(search) ||
                 valueToString(row.slug).toLowerCase().includes(search) ||
-                valueToString(row.email ?? '').toLowerCase().includes(search))
+                valueToString(row.email ?? '')
+                  .toLowerCase()
+                  .includes(search))
           )
         );
       }
@@ -1231,9 +1545,13 @@ function filterProspectsForCore(
   values: unknown[]
 ): Record<string, unknown>[] {
   const organizationId = values[0] ? valueToString(values[0]) : null;
-  const search = valueToString(values[1] ?? '').replaceAll('%', '').toLowerCase();
+  const search = valueToString(values[1] ?? '')
+    .replaceAll('%', '')
+    .toLowerCase();
   const status = values[2] ? valueToString(values[2]) : null;
-  const city = valueToString(values[3] ?? '').replaceAll('%', '').toLowerCase();
+  const city = valueToString(values[3] ?? '')
+    .replaceAll('%', '')
+    .toLowerCase();
   const scoreLabel = values[4] ? valueToString(values[4]) : null;
   const platform = values[5] ? valueToString(values[5]) : null;
 
@@ -1291,6 +1609,65 @@ function contactHistoryUpdateFromValues(values: unknown[]): Record<string, unkno
     follow_up_date: values[6],
     notes: values[7]
   };
+}
+
+function messageTemplateFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    name: values[2],
+    channel: values[3],
+    purpose: values[4],
+    content: values[5],
+    variables: values[6],
+    is_active: values[7],
+    created_by_user_id: values[8],
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+}
+
+function messageTemplateUpdateFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    organization_id: values[0],
+    name: values[1],
+    channel: values[2],
+    purpose: values[3],
+    content: values[4],
+    variables: values[5],
+    is_active: values[6]
+  };
+}
+
+function filterMessageTemplates(
+  messageTemplates: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...messageTemplates.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
+}
+
+function messageTemplateUsageFromValues(values: unknown[]): Record<string, unknown> {
+  return {
+    id: values[0],
+    organization_id: values[1],
+    template_id: values[2],
+    prospect_id: values[3],
+    user_id: values[4],
+    action: values[5],
+    rendered_content: values[6],
+    created_at: new Date()
+  };
+}
+
+function filterMessageTemplateUsage(
+  messageTemplateUsage: Map<string, Record<string, unknown>>,
+  organizationId: string | null
+): Record<string, unknown>[] {
+  return [...messageTemplateUsage.values()].filter(
+    (row) => !organizationId || row.organization_id === organizationId
+  );
 }
 
 function filterContactHistory(

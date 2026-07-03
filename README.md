@@ -21,6 +21,7 @@ The first working MVP is available:
 - protected admin authentication and RBAC.
 - organizations, users, and prospects administration through the production admin UI.
 - contact history, manual follow-ups, and prospect timeline for commercial tracking.
+- message templates and manual outreach assistant with copy-only workflow.
 - AI Provider Engine with mock fallback and OpenAI-ready abstraction.
 - advanced CRM foundation with scoring, tags, notes, follow-ups and exports.
 - Notification Engine with internal alerts, email mock/Resend provider, webhooks and history.
@@ -38,6 +39,7 @@ The first working MVP is available:
 - Lead capture
 - Mini CRM
 - Tags, notes, reminders, and scoring
+- Manual message templates and outreach history
 - Statistics and exports
 - Notifications
 - Configuration by business activity
@@ -249,6 +251,59 @@ Compliance limits:
 - VISITOR-OS only records manual contact actions done outside the system;
 - no private account access or automated platform interaction is included;
 - the operator remains responsible for lawful and proportionate prospecting.
+
+## Message Templates And Manual Outreach
+
+Sprint 8 adds a manual outreach assistant. It helps an administrator prepare personalized messages, copy them, and store the final message in the prospect timeline.
+
+It never sends messages automatically.
+
+Admin routes are protected by JWT/RBAC:
+
+- `GET /admin-api/message-templates`;
+- `GET /admin-api/message-templates/:id`;
+- `POST /admin-api/message-templates`;
+- `PATCH /admin-api/message-templates/:id`;
+- `DELETE /admin-api/message-templates/:id`;
+- `POST /admin-api/message-templates/:id/render`;
+- `POST /admin-api/prospects/:id/render-message`;
+- `POST /admin-api/prospects/:id/save-rendered-message`;
+- `GET /admin-api/message-templates/export-csv`;
+- `GET /admin-api/message-templates/usage-csv`.
+
+Supported channels:
+
+```text
+email, phone_script, whatsapp_manual, instagram_manual, x_manual,
+mym_manual, onlyfans_manual, website_form, other
+```
+
+Supported purposes:
+
+```text
+first_contact, follow_up, proposal, reactivation,
+thank_you, refusal_response, custom
+```
+
+Supported variables:
+
+```text
+{first_name}, {last_name}, {pseudo}, {city}, {activity}, {platform},
+{website}, {instagram}, {mym}, {onlyfans}, {score_label}
+```
+
+Missing values are rendered as empty text. This keeps messages clean and avoids exposing placeholders to prospects.
+
+Default templates are created per organization when templates are first loaded. They are intentionally short, professional, respectful, and non-intrusive.
+
+The admin interface exposes:
+
+- `/message-templates` for listing and exporting templates;
+- `/message-templates/new` for creation;
+- `/message-templates/:id` for editing;
+- a Messages block inside `/prospects/:id` for preview, copy, and history save.
+
+Usage tracking records copies and history saves. It does not record any automatic send event because no send feature exists in this sprint.
 
 ## Development Rule
 
