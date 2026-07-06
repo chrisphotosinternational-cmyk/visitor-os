@@ -1,0 +1,318 @@
+import { randomUUID } from 'node:crypto';
+import { AppError } from '../../core/errors/app-error.js';
+import type {
+  ConversationRepository,
+  SiteRecord
+} from '../conversations/conversation-repository.js';
+import type { ProspectRepository } from '../prospects/prospect-repository.js';
+import type { CrmRepository } from '../crm/crm-repository.js';
+import type { DecisionEngine } from '../decision-engine/decision-engine.js';
+import type { NotificationEngine } from '../notifications/notification-engine.js';
+
+export type ChatbotSiteReference = {
+  siteKey?: string | undefined;
+  siteId?: string | undefined;
+  siteSlug?: string | undefined;
+};
+
+export type StartChatbotConversationInput = ChatbotSiteReference & {
+  anonymousId?: string | undefined;
+  pageUrl?: string | undefined;
+  referrer?: string | undefined;
+};
+
+export type SendChatbotMessageInput = {
+  conversationId: string;
+  content: string;
+};
+
+export type ChatbotWidgetConfig = {
+  siteKey: string;
+  siteId: string;
+  siteSlug: string | null;
+  brandName: string;
+  activity: string;
+  welcomeMessage: string;
+  fallbackMessage: string;
+  quickReplies: string[];
+  primaryColor: string;
+};
+
+export type ChatbotConversationStarted = {
+  conversationId: string;
+  visitorId: string;
+  message: string;
+};
+
+export type ChatbotMessageResponse = {
+  conversationId: string;
+  prospectId: string | null;
+  reply: string;
+  source: string;
+  confidence: number;
+  shouldEscalate: boolean;
+  processingTimeMs: number;
+  matchedItemId: string | undefined;
+  reason: string | undefined;
+};
+
+type NotificationRequest = Parameters<NotificationEngine['notify']>[0];
+
+export class MultiSiteChatbotService {
+  constructor(
+    private readonly dependencies: {
+      conversations: ConversationRepository;
+      prospects: ProspectRepository;
+      crm: CrmRepository;
+      decisionEngine: DecisionEngine;
+      notificationEngine?: { notify(input: NotificationRequest): Promise<unknown> } | undefined;
+    }
+  ) {}
+
+  async getWidgetConfig(input: ChatbotSiteReference): Promise<ChatbotWidgetConfig> {
+    const site = await this.resolveSite(input);
+    const businessConfig = await this.dependencies.decisionEngine.getBusinessConfig(
+      site.business_config_id
+    );
+
+    return {
+      siteKey: site.widget_public_key,
+      siteId: site.id,
+      siteSlug: site.slug,
+      brandName: businessConfig.identity.name,
+      activity: businessConfig.identity.category,
+      welcomeMessage: businessConfig.widget.welcomeMessage ?? 'Bonjour, je peux vous aider.',
+      fallbackMessage:
+        businessConfig.widget.fallbackMessage ??
+        "Je n'ai pas encore cette information. Contactez-nous pour une reponse precise.",
+      quickReplies: businessConfig.widget.quickReplies,
+      primaryColor: businessConfig.identity.colors.primary ?? '#1f6f5b'
+    };
+  }
+
+  async startConversation(
+    input: StartChatbotConversationInput
+  ): Promise<ChatbotConversationStarted> {
+    const site = await this.resolveSite(input);
+    const visitorId = await this.dependencies.conversations.upsertVisitor({
+      organizationId: site.organization_id,
+      siteId: site.id,
+      anonymousId: input.anonymousId ?? randomUUID()
+    });
+    const conversationInput: {
+      organizationId: string;
+      siteId: string;
+      visitorId: string;
+      pageUrl?: string;
+      referrer?: string;
+    } = {
+      organizationId: site.organization_id,
+      siteId: site.id,
+      visitorId
+    };
+
+    if (input.pageUrl) {
+      conversationInput.pageUrl = input.pageUrl;
+    }
+
+    if (input.referrer) {
+      conversationInput.referrer = input.referrer;
+    }
+
+    const conversation =
+      await this.dependencies.conversations.createConversation(conversationInput);
+
+    await this.dependencies.conversations.addMessage({
+      organizationId: site.organization_id,
+      conversationId: conversation.id,
+      senderType: 'system',
+      content: 'Conversation demarree depuis le widget.'
+    });
+
+    await this.dependencies.notificationEngine?.notify({
+      type: 'new_conversation',
+      organizationId: site.organization_id,
+      siteId: site.id,
+      variables: {
+        site: site.name,
+        createdAt: new Date().toISOString(),
+        conversationUrl: `/admin/conversations/${conversation.id}`
+      }
+    });
+
+    return {
+      conversationId: conversation.id,
+      visitorId,
+      message: 'Conversation demarree.'
+    };
+  }
+
+  async sendMessage(input: SendChatbotMessageInput): Promise<ChatbotMessageResponse> {
+    const conversation = await this.dependencies.conversations.findConversation(
+      input.conversationId
+    );
+
+    if (!conversation) {
+      throw new AppError('Conversation not found', {
+        statusCode: 404,
+        code: 'CONVERSATION_NOT_FOUND'
+      });
+    }
+
+    const site = await this.dependencies.conversations.findSite(conversation.site_id);
+
+    await this.dependencies.conversations.addMessage({
+      organizationId: conversation.organization_id,
+      conversationId: conversation.id,
+      senderType: 'visitor',
+      content: input.content
+    });
+
+    const prospect =
+      conversation.prospect_id === null
+        ? await this.dependencies.prospects.createFromConversation({
+            organizationId: conversation.organization_id,
+            siteId: conversation.site_id,
+            visitorId: conversation.visitor_id,
+            question: input.content
+          })
+        : null;
+
+    if (prospect) {
+      await this.dependencies.conversations.linkProspect(conversation.id, prospect.id);
+    }
+
+    const recentHistory = await this.dependencies.conversations.listMessages(conversation.id);
+    const decision = await this.dependencies.decisionEngine.decide({
+      organizationId: conversation.organization_id,
+      conversationId: conversation.id,
+      siteId: conversation.site_id,
+      activity: site?.business_config_id ?? 'default',
+      message: input.content,
+      recentHistory: recentHistory.map((message) => ({
+        senderType: message.sender_type,
+        content: message.content
+      })),
+      pageUrl: conversation.page_url
+    });
+
+    const assistantMessage = await this.dependencies.conversations.addMessage({
+      organizationId: conversation.organization_id,
+      conversationId: conversation.id,
+      senderType: 'assistant',
+      content: decision.reply,
+      decision: {
+        responseSource: decision.source,
+        responseConfidence: decision.confidence,
+        shouldEscalate: decision.shouldEscalate,
+        processingTimeMs: decision.processingTimeMs,
+        ...(decision.matchedItemId ? { matchedItemId: decision.matchedItemId } : {}),
+        ...(decision.reason ? { decisionReason: decision.reason } : {})
+      }
+    });
+
+    await this.dependencies.conversations.addDecisionEvent({
+      organizationId: conversation.organization_id,
+      conversationId: conversation.id,
+      messageId: assistantMessage.id,
+      source: decision.source,
+      confidence: decision.confidence,
+      shouldEscalate: decision.shouldEscalate,
+      processingTimeMs: decision.processingTimeMs,
+      ...(decision.matchedItemId ? { matchedItemId: decision.matchedItemId } : {}),
+      ...(decision.reason ? { reason: decision.reason } : {})
+    });
+
+    if (decision.aiEvent) {
+      await this.dependencies.conversations.addAIEvent({
+        organizationId: conversation.organization_id,
+        siteId: conversation.site_id,
+        conversationId: conversation.id,
+        ...decision.aiEvent
+      });
+    }
+
+    const prospectId = prospect?.id ?? conversation.prospect_id;
+    if (prospectId) {
+      const scoringMessages = [...recentHistory.map((message) => message.content), decision.reply];
+      const appliedTags = await this.dependencies.crm.applyAutomaticTags({
+        organizationId: conversation.organization_id,
+        prospectId,
+        conversationId: conversation.id,
+        messages: scoringMessages
+      });
+      const scoring = await this.dependencies.crm.recalculateScore({
+        organizationId: conversation.organization_id,
+        prospectId
+      });
+
+      if (scoring.score >= 70) {
+        await this.dependencies.notificationEngine?.notify({
+          type: 'hot_prospect',
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          variables: {
+            site: site?.name ?? conversation.site_id,
+            conversationUrl: `/admin/conversations/${conversation.id}`,
+            score: scoring.score,
+            tags: appliedTags.map((tag) => tag.label).join(', ')
+          }
+        });
+      }
+
+      if (appliedTags.some((tag) => tag.slug === 'reservation')) {
+        await this.dependencies.notificationEngine?.notify({
+          type: 'potential_booking',
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          variables: {
+            site: site?.name ?? conversation.site_id,
+            conversationUrl: `/admin/conversations/${conversation.id}`,
+            score: scoring.score,
+            tags: appliedTags.map((tag) => tag.label).join(', ')
+          }
+        });
+      }
+    }
+
+    return {
+      conversationId: conversation.id,
+      prospectId,
+      reply: decision.reply,
+      source: decision.source,
+      confidence: decision.confidence,
+      shouldEscalate: decision.shouldEscalate,
+      processingTimeMs: decision.processingTimeMs,
+      matchedItemId: decision.matchedItemId,
+      reason: decision.reason
+    };
+  }
+
+  private async resolveSite(input: ChatbotSiteReference): Promise<SiteRecord> {
+    if (input.siteId) {
+      const site = await this.dependencies.conversations.findSite(input.siteId);
+
+      if (site?.status === 'active' && site.widget_enabled) {
+        return site;
+      }
+    }
+
+    if (input.siteSlug) {
+      const site = await this.dependencies.conversations.findSiteBySlug(input.siteSlug);
+
+      if (site) {
+        return site;
+      }
+    }
+
+    if (input.siteKey) {
+      const site = await this.dependencies.conversations.findSiteByWidgetKey(input.siteKey);
+
+      if (site) {
+        return site;
+      }
+    }
+
+    throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
+  }
+}

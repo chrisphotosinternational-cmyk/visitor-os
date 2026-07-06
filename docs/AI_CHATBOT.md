@@ -2,6 +2,8 @@
 
 Le chatbot IA de VISITOR-OS permet d'interroger le CRM en langage naturel.
 
+Ce document concerne le chatbot interne d'administration. Le chatbot public multi-sites utilise le widget et est documente dans `docs/CHATBOT_MULTI_SITES.md`.
+
 ## Objectif
 
 Le chatbot aide l'administrateur a comprendre ses donnees commerciales sans construire manuellement des filtres.

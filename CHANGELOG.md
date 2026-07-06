@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 16 - Chatbot Multi-sites Architecture Alignment
+
+- Added dedicated `chatbot-multisite` backend module for the public acquisition chatbot.
+- Preserved all existing CRM, pipeline, AI, enrichment, dashboard, organization, user and prospect modules.
+- Kept existing public widget routes while moving multi-site chatbot orchestration into a dedicated service.
+- Clarified the separation between the public Chatbot Multi-sites and the private AI CRM Chatbot.
+- Added module documentation in `docs/CHATBOT_MULTI_SITES.md`.
+
 ## Sprint 16 - AI CRM Chatbot
 
 - Added AI CRM chatbot with read-only natural language access to prospects, pipeline, follow-ups, AI analysis and CRM action lists.

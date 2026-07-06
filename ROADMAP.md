@@ -2,6 +2,9 @@
 
 ## Current Development - Sprint 16
 
+- Chatbot Multi-sites as the public acquisition engine
+- Dedicated backend module for site-specific widget conversations
+- CRM handoff without replacing existing CRM, pipeline, AI or enrichment modules
 - AI CRM chatbot
 - Natural language CRM questions
 - Read-only pipeline, relance, scoring and opportunity analysis

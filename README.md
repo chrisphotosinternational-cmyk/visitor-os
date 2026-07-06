@@ -34,6 +34,7 @@ The first working MVP is available:
 - Release Candidate 1 packaging with audits, `/system`, installation guides, backup guides and QA checklist.
 - Production validation layer with first-start onboarding, demo campaign, diagnostics, Quality Report, import intelligence, cleanup assistant and full backup export.
 - AI CRM chatbot with read-only natural language access to prospects, follow-ups, pipeline and action lists.
+- Chatbot Multi-sites module for public widget conversations, site-specific business configuration, lead acquisition and CRM handoff.
 
 ## Release Candidate 1
 
@@ -74,9 +75,20 @@ The chatbot can read prospects, follow-ups, pipeline metrics, AI analysis and en
 
 The chatbot does not send messages, delete records or modify CRM data automatically. When no external AI provider is configured, it uses a deterministic rule-based fallback.
 
+## Chatbot Multi-sites
+
+The public Chatbot Multi-sites module powers the embedded widget on each connected site.
+
+It resolves the active site by public key, slug or id, loads the matching business configuration, records visitor conversations, calls the Decision Engine, creates prospects when needed, applies automatic CRM tags and updates lead scoring.
+
+This module is additive. It does not replace the CRM, pipeline, AI qualification, enrichment or admin dashboard modules. The CRM remains the source of truth for commercial follow-up.
+
+Documentation: `docs/CHATBOT_MULTI_SITES.md`.
+
 ## Planned Modules
 
 - Lightweight JavaScript widget
+- Public multi-site chatbot
 - AI assistant module
 - Conversation tracking
 - Lead capture
@@ -129,7 +141,7 @@ The chatbot does not send messages, delete records or modify CRM data automatica
 Current architecture:
 
 ```text
-Organization -> Sites -> Business Configuration -> Knowledge -> Widget -> Conversations -> Prospects
+Organization -> Sites -> Business Configuration -> Widget -> Chatbot Multi-sites -> Conversations -> Prospects -> CRM
 ```
 
 ## Quick Start
