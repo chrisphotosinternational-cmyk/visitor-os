@@ -11,6 +11,16 @@ export type SiteRecord = {
   business_config_id: string;
   status: string;
   widget_enabled: boolean;
+  domain: string | null;
+  allowed_domains: string[] | null;
+  widget_primary_color: string | null;
+  widget_welcome_message: string | null;
+  widget_fallback_message: string | null;
+  widget_privacy_message: string | null;
+  lead_capture_enabled: boolean | null;
+  lead_capture_trigger: string | null;
+  lead_capture_after_messages: number | null;
+  lead_capture_fields: string[] | null;
 };
 
 export type ConversationRecord = {

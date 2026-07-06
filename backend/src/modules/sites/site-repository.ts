@@ -17,6 +17,15 @@ export type SiteRecord = {
   language: string;
   status: SiteStatus;
   widget_enabled: boolean;
+  allowed_domains: string[] | null;
+  widget_primary_color: string | null;
+  widget_welcome_message: string | null;
+  widget_fallback_message: string | null;
+  widget_privacy_message: string | null;
+  lead_capture_enabled: boolean | null;
+  lead_capture_trigger: string | null;
+  lead_capture_after_messages: number | null;
+  lead_capture_fields: string[] | null;
   created_at: Date;
 };
 
@@ -30,6 +39,15 @@ export type SiteInput = {
   language?: string;
   status?: SiteStatus;
   widgetEnabled?: boolean;
+  allowedDomains?: string[];
+  widgetPrimaryColor?: string;
+  widgetWelcomeMessage?: string;
+  widgetFallbackMessage?: string;
+  widgetPrivacyMessage?: string;
+  leadCaptureEnabled?: boolean;
+  leadCaptureTrigger?: string;
+  leadCaptureAfterMessages?: number;
+  leadCaptureFields?: string[];
 };
 
 export class SiteRepository {

@@ -1,0 +1,7 @@
+site_domain,category,question,answer,tags,priority,is_active
+chambres-dhotes-albi.com,parking,Avez-vous un parking ?,"Oui, un parking gratuit est disponible selon les disponibilites. Nous vous confirmons les details avant votre arrivee.","parking;acces",90,true
+chambres-dhotes-albi.com,petit-dejeuner,Le petit-dejeuner est-il inclus ?,"Le petit-dejeuner peut etre inclus selon l'offre reservee. Indiquez vos dates pour une reponse precise.","petit-dejeuner;tarifs",80,true
+chambres-dhotes-albi.com,reservation,Comment reserver ?,"Vous pouvez nous indiquer vos dates, le nombre de personnes et vos coordonnees. Nous vous recontactons rapidement.","reservation;disponibilite",100,true
+photographe-boudoir-albi.ovh,shooting,Comment se passe un shooting boudoir ?,"Le shooting commence par un echange pour comprendre vos attentes, puis nous guidons les poses dans une ambiance professionnelle et rassurante.","shooting;boudoir",90,true
+photographe-boudoir-lyon.ovh,tarifs,Quels sont vos tarifs ?,"Les tarifs dependent du type de seance, de la duree et du nombre d'images souhaitees. Laissez vos coordonnees pour recevoir une proposition adaptee.","tarifs;shooting",85,true
+decoration-murale-photo.com,decoration,Proposez-vous des impressions murales ?,"Oui, nous proposons des creations photo pour decoration murale avec plusieurs formats et finitions possibles.","decoration;impression",80,true

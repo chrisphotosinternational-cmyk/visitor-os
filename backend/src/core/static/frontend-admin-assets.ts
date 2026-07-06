@@ -45,6 +45,16 @@ createApp({
       userStatuses: [],
       userSearch: '',
       userForm: emptyUserForm(),
+      sites: [],
+      selectedSite: null,
+      siteWidget: null,
+      siteWidgetForm: emptySiteWidgetForm(),
+      siteQaCsv: '',
+      siteQaImportResult: null,
+      unansweredQuestions: [],
+      unansweredFilter: 'pending',
+      unansweredAnswer: '',
+      chatbotMetrics: null,
       prospects: [],
       prospectStatuses: [],
       prospectScoreLabels: [],
@@ -205,6 +215,8 @@ createApp({
           this.refreshTechnicalStatus(),
           this.loadOrganizations(),
           this.loadUsers(),
+          this.loadSites(),
+          this.loadChatbotMetrics(),
           this.loadProspects(),
           this.loadFollowUps(),
           this.loadMessageTemplates(),
@@ -415,6 +427,102 @@ createApp({
       });
       if (!response.ok) throw new Error('Desactivation utilisateur impossible.');
       await Promise.all([this.loadUsers(), this.refreshDashboard()]);
+    },
+    async loadSites() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/sites', { authenticated: true });
+      if (!response.ok) throw new Error('Chargement des sites impossible.');
+      this.sites = (await response.json()).sites;
+    },
+    async openSiteWidget(site) {
+      const response = await this.apiRequest('/admin-api/sites/' + site.id + '/widget', { authenticated: true });
+      if (!response.ok) throw new Error('Configuration widget indisponible.');
+      const data = await response.json();
+      this.selectedSite = data.site;
+      this.siteWidget = data.widget;
+      this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
+      await this.loadUnansweredQuestions();
+      this.navigate('site-widget', site.id);
+    },
+    async saveSiteWidgetSettings() {
+      if (!this.selectedSite) return;
+      const payload = {
+        allowedDomains: this.siteWidgetForm.allowedDomains.split('\\n').map((item) => item.trim()).filter(Boolean),
+        primaryColor: this.siteWidgetForm.primaryColor,
+        welcomeMessage: this.siteWidgetForm.welcomeMessage,
+        fallbackMessage: this.siteWidgetForm.fallbackMessage,
+        privacyMessage: this.siteWidgetForm.privacyMessage,
+        leadCaptureEnabled: this.siteWidgetForm.leadCaptureEnabled,
+        leadCaptureTrigger: this.siteWidgetForm.leadCaptureTrigger,
+        leadCaptureAfterMessages: Number(this.siteWidgetForm.leadCaptureAfterMessages || 3),
+        leadCaptureFields: Object.entries(this.siteWidgetForm.leadCaptureFields).filter((entry) => entry[1]).map((entry) => entry[0]),
+        widgetEnabled: this.siteWidgetForm.widgetEnabled,
+        status: this.siteWidgetForm.status
+      };
+      const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/widget-settings', {
+        method: 'PATCH',
+        authenticated: true,
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error('Sauvegarde widget impossible.');
+      const data = await response.json();
+      this.selectedSite = data.site;
+      this.siteWidget = data.widget;
+      this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
+      await Promise.all([this.loadSites(), this.loadChatbotMetrics()]);
+      this.notify('Configuration widget sauvegardee.');
+    },
+    async copyWidgetScript() {
+      if (!this.siteWidget?.scriptCode) return;
+      await navigator.clipboard.writeText(this.siteWidget.scriptCode);
+      this.notify('Code widget copie.');
+    },
+    async importSiteQa() {
+      if (!this.selectedSite || !this.siteQaCsv.trim()) return;
+      const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/qa/import-csv', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ csv: this.siteQaCsv })
+      });
+      if (!response.ok) throw new Error('Import Q/A impossible.');
+      this.siteQaImportResult = (await response.json()).import;
+      this.siteQaCsv = '';
+      this.notify('Base Q/A importee.');
+      await this.loadChatbotMetrics();
+    },
+    async loadUnansweredQuestions() {
+      if (!this.selectedSite) return;
+      const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/unanswered?status=' + this.unansweredFilter, { authenticated: true });
+      if (!response.ok) throw new Error('Questions sans reponse indisponibles.');
+      this.unansweredQuestions = (await response.json()).unanswered;
+    },
+    async ignoreUnanswered(question) {
+      if (!this.selectedSite) return;
+      const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/unanswered/' + question.id + '/ignore', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Impossible d ignorer la question.');
+      await Promise.all([this.loadUnansweredQuestions(), this.loadChatbotMetrics()]);
+    },
+    async convertUnanswered(question) {
+      if (!this.selectedSite) return;
+      const answer = this.unansweredAnswer.trim() || question.suggested_answer || '';
+      if (!answer) throw new Error('Ajoute une reponse avant validation.');
+      const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/unanswered/' + question.id + '/convert', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ answer, category: question.category || 'general', tags: question.tags || [] })
+      });
+      if (!response.ok) throw new Error('Conversion Q/A impossible.');
+      this.unansweredAnswer = '';
+      await Promise.all([this.loadUnansweredQuestions(), this.loadChatbotMetrics()]);
+      this.notify('Question transformee en Q/A.');
+    },
+    async loadChatbotMetrics() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/chatbot/dashboard', { authenticated: true });
+      if (response.ok) this.chatbotMetrics = (await response.json()).metrics;
     },
     async refreshDashboard() {
       const response = await this.apiRequest('/admin-api/dashboard', { authenticated: true });
@@ -931,6 +1039,11 @@ createApp({
       if (route === 'quality') void this.loadQualityReport();
       if (route === 'first-start') void this.loadOnboardingStatus();
       if (route === 'chat') void this.loadChatSessions();
+      if (route === 'sites') {
+        void this.loadSites();
+        void this.loadChatbotMetrics();
+      }
+      if (route === 'site-unanswered') void this.loadUnansweredQuestions();
     },
     syncRouteFromLocation() {
       this.route = normalizeRoute(window.location.pathname);
@@ -1013,6 +1126,7 @@ createApp({
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" :aria-current="route.startsWith('prospect') ? 'page' : null" type="button" @click="navigate('prospects')">Prospects</button>
           <button :class="['nav-item', { active: route === 'pipeline' }]" :aria-current="route === 'pipeline' ? 'page' : null" type="button" @click="navigate('pipeline')">Pipeline</button>
           <button :class="['nav-item', { active: route === 'chat' }]" :aria-current="route === 'chat' ? 'page' : null" type="button" @click="navigate('chat')">Chat IA</button>
+          <button :class="['nav-item', { active: route.startsWith('site') || route === 'sites' }]" :aria-current="route.startsWith('site') || route === 'sites' ? 'page' : null" type="button" @click="navigate('sites')">Chatbot sites</button>
           <button :class="['nav-item', { active: route === 'enrichments' }]" :aria-current="route === 'enrichments' ? 'page' : null" type="button" @click="navigate('enrichments')">Enrichments</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" :aria-current="route === 'follow-ups' ? 'page' : null" type="button" @click="navigate('follow-ups')">Relances</button>
           <button :class="['nav-item', { active: route.startsWith('message-template') }]" :aria-current="route.startsWith('message-template') ? 'page' : null" type="button" @click="navigate('message-templates')">Messages</button>
@@ -1074,6 +1188,9 @@ createApp({
           <article class="metric"><span>Bloques sans action</span><strong>{{ dashboard?.pipeline?.stalledProspects ?? 0 }}</strong><small>14 jours</small></article>
           <article class="metric"><span>Forecast moyen</span><strong>{{ dashboard?.forecast?.mediumEstimate ?? 0 }} €</strong><small>Prévision simple</small></article>
           <article class="metric"><span>Prioritaires non contactés</span><strong>{{ dashboard?.forecast?.highPriorityUncontacted ?? 0 }}</strong><small>high / very_high</small></article>
+          <article class="metric"><span>Questions sans reponse</span><strong>{{ chatbotMetrics?.unansweredQuestions ?? 0 }}</strong><small>Chatbot</small></article>
+          <article class="metric"><span>Leads chatbot</span><strong>{{ chatbotMetrics?.leadsCaptured ?? 0 }}</strong><small>Captures</small></article>
+          <article class="metric"><span>Fallback chatbot</span><strong>{{ Math.round((chatbotMetrics?.fallbackRate ?? 0) * 100) }}%</strong><small>Questions non couvertes</small></article>
         </section>
 
         <section v-if="route === 'dashboard' && dashboard?.pipeline?.byStage?.length" class="panel">
@@ -1221,6 +1338,112 @@ createApp({
                 <td class="actions"><button v-if="canWriteUsers" type="button" @click="editUser(item)">Modifier</button><button v-if="canWriteUsers" type="button" @click="disableUser(item)">Desactiver</button></td>
               </tr></tbody>
             </table>
+          </div>
+        </section>
+
+        <section v-if="route === 'sites'" class="panel">
+          <div class="panel-header">
+            <h2>Chatbot multi-sites</h2>
+            <div class="inline-actions">
+              <button type="button" @click="loadSites">Rafraichir</button>
+              <button type="button" @click="loadChatbotMetrics">Metriques</button>
+            </div>
+          </div>
+          <div class="dashboard-grid">
+            <article class="metric"><span>Questions sans reponse</span><strong>{{ chatbotMetrics?.unansweredQuestions ?? 0 }}</strong><small>Pending</small></article>
+            <article class="metric"><span>Leads captures</span><strong>{{ chatbotMetrics?.leadsCaptured ?? 0 }}</strong><small>Chatbot</small></article>
+            <article class="metric"><span>Conversion chatbot</span><strong>{{ Math.round((chatbotMetrics?.conversionRate ?? 0) * 100) }}%</strong><small>Conversation -> prospect</small></article>
+          </div>
+          <div class="table-wrap">
+            <table><thead><tr><th>Site</th><th>Domaine</th><th>Widget</th><th>Cle publique</th><th></th></tr></thead>
+              <tbody><tr v-for="site in sites" :key="site.id">
+                <td><strong>{{ site.name }}</strong><small>{{ site.slug || site.id }}</small></td>
+                <td>{{ site.domain || '-' }}</td>
+                <td><span class="badge">{{ site.widget_enabled ? 'actif' : 'inactif' }}</span></td>
+                <td><code>{{ site.widget_public_key }}</code></td>
+                <td class="actions"><button type="button" @click="openSiteWidget(site)">Configurer</button></td>
+              </tr></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section v-if="route === 'site-widget'" class="panel">
+          <div class="panel-header">
+            <h2>Widget {{ selectedSite?.name }}</h2>
+            <div class="inline-actions">
+              <button type="button" @click="navigate('sites')">Retour</button>
+              <button type="button" @click="navigate('site-unanswered', selectedSite?.id)">Questions sans reponse</button>
+            </div>
+          </div>
+          <div class="analysis-grid">
+            <article class="analysis-main">
+              <h3>Code Moto CMS</h3>
+              <p>Collez ce script dans Moto CMS 4.</p>
+              <textarea readonly rows="3">{{ siteWidget?.scriptCode }}</textarea>
+              <div class="inline-actions"><button type="button" @click="copyWidgetScript">Copier le script</button><a :href="siteWidget?.scriptUrl" target="_blank" rel="noreferrer">Voir le script</a></div>
+            </article>
+            <article>
+              <h3>Apercu live</h3>
+              <div class="widget-preview" :style="{ borderColor: siteWidgetForm.primaryColor }">
+                <button type="button" :style="{ background: siteWidgetForm.primaryColor }">Besoin d’aide ?</button>
+                <p>{{ siteWidgetForm.welcomeMessage }}</p>
+                <small>{{ siteWidgetForm.privacyMessage }}</small>
+              </div>
+            </article>
+          </div>
+          <form class="admin-form prospect-form" @submit.prevent="saveSiteWidgetSettings">
+            <label class="checkbox-field"><input v-model="siteWidgetForm.widgetEnabled" type="checkbox" /> Widget actif</label>
+            <select v-model="siteWidgetForm.status"><option value="active">active</option><option value="inactive">inactive</option></select>
+            <input v-model="siteWidgetForm.primaryColor" placeholder="#1f6f5b" />
+            <textarea v-model="siteWidgetForm.allowedDomains" placeholder="Un domaine autorise par ligne"></textarea>
+            <textarea v-model="siteWidgetForm.welcomeMessage" placeholder="Message d'accueil"></textarea>
+            <textarea v-model="siteWidgetForm.fallbackMessage" placeholder="Message fallback"></textarea>
+            <textarea v-model="siteWidgetForm.privacyMessage" placeholder="Message confidentialite"></textarea>
+            <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureEnabled" type="checkbox" /> Capture lead active</label>
+            <select v-model="siteWidgetForm.leadCaptureTrigger">
+              <option value="after_messages">apres X messages</option>
+              <option value="repeated_fallback">fallback repete</option>
+              <option value="commercial_intent">intention commerciale</option>
+              <option value="manual">manuel</option>
+            </select>
+            <input v-model="siteWidgetForm.leadCaptureAfterMessages" type="number" min="1" max="20" />
+            <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.name" type="checkbox" /> nom</label>
+            <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.email" type="checkbox" /> email</label>
+            <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.phone" type="checkbox" /> telephone</label>
+            <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.need" type="checkbox" /> besoin</label>
+            <button type="submit">Sauvegarder widget</button>
+          </form>
+          <section class="timeline-section">
+            <div class="panel-header"><h2>Import Q/A site</h2><span class="badge">CSV</span></div>
+            <form class="import-form" @submit.prevent="importSiteQa">
+              <textarea v-model="siteQaCsv" placeholder="site_domain,category,question,answer,tags,priority,is_active"></textarea>
+              <button type="submit">Importer Q/A</button>
+            </form>
+            <pre v-if="siteQaImportResult" class="metrics-output">{{ JSON.stringify(siteQaImportResult, null, 2) }}</pre>
+          </section>
+        </section>
+
+        <section v-if="route === 'site-unanswered'" class="panel">
+          <div class="panel-header">
+            <h2>Questions sans reponse</h2>
+            <div class="inline-actions">
+              <button type="button" @click="navigate('site-widget', selectedSite?.id)">Retour widget</button>
+              <select v-model="unansweredFilter" @change="loadUnansweredQuestions"><option value="pending">pending</option><option value="ignored">ignored</option><option value="converted">converted</option></select>
+            </div>
+          </div>
+          <div class="message-preview">
+            <textarea v-model="unansweredAnswer" placeholder="Reponse a utiliser pour transformer une question en Q/A"></textarea>
+          </div>
+          <div class="timeline">
+            <article v-for="question in unansweredQuestions" :key="question.id" class="timeline-item">
+              <header><strong>{{ question.question }}</strong><span class="badge">{{ question.status }}</span></header>
+              <p>{{ question.created_at }}</p>
+              <div class="inline-actions">
+                <button type="button" @click="convertUnanswered(question)">Transformer en Q/A</button>
+                <button type="button" @click="ignoreUnanswered(question)">Ignorer</button>
+              </div>
+            </article>
+            <p v-if="unansweredQuestions.length === 0" class="muted">Aucune question pour ce filtre.</p>
           </div>
         </section>
 
@@ -1681,6 +1904,9 @@ function normalizeRoute(pathname) {
   if (pathname === '/first-start') return 'first-start';
   if (pathname === '/chat') return 'chat';
   if (pathname === '/pipeline') return 'pipeline';
+  if (pathname === '/sites') return 'sites';
+  if (pathname.startsWith('/sites/') && pathname.endsWith('/unanswered')) return 'site-unanswered';
+  if (pathname.startsWith('/sites/') && pathname.endsWith('/widget')) return 'site-widget';
   if (pathname === '/organizations') return 'organizations';
   if (pathname === '/users') return 'users';
   if (pathname === '/prospects') return 'prospects';
@@ -1705,6 +1931,9 @@ function routePath(route, id) {
   if (route === 'first-start') return '/first-start';
   if (route === 'chat') return '/chat';
   if (route === 'pipeline') return '/pipeline';
+  if (route === 'sites') return '/sites';
+  if (route === 'site-widget') return '/sites/' + id + '/widget';
+  if (route === 'site-unanswered') return '/sites/' + id + '/unanswered';
   if (route === 'prospect-new') return '/prospects/new';
   if (route === 'prospect-import') return '/prospects/import';
   if (route === 'prospect-detail') return '/prospects/' + id;
@@ -1723,6 +1952,9 @@ function routeTitle(route) {
     quality: 'Quality Report',
     'first-start': 'Premier demarrage',
     chat: 'Chat IA CRM',
+    sites: 'Chatbot multi-sites',
+    'site-widget': 'Integration widget',
+    'site-unanswered': 'Questions sans reponse',
     pipeline: 'Pipeline',
     organizations: 'Organisations',
     users: 'Utilisateurs',
@@ -1745,6 +1977,46 @@ function emptyOrganizationForm() {
 
 function emptyUserForm(organizationId = '') {
   return { id: '', organizationId, firstName: '', lastName: '', email: '', password: '', role: 'Viewer', status: 'active' };
+}
+
+function emptySiteWidgetForm() {
+  return {
+    allowedDomains: ['chambres-dhotes-albi.com', 'photographe-boudoir-albi.ovh', 'photographe-boudoir-lyon.ovh', 'decoration-murale-photo.com'].join('\\n'),
+    primaryColor: '#1f6f5b',
+    welcomeMessage: 'Bonjour, je peux vous aider.',
+    fallbackMessage: "Je n'ai pas encore cette information. Contactez-nous pour une reponse precise.",
+    privacyMessage: 'Vos informations sont utilisees uniquement pour repondre a votre demande.',
+    leadCaptureEnabled: false,
+    leadCaptureTrigger: 'after_messages',
+    leadCaptureAfterMessages: 3,
+    leadCaptureFields: { name: true, email: true, phone: true, need: true },
+    widgetEnabled: true,
+    status: 'active'
+  };
+}
+
+function siteWidgetToForm(site, settings) {
+  const defaults = emptySiteWidgetForm();
+  const fields = new Set(settings?.leadCaptureFields ?? ['name', 'email', 'phone', 'need']);
+
+  return {
+    allowedDomains: (settings?.allowedDomains ?? site?.allowed_domains ?? []).join('\\n'),
+    primaryColor: settings?.primaryColor ?? defaults.primaryColor,
+    welcomeMessage: settings?.welcomeMessage ?? defaults.welcomeMessage,
+    fallbackMessage: settings?.fallbackMessage ?? defaults.fallbackMessage,
+    privacyMessage: settings?.privacyMessage ?? defaults.privacyMessage,
+    leadCaptureEnabled: Boolean(settings?.leadCaptureEnabled),
+    leadCaptureTrigger: settings?.leadCaptureTrigger ?? defaults.leadCaptureTrigger,
+    leadCaptureAfterMessages: settings?.leadCaptureAfterMessages ?? defaults.leadCaptureAfterMessages,
+    leadCaptureFields: {
+      name: fields.has('name'),
+      email: fields.has('email'),
+      phone: fields.has('phone'),
+      need: fields.has('need')
+    },
+    widgetEnabled: Boolean(site?.widget_enabled ?? true),
+    status: site?.status ?? 'active'
+  };
 }
 
 function emptyProspectForm(organizationId = '') {
@@ -1987,6 +2259,10 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91,
 .import-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .message-preview { display: grid; gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; background: #fbfcfe; }
 .message-preview textarea { min-height: 160px; }
+.widget-preview { display: grid; gap: 12px; border: 2px solid #166a5b; border-radius: 8px; padding: 16px; background: #fbfcfe; }
+.widget-preview button { justify-self: start; border-radius: 999px; }
+.widget-preview small { color: #647084; }
+code { overflow-wrap: anywhere; color: #172033; }
 .settings-grid { display: grid; grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr); gap: 18px; padding: 18px; }
 .settings-grid article { display: grid; align-content: start; gap: 12px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
 .settings-grid textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }

@@ -54,6 +54,10 @@ import {
 } from '../settings/settings-service.js';
 import { ProductionValidationService } from '../production-validation/production-validation-service.js';
 import { AIChatService } from '../ai-chat/ai-chat-service.js';
+import {
+  ChatbotProductionService,
+  leadCaptureTriggers
+} from '../chatbot-production/chatbot-production-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -304,6 +308,42 @@ const optionalOrganizationQuerySchema = z.object({
   organizationId: z.string().uuid().optional()
 });
 
+const siteWidgetSettingsPayloadSchema = z.object({
+  allowedDomains: z.array(z.string().min(1)).default([]),
+  primaryColor: z.string().min(1).default('#1f6f5b'),
+  welcomeMessage: z.string().min(1).default('Bonjour, je peux vous aider.'),
+  fallbackMessage: z
+    .string()
+    .min(1)
+    .default("Je n'ai pas encore cette information. Contactez-nous pour une reponse precise."),
+  privacyMessage: z
+    .string()
+    .min(1)
+    .default('Vos informations sont utilisees uniquement pour repondre a votre demande.'),
+  leadCaptureEnabled: z.boolean().default(false),
+  leadCaptureTrigger: z.enum(leadCaptureTriggers).default('after_messages'),
+  leadCaptureAfterMessages: z.number().int().positive().max(20).default(3),
+  leadCaptureFields: z
+    .array(z.enum(['name', 'email', 'phone', 'need']))
+    .default(['name', 'email', 'phone', 'need']),
+  widgetEnabled: z.boolean().optional(),
+  status: z.enum(['active', 'inactive']).optional()
+});
+
+const unansweredQuerySchema = z.object({
+  status: z.enum(['pending', 'ignored', 'converted']).default('pending')
+});
+
+const qaImportPayloadSchema = z.object({
+  csv: z.string().min(1)
+});
+
+const unansweredConvertPayloadSchema = z.object({
+  answer: z.string().min(1),
+  category: z.string().optional(),
+  tags: z.array(z.string()).default([])
+});
+
 const chatSessionPayloadSchema = z.object({
   organizationId: z.string().uuid().optional(),
   title: z.string().min(1).max(120).optional()
@@ -336,6 +376,7 @@ export function registerAdminManagementRoutes(
   const pipeline = new SalesPipelineService(database);
   const settings = new SettingsService(database);
   const aiChat = new AIChatService(database);
+  const chatbotProduction = new ChatbotProductionService(database);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
   const productionValidation = new ProductionValidationService({
@@ -756,6 +797,159 @@ export function registerAdminManagementRoutes(
     const user = await users.updateStatus(params.userId, body.status);
 
     return { user: user ? toPublicUser(user) : null };
+  });
+
+  app.get('/admin-api/sites', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return {
+      sites: await chatbotProduction.listSites(organizationId)
+    };
+  });
+
+  app.get('/admin-api/sites/:siteId/widget', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    const baseUrl = publicBaseUrl();
+    const scriptCode = `<script src="${baseUrl}/widget/${site.widget_public_key}.js"></script>`;
+
+    return {
+      site,
+      widget: {
+        settings: chatbotProduction.widgetSettings(site),
+        publicKey: site.widget_public_key,
+        scriptUrl: `${baseUrl}/widget/${site.widget_public_key}.js`,
+        scriptCode,
+        active: site.status === 'active' && site.widget_enabled
+      }
+    };
+  });
+
+  app.patch('/admin-api/sites/:siteId/widget-settings', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const existing = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!existing) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, existing.organization_id);
+    const body = siteWidgetSettingsPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.updateWidgetSettings(
+      params.siteId,
+      existing.organization_id,
+      body
+    );
+
+    return {
+      site,
+      widget: site
+        ? {
+            settings: chatbotProduction.widgetSettings(site),
+            publicKey: site.widget_public_key,
+            active: site.status === 'active' && site.widget_enabled
+          }
+        : null
+    };
+  });
+
+  app.post('/admin-api/sites/:siteId/qa/import-csv', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = qaImportPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      import: await chatbotProduction.importQaCsv({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        siteDomain: site.domain,
+        csv: body.csv
+      })
+    };
+  });
+
+  app.get('/admin-api/sites/:siteId/unanswered', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const query = unansweredQuerySchema.parse(request.query);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      unanswered: await chatbotProduction.listUnanswered({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        status: query.status
+      })
+    };
+  });
+
+  app.post('/admin-api/sites/:siteId/unanswered/:unansweredId/ignore', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z
+      .object({ siteId: z.string().uuid(), unansweredId: z.string().uuid() })
+      .parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      unanswered: await chatbotProduction.ignoreUnanswered({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        unansweredId: params.unansweredId
+      })
+    };
+  });
+
+  app.post('/admin-api/sites/:siteId/unanswered/:unansweredId/convert', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z
+      .object({ siteId: z.string().uuid(), unansweredId: z.string().uuid() })
+      .parse(request.params);
+    const body = unansweredConvertPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return chatbotProduction.convertUnansweredToQa({
+      organizationId: site.organization_id,
+      siteId: site.id,
+      unansweredId: params.unansweredId,
+      answer: body.answer,
+      ...(body.category ? { category: body.category } : {}),
+      tags: body.tags
+    });
+  });
+
+  app.get('/admin-api/chatbot/dashboard', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return {
+      metrics: await cached(
+        cache,
+        cacheKey('chatbot-dashboard', organizationId),
+        ['dashboard', 'statistics'],
+        () => chatbotProduction.metrics(organizationId)
+      )
+    };
   });
 
   app.get('/admin-api/prospects', async (request) => {
@@ -1650,6 +1844,15 @@ function filterProspectsForEnrichmentMode(
     if (mode === 'url_missing_data') return !prospect.email || !prospect.phone || !prospect.city;
     return true;
   });
+}
+
+function publicBaseUrl(): string {
+  const configured = process.env.PUBLIC_APP_URL;
+  if (configured) return configured.replace(/\/$/, '');
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (railwayDomain) return `https://${railwayDomain}`;
+
+  return 'https://visitor-os-production-3a31.up.railway.app';
 }
 
 function optional<T>(value: T | null): T[] {

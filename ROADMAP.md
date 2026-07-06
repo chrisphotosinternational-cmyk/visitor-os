@@ -1,6 +1,17 @@
 # Roadmap
 
-## Current Development - Sprint 16
+## Current Development - Sprint 17
+
+- Chatbot production hardening for Moto CMS 4
+- Public widget script route `/widget/:publicKey.js`
+- Per-site allowed domains and widget settings
+- Site Q/A CSV import
+- Questions sans reponse workflow
+- Lead capture settings and CRM conversion without duplicates
+- Chatbot metrics by site
+- Moto CMS installation documentation
+
+## Previous Development - Sprint 16
 
 - Chatbot Multi-sites as the public acquisition engine
 - Dedicated backend module for site-specific widget conversations

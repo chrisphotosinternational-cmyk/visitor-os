@@ -307,6 +307,28 @@ async function createMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('from site_qa_items')) {
+        return result([]);
+      }
+
+      if (sql.includes('insert into chatbot_unanswered_questions')) {
+        return result([
+          {
+            id: values[0],
+            organization_id: values[1],
+            site_id: values[2],
+            conversation_id: values[3],
+            question: values[4],
+            status: 'pending',
+            suggested_answer: null,
+            category: null,
+            tags: [],
+            created_at: new Date(),
+            updated_at: new Date()
+          }
+        ]);
+      }
+
       if (sql.includes('insert into prospects')) {
         const row = {
           id: values[0],

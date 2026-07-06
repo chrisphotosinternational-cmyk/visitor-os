@@ -24,6 +24,8 @@ model Organization {
   appSettings AppSetting[]
   aiChatSessions AiChatSession[]
   aiChatMessages AiChatMessage[]
+  siteQaItems SiteQaItem[]
+  chatbotUnansweredQuestions ChatbotUnansweredQuestion[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([createdAt])
@@ -444,4 +446,43 @@ model AiChatMessage {
 
   @@index([sessionId, createdAt])
   @@map("ai_chat_messages")
+}
+
+model SiteQaItem {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  siteId         String       @map("site_id") @db.Uuid
+  category       String       @default("general")
+  question       String
+  answer         String
+  tags           String[]     @default([])
+  priority       Int          @default(50)
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([siteId, question])
+  @@index([siteId, isActive, priority])
+  @@index([organizationId, createdAt])
+  @@map("site_qa_items")
+}
+
+model ChatbotUnansweredQuestion {
+  id              String       @id @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  siteId          String       @map("site_id") @db.Uuid
+  conversationId  String?      @map("conversation_id") @db.Uuid
+  question        String
+  status          String       @default("pending")
+  suggestedAnswer String?      @map("suggested_answer")
+  category        String?
+  tags            String[]     @default([])
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization    Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([siteId, status, createdAt])
+  @@index([organizationId, createdAt])
+  @@map("chatbot_unanswered_questions")
 }

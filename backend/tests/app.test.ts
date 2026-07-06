@@ -64,6 +64,34 @@ describe('createApp', () => {
     await app.close();
   });
 
+  it('serves the public widget script for Moto CMS integration', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent'
+      }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/widget/demo-site-key.js'
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.headers['content-type'] ?? '', /application\/javascript/);
+    assert.match(response.body, /visitor-os-launcher/);
+    assert.match(response.body, /visitor-os-anonymous-id/);
+
+    await app.close();
+  });
+
   it('starts technical health route without business endpoints', async () => {
     const previousAppVersion = process.env.APP_VERSION;
     const previousNodeEnv = process.env.NODE_ENV;

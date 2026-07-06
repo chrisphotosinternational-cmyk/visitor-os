@@ -35,6 +35,7 @@ The first working MVP is available:
 - Production validation layer with first-start onboarding, demo campaign, diagnostics, Quality Report, import intelligence, cleanup assistant and full backup export.
 - AI CRM chatbot with read-only natural language access to prospects, follow-ups, pipeline and action lists.
 - Chatbot Multi-sites module for public widget conversations, site-specific business configuration, lead acquisition and CRM handoff.
+- Moto CMS widget integration with public script generation, allowed domains, site Q/A import, unanswered questions and lead capture settings.
 
 ## Release Candidate 1
 
@@ -84,6 +85,10 @@ It resolves the active site by public key, slug or id, loads the matching busine
 This module is additive. It does not replace the CRM, pipeline, AI qualification, enrichment or admin dashboard modules. The CRM remains the source of truth for commercial follow-up.
 
 Documentation: `docs/CHATBOT_MULTI_SITES.md`.
+
+Moto CMS installation guide: `docs/MOTO_CMS_WIDGET_INSTALL.md`.
+
+Q/A CSV example: `examples/site_qa_import.csv`.
 
 ## Planned Modules
 

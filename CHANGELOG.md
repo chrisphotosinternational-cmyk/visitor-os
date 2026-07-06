@@ -2,6 +2,16 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 17 - Chatbot Production Hardening & Moto CMS Integration
+
+- Added Railway-hosted public widget script route `/widget/:publicKey.js` for simple Moto CMS integration.
+- Added per-site allowed domains, widget copy, colors, welcome/fallback/privacy messages and lead capture settings.
+- Added site Q/A CSV import with `examples/site_qa_import.csv`.
+- Added unanswered question administration: filter, ignore and convert to Q/A.
+- Added public lead capture endpoint with CRM deduplication by email/phone.
+- Added chatbot dashboard metrics for conversations, fallback, unanswered questions and captured leads.
+- Added Moto CMS installation documentation in `docs/MOTO_CMS_WIDGET_INSTALL.md`.
+
 ## Sprint 16 - Chatbot Multi-sites Architecture Alignment
 
 - Added dedicated `chatbot-multisite` backend module for the public acquisition chatbot.
