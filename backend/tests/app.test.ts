@@ -65,6 +65,11 @@ describe('createApp', () => {
   });
 
   it('starts technical health route without business endpoints', async () => {
+    const previousAppVersion = process.env.APP_VERSION;
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.APP_VERSION = 'v1.0.0-RC1';
+    process.env.NODE_ENV = 'production';
+
     const database: Database = {
       isConfigured: mock.fn(() => true),
       checkConnection: mock.fn(async () => undefined),
@@ -102,7 +107,7 @@ describe('createApp', () => {
     assert.equal(body.status, 'ok');
     assert.equal(body.app, 'VISITOR-OS');
     assert.equal(body.version, 'v1.0.0-RC1');
-    assert.equal(body.environment, 'test');
+    assert.equal(body.environment, 'production');
     assert.equal(body.database, 'ok');
     assert.equal(body.cache.enabled, true);
     assert.equal(body.queue.enabled, true);
@@ -111,6 +116,8 @@ describe('createApp', () => {
     assert.equal(typeof body.uptime, 'number');
 
     await app.close();
+    restoreOptionalEnv('APP_VERSION', previousAppVersion);
+    restoreOptionalEnv('NODE_ENV', previousNodeEnv);
   });
 
   it('adds basic security headers', async () => {
@@ -290,3 +297,12 @@ describe('createApp', () => {
     await app.close();
   });
 });
+
+function restoreOptionalEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}

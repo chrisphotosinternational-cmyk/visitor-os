@@ -80,11 +80,14 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   registerAuditTrail(app, dependencies.config, auditTrail);
   registerFrontendAdmin(app);
 
+  const runtimeEnvironment = () => process.env.NODE_ENV ?? 'development';
+  const runtimeVersion = () => process.env.APP_VERSION ?? 'dev';
+
   app.get('/health', () => ({
     status: 'ok',
     app: dependencies.config.app.name,
-    version: dependencies.config.app.version ?? 'v1.0.0-RC1',
-    environment: dependencies.config.app.environment,
+    version: runtimeVersion(),
+    environment: runtimeEnvironment(),
     database:
       dependencies.readiness?.database ??
       (dependencies.database.isConfigured() ? 'ok' : 'disabled'),
@@ -103,15 +106,15 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   app.get('/live', () => ({
     status: 'alive',
     app: dependencies.config.app.name,
-    version: dependencies.config.app.version ?? 'v1.0.0-RC1',
-    environment: dependencies.config.app.environment
+    version: runtimeVersion(),
+    environment: runtimeEnvironment()
   }));
 
   app.get('/ready', () => {
     return {
       status: 'ready',
       app: dependencies.config.app.name,
-      version: dependencies.config.app.version ?? 'v1.0.0-RC1',
+      version: runtimeVersion(),
       database: dependencies.readiness?.database ?? 'ok'
     };
   });
@@ -121,7 +124,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
 
     return renderMetrics({
       app: dependencies.config.app.name,
-      environment: dependencies.config.app.environment,
+      environment: runtimeEnvironment(),
       uptimeSeconds: Math.round((Date.now() - startedAt.getTime()) / 1000),
       database: dependencies.readiness?.database ?? 'ok',
       cache,
