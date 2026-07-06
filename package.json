@@ -10,5 +10,6 @@
   },
   "engines": {
     "node": ">=22.0.0"
-  }
+  },
+  "description": "VISITOR-OS Release Candidate deployment trigger"
 }
