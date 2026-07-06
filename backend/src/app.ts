@@ -155,7 +155,12 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   const notificationEngine = new NotificationEngine(notificationRepository, dependencies.config);
 
   registerJwtAuthRoutes(app, dependencies.database, dependencies.config);
-  registerAdminManagementRoutes(app, dependencies.database, dependencies.config, { cache, queue });
+  registerAdminManagementRoutes(app, dependencies.database, dependencies.config, {
+    cache,
+    queue,
+    ...(dependencies.readiness ? { readiness: dependencies.readiness } : {}),
+    startedAt
+  });
   registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(
     app,

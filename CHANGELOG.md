@@ -2,6 +2,18 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 15 - Production Validation & First Real Campaign
+
+- Added first-start onboarding status and demo project creation.
+- Added `VISITOR DEMO` campaign seed with `demo@visitor-os.app` / `demo123`.
+- Added 200 fictitious prospects, contact history, follow-ups, signed prospects and refusals for production validation.
+- Added diagnostics and about endpoints for Railway, database, cache, queue, OpenTelemetry, version and runtime visibility.
+- Added import intelligence for duplicates, invalid emails, invalid phones, missing cities and ignored columns.
+- Added data cleanup preview/apply workflow for spaces, emails, phones, URLs and simple duplicate signals.
+- Added Quality Report and full VISITOR-OS ZIP backup export.
+- Added admin pages `/first-start`, `/diagnostics`, `/quality` and `/about`.
+- Added first-start and quality documentation.
+
 ## v1.0.0-RC1 - Sprint 14
 
 - Promoted VISITOR-OS from beta hardening to first Release Candidate.

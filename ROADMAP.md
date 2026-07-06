@@ -1,6 +1,16 @@
 # Roadmap
 
-## Current Development - v1.0.0-RC1
+## Current Development - Sprint 15
+
+- Production validation with first real campaign workflow
+- Demo organization and demo admin account
+- First-start onboarding assistant
+- Import intelligence and data cleanup assistant
+- Quality Report
+- Full VISITOR-OS backup export
+- Diagnostics and About pages
+
+## Previous Development - v1.0.0-RC1
 
 - First Release Candidate
 - Project audit

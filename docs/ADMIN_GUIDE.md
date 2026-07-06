@@ -32,4 +32,37 @@
 - Do not enable external AI or email providers without keys and cost controls.
 - Export data only when necessary.
 - Use backups before migrations or large imports.
+# Sprint 15 - Exploitation initiale
+
+## Diagnostics
+
+La page `/diagnostics` permet de verifier :
+
+- base de donnees ;
+- queue ;
+- cache ;
+- OpenTelemetry ;
+- variables critiques ;
+- version ;
+- Railway ;
+- permissions ;
+- temps de reponse.
+
+## Backup complet
+
+La page `/quality` permet de telecharger un backup VISITOR-OS au format ZIP.
+
+Le backup contient :
+
+- organisation ;
+- utilisateurs sans hash de mot de passe ;
+- prospects ;
+- historique ;
+- templates ;
+- pipeline ;
+- configuration.
+
+## Quality Report
+
+Le rapport qualite doit etre consulte avant toute premiere campagne reelle.
 

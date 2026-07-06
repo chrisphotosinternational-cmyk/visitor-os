@@ -52,6 +52,7 @@ import {
   type FeatureFlagKey,
   type RuntimeSettingsUpdate
 } from '../settings/settings-service.js';
+import { ProductionValidationService } from '../production-validation/production-validation-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -294,6 +295,14 @@ const runtimeSettingsPayloadSchema: z.ZodType<RuntimeSettingsUpdate> = z
   })
   .partial();
 
+const importIntelligencePayloadSchema = z.object({
+  csv: z.string().min(1)
+});
+
+const optionalOrganizationQuerySchema = z.object({
+  organizationId: z.string().uuid().optional()
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -301,6 +310,10 @@ export function registerAdminManagementRoutes(
   dependencies?: {
     cache?: AppCache;
     queue?: InMemoryJobQueue;
+    readiness?: {
+      database: 'disabled' | 'pending' | 'ok' | 'error';
+    };
+    startedAt?: Date;
   }
 ): void {
   const organizations = new OrganizationRepository(database);
@@ -314,6 +327,14 @@ export function registerAdminManagementRoutes(
   const settings = new SettingsService(database);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
+  const productionValidation = new ProductionValidationService({
+    database,
+    config,
+    ...(cache ? { cache } : {}),
+    ...(queue ? { queue } : {}),
+    ...(dependencies?.readiness ? { readiness: dependencies.readiness } : {}),
+    ...(dependencies?.startedAt ? { startedAt: dependencies.startedAt } : {})
+  });
 
   app.addHook('onResponse', (request, reply, done) => {
     if (
@@ -363,6 +384,83 @@ export function registerAdminManagementRoutes(
         };
       }
     );
+  });
+
+  app.get('/admin-api/onboarding/status', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'organizations:read');
+
+    return { onboarding: await productionValidation.firstStartStatus() };
+  });
+
+  app.post('/admin-api/demo-project', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'organizations:write');
+
+    return { demo: await productionValidation.createDemoProject() };
+  });
+
+  app.get('/admin-api/diagnostics', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'settings:access');
+
+    return { diagnostics: await productionValidation.diagnostics() };
+  });
+
+  app.get('/admin-api/about', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'settings:access');
+
+    return { about: productionValidation.about() };
+  });
+
+  app.post('/admin-api/import/intelligence', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const body = importIntelligencePayloadSchema.parse(request.body);
+
+    return { intelligence: productionValidation.importIntelligence(body.csv) };
+  });
+
+  app.get('/admin-api/data-cleanup/preview', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return { cleanup: await productionValidation.cleanupPreview(organizationId) };
+  });
+
+  app.post('/admin-api/data-cleanup/apply', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:write');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return { cleanup: await productionValidation.applyCleanup(organizationId) };
+  });
+
+  app.get('/admin-api/quality-report', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return { quality: await productionValidation.qualityReport(organizationId) };
+  });
+
+  app.get('/admin-api/backup/full', async (request, reply) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'data:export');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireFeature(settings, 'exports', organizationId);
+    const backup = await productionValidation.fullBackup(organizationId);
+
+    reply.type('application/zip');
+    reply.header('Content-Disposition', `attachment; filename="${backup.filename}"`);
+
+    return backup.content;
   });
 
   app.get('/admin-api/feature-flags', async (request) => {

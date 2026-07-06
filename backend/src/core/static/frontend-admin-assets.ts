@@ -86,6 +86,12 @@ createApp({
       featureFlags: {},
       runtimeSettings: null,
       runtimeSettingsJson: '',
+      onboarding: null,
+      diagnostics: null,
+      about: null,
+      qualityReport: null,
+      cleanupPreview: null,
+      importIntelligence: null,
       draggedProspectId: '',
       loading: false,
       error: '',
@@ -192,7 +198,9 @@ createApp({
           this.loadMessageTemplates(),
           this.loadEnrichments(),
           this.loadPipeline(),
-          this.loadSettings()
+          this.loadSettings(),
+          this.loadOnboardingStatus(),
+          this.loadQualityReport()
         ]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
@@ -210,6 +218,80 @@ createApp({
       this.health = await responseJsonOrFallback(health, { status: 'unreachable' });
       this.ready = await responseJsonOrFallback(ready, { status: 'unreachable', database: 'unknown' });
       this.systemMetrics = await responseTextOrFallback(metrics, 'metrics_unavailable 1');
+    },
+    async loadOnboardingStatus() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/onboarding/status', { authenticated: true });
+      if (response.ok) this.onboarding = (await response.json()).onboarding;
+    },
+    async createDemoProject() {
+      const response = await this.apiRequest('/admin-api/demo-project', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Creation demo impossible.');
+      const data = await response.json();
+      this.notify('Projet demo pret : ' + data.demo.user.email + ' / ' + data.demo.user.password);
+      await Promise.all([
+        this.loadOnboardingStatus(),
+        this.loadOrganizations(),
+        this.loadUsers(),
+        this.loadProspects(),
+        this.loadFollowUps(),
+        this.refreshDashboard()
+      ]);
+    },
+    async loadDiagnostics() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/diagnostics', { authenticated: true });
+      if (!response.ok) throw new Error('Diagnostics indisponibles.');
+      this.diagnostics = (await response.json()).diagnostics;
+    },
+    async loadAbout() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/about', { authenticated: true });
+      if (!response.ok) throw new Error('Informations version indisponibles.');
+      this.about = (await response.json()).about;
+    },
+    async loadQualityReport() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/quality-report', { authenticated: true });
+      if (response.ok) this.qualityReport = (await response.json()).quality;
+    },
+    async analyzeImportCsv() {
+      const response = await this.apiRequest('/admin-api/import/intelligence', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ csv: this.prospectImportCsv })
+      });
+      if (!response.ok) throw new Error('Analyse import impossible.');
+      this.importIntelligence = (await response.json()).intelligence;
+    },
+    async loadCleanupPreview() {
+      const response = await this.apiRequest('/admin-api/data-cleanup/preview', { authenticated: true });
+      if (!response.ok) throw new Error('Apercu nettoyage indisponible.');
+      this.cleanupPreview = (await response.json()).cleanup;
+    },
+    async applyCleanup() {
+      const response = await this.apiRequest('/admin-api/data-cleanup/apply', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Nettoyage impossible.');
+      const data = await response.json();
+      this.cleanupPreview = data.cleanup.preview;
+      this.notify(data.cleanup.updated + ' prospect(s) nettoye(s).');
+      await Promise.all([this.loadProspects(), this.loadQualityReport(), this.refreshDashboard()]);
+    },
+    async exportFullBackup() {
+      const response = await this.apiRequest('/admin-api/backup/full', { authenticated: true });
+      if (!response.ok) throw new Error('Backup complet impossible.');
+      const blob = new Blob([await response.arrayBuffer()], { type: 'application/zip' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'visitor-os-backup.zip';
+      link.click();
+      URL.revokeObjectURL(link.href);
     },
     async loadOrganizations() {
       if (!this.token) return;
@@ -782,6 +864,10 @@ createApp({
       this.route = route;
       const path = routePath(route, arguments[1]);
       if (window.location.pathname !== path) window.history.pushState({}, '', path);
+      if (route === 'diagnostics') void this.loadDiagnostics();
+      if (route === 'about') void this.loadAbout();
+      if (route === 'quality') void this.loadQualityReport();
+      if (route === 'first-start') void this.loadOnboardingStatus();
     },
     syncRouteFromLocation() {
       this.route = normalizeRoute(window.location.pathname);
@@ -866,6 +952,10 @@ createApp({
           <button :class="['nav-item', { active: route === 'enrichments' }]" :aria-current="route === 'enrichments' ? 'page' : null" type="button" @click="navigate('enrichments')">Enrichments</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" :aria-current="route === 'follow-ups' ? 'page' : null" type="button" @click="navigate('follow-ups')">Relances</button>
           <button :class="['nav-item', { active: route.startsWith('message-template') }]" :aria-current="route.startsWith('message-template') ? 'page' : null" type="button" @click="navigate('message-templates')">Messages</button>
+          <button :class="['nav-item', { active: route === 'first-start' }]" :aria-current="route === 'first-start' ? 'page' : null" type="button" @click="navigate('first-start')">Premier demarrage</button>
+          <button :class="['nav-item', { active: route === 'quality' }]" :aria-current="route === 'quality' ? 'page' : null" type="button" @click="navigate('quality')">Qualite</button>
+          <button :class="['nav-item', { active: route === 'diagnostics' }]" :aria-current="route === 'diagnostics' ? 'page' : null" type="button" @click="navigate('diagnostics')">Diagnostics</button>
+          <button :class="['nav-item', { active: route === 'about' }]" :aria-current="route === 'about' ? 'page' : null" type="button" @click="navigate('about')">About</button>
           <button :class="['nav-item', { active: route === 'system' }]" :aria-current="route === 'system' ? 'page' : null" type="button" @click="navigate('system')">System</button>
           <button :class="['nav-item', { active: route === 'settings' }]" :aria-current="route === 'settings' ? 'page' : null" type="button" @click="navigate('settings')">Parametres</button>
         </nav>
@@ -1300,8 +1390,24 @@ createApp({
           <p class="muted">Champs acceptes : first_name, last_name, pseudo, company, email, phone, website, instagram, twitter_x, mym, onlyfans, linktree, allmylinks, city, activity, description, source_url, status, notes.</p>
           <form class="import-form" @submit.prevent="importProspects">
             <textarea v-model="prospectImportCsv" placeholder="Colle le contenu CSV ici" required></textarea>
-            <button type="submit">Importer</button>
+            <div class="inline-actions">
+              <button type="button" @click="analyzeImportCsv">Analyser import</button>
+              <button type="submit">Importer</button>
+            </div>
           </form>
+          <div v-if="importIntelligence" class="dashboard-grid compact-grid">
+            <article class="metric"><span>Lignes</span><strong>{{ importIntelligence.rows }}</strong><small>CSV</small></article>
+            <article class="metric"><span>Doublons</span><strong>{{ importIntelligence.duplicates }}</strong><small>Probables</small></article>
+            <article class="metric"><span>Emails invalides</span><strong>{{ importIntelligence.invalidEmails }}</strong><small>A corriger</small></article>
+            <article class="metric"><span>Telephones invalides</span><strong>{{ importIntelligence.invalidPhones }}</strong><small>A corriger</small></article>
+            <article class="metric"><span>Villes inconnues</span><strong>{{ importIntelligence.unknownCities }}</strong><small>Manquantes</small></article>
+            <article class="metric"><span>Colonnes ignorees</span><strong>{{ importIntelligence.ignoredColumns?.length || 0 }}</strong><small>{{ importIntelligence.ignoredColumns?.join(', ') || '-' }}</small></article>
+          </div>
+          <div v-if="importIntelligence?.correctionProposals?.length" class="activity-list">
+            <article v-for="proposal in importIntelligence.correctionProposals" :key="proposal">
+              <strong>Correction proposee</strong><span>{{ proposal }}</span><small>Import intelligent</small>
+            </article>
+          </div>
         </section>
 
         <section v-if="route === 'follow-ups'" class="panel">
@@ -1326,6 +1432,97 @@ createApp({
                 <td class="actions"><button type="button" @click="markFollowedUp(entry)">Marquer relancé</button></td>
               </tr></tbody>
             </table>
+          </div>
+        </section>
+
+        <section v-if="route === 'first-start'" class="panel">
+          <div class="panel-header">
+            <h2>Assistant premier demarrage</h2>
+            <div class="inline-actions">
+              <button type="button" @click="loadOnboardingStatus">Actualiser</button>
+              <button type="button" @click="createDemoProject">Creer projet demo</button>
+            </div>
+          </div>
+          <div class="dashboard-grid compact-grid">
+            <article v-for="step in onboarding?.steps || []" :key="step.key" class="metric">
+              <span>{{ step.label }}</span>
+              <strong>{{ step.completed ? 'OK' : 'A faire' }}</strong>
+              <small>{{ step.key }}</small>
+            </article>
+          </div>
+          <div class="empty-panel">
+            <p>Compte demo : <strong>demo@visitor-os.app</strong> / <strong>demo123</strong></p>
+            <p class="muted">Le projet demo cree 200 prospects fictifs, 20 contacts, 10 relances, 5 signatures et 5 refus.</p>
+          </div>
+        </section>
+
+        <section v-if="route === 'quality'" class="panel">
+          <div class="panel-header">
+            <h2>Quality Report</h2>
+            <div class="inline-actions">
+              <button type="button" @click="loadQualityReport">Actualiser</button>
+              <button type="button" @click="loadCleanupPreview">Nettoyer les donnees</button>
+              <button type="button" @click="exportFullBackup">Backup VISITOR-OS</button>
+            </div>
+          </div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Erreurs</span><strong>{{ qualityReport?.errors ?? 0 }}</strong><small>Qualite donnees</small></article>
+            <article class="metric"><span>Donnees incompletes</span><strong>{{ qualityReport?.incompleteData ?? 0 }}</strong><small>Nom / pseudo</small></article>
+            <article class="metric"><span>Sans contact</span><strong>{{ qualityReport?.prospectsWithoutContact ?? 0 }}</strong><small>Email / telephone</small></article>
+            <article class="metric"><span>Jamais relances</span><strong>{{ qualityReport?.prospectsNeverFollowedUp ?? 0 }}</strong><small>Historique absent</small></article>
+            <article class="metric"><span>Score moyen</span><strong>{{ qualityReport?.averageScore ?? 0 }}</strong><small>CRM</small></article>
+            <article class="metric"><span>Qualite CRM</span><strong>{{ qualityReport?.crmQuality ?? 0 }}%</strong><small>Indice simple</small></article>
+          </div>
+          <div v-if="qualityReport?.recommendations?.length" class="activity-list">
+            <article v-for="recommendation in qualityReport.recommendations" :key="recommendation">
+              <strong>Recommandation</strong><span>{{ recommendation }}</span><small>Avant campagne</small>
+            </article>
+          </div>
+          <div v-if="cleanupPreview" class="panel">
+            <div class="panel-header"><h2>Apercu nettoyage</h2><button type="button" @click="applyCleanup">Valider nettoyage</button></div>
+            <div class="dashboard-grid compact-grid">
+              <article class="metric"><span>Espaces</span><strong>{{ cleanupPreview.trimSpaces }}</strong><small>Corrections</small></article>
+              <article class="metric"><span>Emails</span><strong>{{ cleanupPreview.normalizeEmails }}</strong><small>Normalisation</small></article>
+              <article class="metric"><span>Telephones</span><strong>{{ cleanupPreview.normalizePhones }}</strong><small>Normalisation</small></article>
+              <article class="metric"><span>URLs</span><strong>{{ cleanupPreview.normalizeUrls }}</strong><small>Normalisation</small></article>
+              <article class="metric"><span>Doublons simples</span><strong>{{ cleanupPreview.simpleDuplicates }}</strong><small>A surveiller</small></article>
+            </div>
+            <div class="table-wrap">
+              <table><thead><tr><th>Champ</th><th>Avant</th><th>Apres</th></tr></thead>
+                <tbody><tr v-for="sample in cleanupPreview.samples" :key="sample.id + sample.field">
+                  <td>{{ sample.field }}</td><td>{{ sample.before || '-' }}</td><td>{{ sample.after || '-' }}</td>
+                </tr></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="route === 'diagnostics'" class="panel">
+          <div class="panel-header"><h2>Diagnostics</h2><button type="button" @click="loadDiagnostics">Actualiser</button></div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Database</span><strong>{{ diagnostics?.database?.state || 'unknown' }}</strong><small>{{ diagnostics?.database?.latencyMs ?? '-' }} ms</small></article>
+            <article class="metric"><span>Queue</span><strong>{{ diagnostics?.queue?.enabled ? 'enabled' : 'disabled' }}</strong><small>{{ diagnostics?.queue?.queued ?? 0 }} queued</small></article>
+            <article class="metric"><span>Cache</span><strong>{{ diagnostics?.cache?.enabled ? 'enabled' : 'disabled' }}</strong><small>{{ diagnostics?.cache?.keys ?? 0 }} keys</small></article>
+            <article class="metric"><span>OpenTelemetry</span><strong>{{ diagnostics?.openTelemetry?.enabled ? 'enabled' : 'disabled' }}</strong><small>{{ diagnostics?.openTelemetry?.serviceName || '-' }}</small></article>
+            <article class="metric"><span>Version</span><strong>{{ diagnostics?.version || '-' }}</strong><small>{{ diagnostics?.variables?.NODE_ENV || '-' }}</small></article>
+            <article class="metric"><span>Railway</span><strong>{{ diagnostics?.railway?.environment || '-' }}</strong><small>{{ diagnostics?.railway?.service || '-' }}</small></article>
+            <article class="metric"><span>Permissions</span><strong>{{ diagnostics?.permissions?.readiness || '-' }}</strong><small>DB configured: {{ diagnostics?.permissions?.databaseConfigured }}</small></article>
+            <article class="metric"><span>Temps reponse</span><strong>{{ diagnostics?.responseTimeMs ?? 0 }} ms</strong><small>Diagnostic API</small></article>
+          </div>
+          <pre class="metrics-output" tabindex="0">{{ JSON.stringify(diagnostics, null, 2) }}</pre>
+        </section>
+
+        <section v-if="route === 'about'" class="panel">
+          <div class="panel-header"><h2>About VISITOR-OS</h2><button type="button" @click="loadAbout">Actualiser</button></div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Version</span><strong>{{ about?.version || '-' }}</strong><small>APP_VERSION</small></article>
+            <article class="metric"><span>Commit</span><strong>{{ about?.commit || '-' }}</strong><small>Git</small></article>
+            <article class="metric"><span>Date build</span><strong>{{ about?.buildDate || '-' }}</strong><small>Railway</small></article>
+            <article class="metric"><span>Railway</span><strong>{{ about?.railway?.environment || '-' }}</strong><small>{{ about?.railway?.service || '-' }}</small></article>
+            <article class="metric"><span>Node</span><strong>{{ about?.node || '-' }}</strong><small>Runtime</small></article>
+            <article class="metric"><span>PostgreSQL</span><strong>{{ about?.postgresql || '-' }}</strong><small>Readiness</small></article>
+            <article class="metric"><span>Licence</span><strong>{{ about?.license || '-' }}</strong><small>Projet</small></article>
+            <article class="metric"><span>Documentation</span><strong>{{ about?.documentation || '-' }}</strong><small>Guides</small></article>
           </div>
         </section>
 
@@ -1371,6 +1568,10 @@ createApp({
 
 function normalizeRoute(pathname) {
   if (pathname === '/system') return 'system';
+  if (pathname === '/diagnostics') return 'diagnostics';
+  if (pathname === '/about') return 'about';
+  if (pathname === '/quality') return 'quality';
+  if (pathname === '/first-start') return 'first-start';
   if (pathname === '/pipeline') return 'pipeline';
   if (pathname === '/organizations') return 'organizations';
   if (pathname === '/users') return 'users';
@@ -1390,6 +1591,10 @@ function normalizeRoute(pathname) {
 function routePath(route, id) {
   if (route === 'dashboard') return '/';
   if (route === 'system') return '/system';
+  if (route === 'diagnostics') return '/diagnostics';
+  if (route === 'about') return '/about';
+  if (route === 'quality') return '/quality';
+  if (route === 'first-start') return '/first-start';
   if (route === 'pipeline') return '/pipeline';
   if (route === 'prospect-new') return '/prospects/new';
   if (route === 'prospect-import') return '/prospects/import';
@@ -1404,6 +1609,10 @@ function routeTitle(route) {
   return {
     dashboard: 'Dashboard',
     system: 'System',
+    diagnostics: 'Diagnostics',
+    about: 'About',
+    quality: 'Quality Report',
+    'first-start': 'Premier demarrage',
     pipeline: 'Pipeline',
     organizations: 'Organisations',
     users: 'Utilisateurs',

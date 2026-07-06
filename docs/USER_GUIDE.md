@@ -23,4 +23,25 @@ Use public enrichment only for public pages. VISITOR-OS must not bypass login, c
 ## Pipeline
 
 Use `/pipeline` to move prospects through commercial stages and keep conversion metrics current.
+# Sprint 15 - Validation production
+
+## Pages ajoutees
+
+- `/first-start` : assistant premier demarrage et projet demo.
+- `/quality` : rapport qualite, nettoyage et backup.
+- `/diagnostics` : etat technique de la plateforme.
+- `/about` : version, commit, Railway, Node et licence.
+
+## Projet demo
+
+Le projet demo permet de tester VISITOR-OS sans importer de vraies donnees.
+
+Identifiants :
+
+- email : `demo@visitor-os.app`
+- mot de passe : `demo123`
+
+## Import CSV
+
+La page import propose une analyse avant import pour detecter les erreurs courantes.
 

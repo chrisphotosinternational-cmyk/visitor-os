@@ -32,6 +32,7 @@ The first working MVP is available:
 - External SaaS deployment guidance for Render/Railway with managed PostgreSQL.
 - Production readiness layer with performance indexes, cache, queue, monitoring and optional file logs.
 - Release Candidate 1 packaging with audits, `/system`, installation guides, backup guides and QA checklist.
+- Production validation layer with first-start onboarding, demo campaign, diagnostics, Quality Report, import intelligence, cleanup assistant and full backup export.
 
 ## Release Candidate 1
 
@@ -49,6 +50,20 @@ RC1 focuses on stability rather than new business functionality.
 - Release notes: `docs/RELEASE_NOTES_v1.0.0-RC1.md`
 
 The admin `/system` route displays API health, database state, cache, queue, logs, uptime and raw metrics.
+
+## Production Validation
+
+Sprint 15 adds operational validation pages:
+
+- `/first-start` for onboarding and demo data.
+- `/diagnostics` for database, queue, cache, OpenTelemetry, Railway and response time checks.
+- `/quality` for CRM quality, cleanup preview/apply and full backup export.
+- `/about` for version, commit, build date, Railway, Node, PostgreSQL, licence and documentation.
+
+Demo account:
+
+- email: `demo@visitor-os.app`
+- password: `demo123`
 
 ## Planned Modules
 
