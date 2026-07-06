@@ -6,6 +6,7 @@
     "watchPatterns": [
       "/backend/**",
       "/configs/**",
+      "/railpack.json",
       "/railway.json",
       "/package.json"
     ]
