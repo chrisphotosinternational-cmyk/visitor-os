@@ -203,7 +203,11 @@ function registerFileLogging(app: FastifyInstance, config: AppConfig): void {
       responseTimeMs: Math.round(reply.elapsedTime)
     });
 
-    if (request.url.startsWith('/admin-api') || request.url.startsWith('/api/admin')) {
+    if (
+      request.url.startsWith('/admin-api') ||
+      request.url.startsWith('/api/admin') ||
+      request.url.startsWith('/chat/sessions')
+    ) {
       void writeFileLog(fileLogs, 'audit', {
         method: request.method,
         url: request.url,
@@ -223,7 +227,9 @@ function registerAuditTrail(
   app.addHook('onResponse', (request, reply, done) => {
     const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
     const isAdminRoute =
-      request.url.startsWith('/admin-api') || request.url.startsWith('/api/admin');
+      request.url.startsWith('/admin-api') ||
+      request.url.startsWith('/api/admin') ||
+      request.url.startsWith('/chat/sessions');
 
     if (isMutation && isAdminRoute && reply.statusCode < 400) {
       const action = actionFromRequest(request);

@@ -2,6 +2,17 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 16 - AI CRM Chatbot
+
+- Added AI CRM chatbot with read-only natural language access to prospects, pipeline, follow-ups, AI analysis and CRM action lists.
+- Added chat sessions and chat messages persistence with organization isolation.
+- Added rule-based fallback mode that works without an external AI key.
+- Added citations in chatbot answers: prospect, score, status, city, last action and source.
+- Added CSV export for chatbot result lists.
+- Added admin page `/chat` with history, quick suggestions and prospect result cards.
+- Added refusal behavior for destructive or unauthorized requests.
+- Added chatbot documentation in `docs/AI_CHATBOT.md`.
+
 ## Sprint 15 - Production Validation & First Real Campaign
 
 - Added first-start onboarding status and demo project creation.

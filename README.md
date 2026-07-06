@@ -33,6 +33,7 @@ The first working MVP is available:
 - Production readiness layer with performance indexes, cache, queue, monitoring and optional file logs.
 - Release Candidate 1 packaging with audits, `/system`, installation guides, backup guides and QA checklist.
 - Production validation layer with first-start onboarding, demo campaign, diagnostics, Quality Report, import intelligence, cleanup assistant and full backup export.
+- AI CRM chatbot with read-only natural language access to prospects, follow-ups, pipeline and action lists.
 
 ## Release Candidate 1
 
@@ -64,6 +65,14 @@ Demo account:
 
 - email: `demo@visitor-os.app`
 - password: `demo123`
+
+## AI CRM Chatbot
+
+The admin `/chat` route lets an authenticated user ask CRM questions in natural language.
+
+The chatbot can read prospects, follow-ups, pipeline metrics, AI analysis and enrichment-derived signals. It cites the data used in each answer and can export result lists as CSV.
+
+The chatbot does not send messages, delete records or modify CRM data automatically. When no external AI provider is configured, it uses a deterministic rule-based fallback.
 
 ## Planned Modules
 

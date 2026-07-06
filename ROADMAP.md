@@ -1,6 +1,15 @@
 # Roadmap
 
-## Current Development - Sprint 15
+## Current Development - Sprint 16
+
+- AI CRM chatbot
+- Natural language CRM questions
+- Read-only pipeline, relance, scoring and opportunity analysis
+- Rule-based fallback without external AI provider
+- Citations and CSV export for chatbot answers
+- Admin `/chat` page
+
+## Previous Development - Sprint 15
 
 - Production validation with first real campaign workflow
 - Demo organization and demo admin account

@@ -92,6 +92,18 @@ createApp({
       qualityReport: null,
       cleanupPreview: null,
       importIntelligence: null,
+      chatSessions: [],
+      selectedChatSession: null,
+      chatMessages: [],
+      chatInput: '',
+      chatSuggestions: [
+        'Quels sont les 20 meilleurs prospects à contacter aujourd’hui ?',
+        'Qui dois-je relancer cette semaine ?',
+        'Quels prospects sont intéressés mais non signés ?',
+        'Quels profils MYM / OnlyFans sont prioritaires ?',
+        'Résume-moi l’état du pipeline.'
+      ],
+      chatLastCsv: '',
       draggedProspectId: '',
       loading: false,
       error: '',
@@ -200,7 +212,8 @@ createApp({
           this.loadPipeline(),
           this.loadSettings(),
           this.loadOnboardingStatus(),
-          this.loadQualityReport()
+          this.loadQualityReport(),
+          this.loadChatSessions()
         ]);
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
@@ -860,6 +873,55 @@ createApp({
       link.click();
       URL.revokeObjectURL(link.href);
     },
+    async loadChatSessions() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/chat/sessions', { authenticated: true });
+      if (!response.ok) return;
+      this.chatSessions = (await response.json()).sessions;
+    },
+    async createChatSession() {
+      const response = await this.apiRequest('/chat/sessions', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ title: 'Assistant CRM' })
+      });
+      if (!response.ok) throw new Error('Creation conversation impossible.');
+      const session = (await response.json()).session;
+      this.selectedChatSession = session;
+      this.chatMessages = [];
+      await this.loadChatSessions();
+    },
+    async openChatSession(session) {
+      const response = await this.apiRequest('/chat/sessions/' + session.id, { authenticated: true });
+      if (!response.ok) throw new Error('Chargement conversation impossible.');
+      const data = await response.json();
+      this.selectedChatSession = data.session;
+      this.chatMessages = data.messages;
+      this.chatLastCsv = [...this.chatMessages].reverse().find((message) => message.result_csv)?.result_csv || '';
+    },
+    async sendChatMessage(content = '') {
+      const message = (content || this.chatInput).trim();
+      if (!message) return;
+      if (!this.selectedChatSession) await this.createChatSession();
+      this.chatInput = '';
+      const response = await this.apiRequest('/chat/sessions/' + this.selectedChatSession.id + '/messages', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ content: message })
+      });
+      if (!response.ok) throw new Error('Question impossible a traiter.');
+      const data = await response.json();
+      this.chatMessages.push(data.userMessage, data.assistantMessage);
+      this.chatLastCsv = data.answer.csv || '';
+      await this.loadChatSessions();
+    },
+    exportChatCsv() {
+      if (!this.chatLastCsv) return;
+      downloadCsv(this.chatLastCsv, 'visitor-os-chat-result.csv');
+    },
+    openProspectFromChat(prospectId) {
+      this.navigate('prospect-detail', prospectId);
+    },
     navigate(route) {
       this.route = route;
       const path = routePath(route, arguments[1]);
@@ -868,6 +930,7 @@ createApp({
       if (route === 'about') void this.loadAbout();
       if (route === 'quality') void this.loadQualityReport();
       if (route === 'first-start') void this.loadOnboardingStatus();
+      if (route === 'chat') void this.loadChatSessions();
     },
     syncRouteFromLocation() {
       this.route = normalizeRoute(window.location.pathname);
@@ -949,6 +1012,7 @@ createApp({
           <button :class="['nav-item', { active: route === 'users' }]" :aria-current="route === 'users' ? 'page' : null" type="button" @click="navigate('users')">Utilisateurs</button>
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" :aria-current="route.startsWith('prospect') ? 'page' : null" type="button" @click="navigate('prospects')">Prospects</button>
           <button :class="['nav-item', { active: route === 'pipeline' }]" :aria-current="route === 'pipeline' ? 'page' : null" type="button" @click="navigate('pipeline')">Pipeline</button>
+          <button :class="['nav-item', { active: route === 'chat' }]" :aria-current="route === 'chat' ? 'page' : null" type="button" @click="navigate('chat')">Chat IA</button>
           <button :class="['nav-item', { active: route === 'enrichments' }]" :aria-current="route === 'enrichments' ? 'page' : null" type="button" @click="navigate('enrichments')">Enrichments</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" :aria-current="route === 'follow-ups' ? 'page' : null" type="button" @click="navigate('follow-ups')">Relances</button>
           <button :class="['nav-item', { active: route.startsWith('message-template') }]" :aria-current="route.startsWith('message-template') ? 'page' : null" type="button" @click="navigate('message-templates')">Messages</button>
@@ -1497,6 +1561,49 @@ createApp({
           </div>
         </section>
 
+        <section v-if="route === 'chat'" class="panel">
+          <div class="panel-header">
+            <h2>Chat IA CRM</h2>
+            <div class="inline-actions">
+              <button type="button" @click="createChatSession">Nouvelle conversation</button>
+              <button type="button" :disabled="!chatLastCsv" @click="exportChatCsv">Exporter resultat CSV</button>
+            </div>
+          </div>
+          <div class="chat-layout">
+            <aside class="chat-history" aria-label="Historique conversations">
+              <button v-for="session in chatSessions" :key="session.id" type="button" :class="{ active: selectedChatSession?.id === session.id }" @click="openChatSession(session)">
+                <strong>{{ session.title }}</strong>
+                <small>{{ new Date(session.updated_at).toLocaleString('fr-FR') }}</small>
+              </button>
+              <p v-if="chatSessions.length === 0" class="muted">Aucune conversation.</p>
+            </aside>
+            <div class="chat-main">
+              <div class="chat-suggestions">
+                <button v-for="suggestion in chatSuggestions" :key="suggestion" type="button" @click="sendChatMessage(suggestion)">{{ suggestion }}</button>
+              </div>
+              <div class="chat-messages" aria-live="polite">
+                <article v-for="message in chatMessages" :key="message.id" :class="['chat-message', message.role]">
+                  <strong>{{ message.role === 'user' ? 'Vous' : 'VISITOR-OS' }}</strong>
+                  <p>{{ message.content }}</p>
+                  <div v-if="message.citations?.length" class="chat-citations">
+                    <span v-for="citation in message.citations.slice(0, 8)" :key="citation.source + citation.prospectId" class="badge">
+                      {{ citation.prospect || citation.status || citation.source }} · {{ citation.score ?? '-' }} · {{ citation.city || '-' }}
+                    </span>
+                  </div>
+                </article>
+                <div v-if="chatMessages.length === 0" class="empty-panel">
+                  <strong>Pose une question sur le CRM.</strong>
+                  <p>Le chat lit les prospects, relances, pipeline, analyses IA et enrichissements. Il ne modifie rien et n'envoie aucun message.</p>
+                </div>
+              </div>
+              <form class="chat-input" @submit.prevent="sendChatMessage()">
+                <input v-model="chatInput" type="text" maxlength="1500" placeholder="Exemple : Quels sont les 20 meilleurs prospects à contacter aujourd'hui ?" />
+                <button type="submit">Envoyer</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
         <section v-if="route === 'diagnostics'" class="panel">
           <div class="panel-header"><h2>Diagnostics</h2><button type="button" @click="loadDiagnostics">Actualiser</button></div>
           <div class="dashboard-grid compact-grid">
@@ -1572,6 +1679,7 @@ function normalizeRoute(pathname) {
   if (pathname === '/about') return 'about';
   if (pathname === '/quality') return 'quality';
   if (pathname === '/first-start') return 'first-start';
+  if (pathname === '/chat') return 'chat';
   if (pathname === '/pipeline') return 'pipeline';
   if (pathname === '/organizations') return 'organizations';
   if (pathname === '/users') return 'users';
@@ -1595,6 +1703,7 @@ function routePath(route, id) {
   if (route === 'about') return '/about';
   if (route === 'quality') return '/quality';
   if (route === 'first-start') return '/first-start';
+  if (route === 'chat') return '/chat';
   if (route === 'pipeline') return '/pipeline';
   if (route === 'prospect-new') return '/prospects/new';
   if (route === 'prospect-import') return '/prospects/import';
@@ -1613,6 +1722,7 @@ function routeTitle(route) {
     about: 'About',
     quality: 'Quality Report',
     'first-start': 'Premier demarrage',
+    chat: 'Chat IA CRM',
     pipeline: 'Pipeline',
     organizations: 'Organisations',
     users: 'Utilisateurs',
@@ -1952,6 +2062,20 @@ td strong, td small { display: block; }
 .activity-list { display: grid; gap: 10px; padding: 18px; }
 .activity-list article { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; border: 1px solid #e6ebf2; border-radius: 8px; padding: 12px; background: #fbfcfe; }
 .activity-list span, .activity-list small { color: #647084; }
+.chat-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 620px; }
+.chat-history { display: grid; align-content: start; gap: 8px; border-right: 1px solid #e6ebf2; padding: 18px; background: #fbfcfe; }
+.chat-history button { justify-content: flex-start; align-items: flex-start; flex-direction: column; border: 1px solid #dfe5ee; color: #172033; background: #fff; text-align: left; }
+.chat-history button.active { border-color: #166a5b; background: #ecfdf5; }
+.chat-history small { color: #647084; font-weight: 500; }
+.chat-main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; }
+.chat-suggestions { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #e6ebf2; padding: 14px 18px; }
+.chat-suggestions button { min-height: 34px; padding: 8px 10px; color: #354157; background: #f8fafc; font-size: 13px; }
+.chat-messages { display: grid; align-content: start; gap: 12px; overflow: auto; padding: 18px; }
+.chat-message { max-width: 880px; border: 1px solid #dfe5ee; border-radius: 8px; padding: 14px; background: #fff; }
+.chat-message.user { justify-self: end; background: #eef6ff; }
+.chat-message p { white-space: pre-wrap; color: #354157; }
+.chat-citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chat-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; border-top: 1px solid #e6ebf2; padding: 14px 18px; background: #fbfcfe; }
 @media (max-width: 1180px) {
   .admin-form, .prospect-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .prospect-form textarea { grid-column: span 3; }
@@ -1973,6 +2097,9 @@ td strong, td small { display: block; }
   .prospect-form textarea { grid-column: span 1; }
   .analysis-grid, .analysis-grid .analysis-main { grid-template-columns: 1fr; grid-column: span 1; }
   .compact-grid, .pipeline-mini, .activity-list article { grid-template-columns: 1fr; }
+  .chat-layout { grid-template-columns: 1fr; }
+  .chat-history { border-right: 0; border-bottom: 1px solid #e6ebf2; }
+  .chat-input { grid-template-columns: 1fr; }
   .inline-actions, .filters, .filters input, .filters select { width: 100%; }
 }
 `;

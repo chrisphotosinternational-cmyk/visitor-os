@@ -23,6 +23,18 @@ Use public enrichment only for public pages. VISITOR-OS must not bypass login, c
 ## Pipeline
 
 Use `/pipeline` to move prospects through commercial stages and keep conversion metrics current.
+
+## Chat IA CRM
+
+Use `/chat` to ask read-only CRM questions in natural language.
+
+Examples:
+
+- Quels sont les meilleurs prospects a contacter aujourd'hui ?
+- Qui dois-je relancer cette semaine ?
+- Resume-moi l'etat du pipeline.
+
+The chatbot cites the prospects and CRM fields used in each answer. It can export a result list as CSV, but it never sends messages and never modifies data automatically.
 # Sprint 15 - Validation production
 
 ## Pages ajoutees
@@ -44,4 +56,3 @@ Identifiants :
 ## Import CSV
 
 La page import propose une analyse avant import pour detecter les erreurs courantes.
-

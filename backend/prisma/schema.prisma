@@ -22,6 +22,8 @@ model Organization {
   crmActivityLog CrmActivityLog[]
   auditTrail AuditTrail[]
   appSettings AppSetting[]
+  aiChatSessions AiChatSession[]
+  aiChatMessages AiChatMessage[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([createdAt])
@@ -45,6 +47,8 @@ model User {
   messageTemplateUsage MessageTemplateUsage[]
   crmActivityLog CrmActivityLog[]
   auditTrail AuditTrail[]
+  aiChatSessions AiChatSession[]
+  aiChatMessages AiChatMessage[]
 
   @@unique([organizationId, email])
   @@index([organizationId, role, status])
@@ -406,4 +410,38 @@ model AppSetting {
   @@unique([organizationId, key])
   @@index([organizationId, key])
   @@map("app_settings")
+}
+
+model AiChatSession {
+  id             String          @id @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  userId         String?         @map("user_id") @db.Uuid
+  title          String          @default("Nouvelle conversation")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime        @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  user           User?           @relation(fields: [userId], references: [id])
+  messages       AiChatMessage[]
+
+  @@index([organizationId, updatedAt])
+  @@map("ai_chat_sessions")
+}
+
+model AiChatMessage {
+  id             String        @id @db.Uuid
+  sessionId      String        @map("session_id") @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  userId         String?       @map("user_id") @db.Uuid
+  role           String
+  content        String
+  intent         String?
+  citations      Json          @default("[]")
+  resultCsv      String?       @map("result_csv")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  session        AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+
+  @@index([sessionId, createdAt])
+  @@map("ai_chat_messages")
 }

@@ -66,3 +66,14 @@ Le backup contient :
 
 Le rapport qualite doit etre consulte avant toute premiere campagne reelle.
 
+## Chat IA CRM
+
+La page `/chat` donne un assistant CRM en lecture seule.
+
+Points de controle administrateur :
+
+- les routes sont protegees par JWT ;
+- les reponses respectent l'organisation de l'utilisateur ;
+- les actions destructives sont refusees ;
+- les questions sont historisees dans les tables de chat et le journal d'activite CRM ;
+- le mode fallback fonctionne sans cle IA externe.

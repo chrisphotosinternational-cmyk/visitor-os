@@ -53,6 +53,7 @@ import {
   type RuntimeSettingsUpdate
 } from '../settings/settings-service.js';
 import { ProductionValidationService } from '../production-validation/production-validation-service.js';
+import { AIChatService } from '../ai-chat/ai-chat-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -303,6 +304,15 @@ const optionalOrganizationQuerySchema = z.object({
   organizationId: z.string().uuid().optional()
 });
 
+const chatSessionPayloadSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  title: z.string().min(1).max(120).optional()
+});
+
+const chatMessagePayloadSchema = z.object({
+  content: z.string().min(1).max(1500)
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -325,6 +335,7 @@ export function registerAdminManagementRoutes(
   const enrichments = new PublicEnrichmentService(database);
   const pipeline = new SalesPipelineService(database);
   const settings = new SettingsService(database);
+  const aiChat = new AIChatService(database);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
   const productionValidation = new ProductionValidationService({
@@ -461,6 +472,62 @@ export function registerAdminManagementRoutes(
     reply.header('Content-Disposition', `attachment; filename="${backup.filename}"`);
 
     return backup.content;
+  });
+
+  app.post('/chat/sessions', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const body = chatSessionPayloadSchema.parse(request.body ?? {});
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+
+    return {
+      session: await aiChat.createSession({
+        organizationId,
+        userId: context.user.id,
+        ...(body.title ? { title: body.title } : {})
+      })
+    };
+  });
+
+  app.get('/chat/sessions', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return { sessions: await aiChat.listSessions(organizationId) };
+  });
+
+  app.get('/chat/sessions/:sessionId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    const session = await aiChat.getSession(params.sessionId, organizationId);
+
+    if (!session) throw notFound('Chat session not found', 'CHAT_SESSION_NOT_FOUND');
+
+    return session;
+  });
+
+  app.post('/chat/sessions/:sessionId/messages', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'prospects:read');
+    const params = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    const body = chatMessagePayloadSchema.parse(request.body);
+    const answer = await aiChat.sendMessage({
+      sessionId: params.sessionId,
+      organizationId,
+      userId: context.user.id,
+      content: body.content
+    });
+
+    if (!answer) throw notFound('Chat session not found', 'CHAT_SESSION_NOT_FOUND');
+
+    return answer;
   });
 
   app.get('/admin-api/feature-flags', async (request) => {
