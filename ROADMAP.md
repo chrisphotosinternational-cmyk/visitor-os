@@ -13,6 +13,16 @@
 - Feature flags and central runtime configuration
 - CI/CD checks for lint, tests, build, migration checks, coverage and security audit
 - Backup, performance and security documentation
+- Beta validation with dirty CSV datasets up to 100,000 rows
+- Import hardening for rejected rows, capped previews and deduplication normalization
+
+## Before v1.0 RC
+
+- Move large imports to queue jobs
+- Add streaming CSV parsing
+- Add import progress API
+- Add large export jobs
+- Increase backend coverage toward the target threshold
 
 ## Current Development - v0.12.0-beta-prep
 

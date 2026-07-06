@@ -346,6 +346,78 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('handles dirty CSV rows with rejection counters and capped import preview', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const lines = ['pseudo,email,phone,city,source_url,description,unknown_column'];
+    for (let index = 0; index < 140; index += 1) {
+      lines.push(
+        [
+          `dirty_${index}`,
+          index % 17 === 0 ? 'not-an-email@@' : `dirty_${index}@example.com`,
+          index % 11 === 0 ? '06 xx xx' : `+33 6 00 00 ${String(index).padStart(2, '0')}`,
+          index % 9 === 0 ? '' : 'Albi',
+          `https://dirty.example/${index}`,
+          index % 13 === 0 ? 'x'.repeat(5200) : 'Profil public partiel avec accents éèà',
+          'ignored'
+        ].join(',')
+      );
+    }
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects/import-csv',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { csv: lines.join('\n') }
+    });
+
+    assert.equal(response.statusCode, 200);
+    const payload = response.json() as {
+      import: {
+        rows: number;
+        accepted: number;
+        rejected: number;
+        errors: Array<{ row: number; reason: string }>;
+        prospects: unknown[];
+        previewLimit: number;
+      };
+    };
+    assert.equal(payload.import.rows, 140);
+    assert.ok(payload.import.accepted > 100);
+    assert.ok(payload.import.rejected > 0);
+    assert.equal(payload.import.prospects.length, payload.import.previewLimit);
+    assert.ok(payload.import.errors.some((error) => error.reason === 'invalid_email'));
+    await app.close();
+  });
+
+  it('deduplicates CSV imports by normalized phone, source URL and pseudo city', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const csv = [
+      'pseudo,email,phone,city,source_url,description',
+      'phone_a,phone-a@example.com,+33 6 11 22 33 44,Albi,https://source/phone,Premier contact',
+      'phone_b,,+33611223344,Toulouse,https://source/other,Telephone normalise plus complet',
+      'source_a,source-a@example.com,+33 6 99 99 99 99,Paris, HTTPS://SOURCE/URL ,Source casse differente',
+      'source_b,,+33 6 98 98 98 98,Lyon,https://source/url,Source normalisee',
+      '  MixedCase  ,, , Toulouse ,https://source/pseudo,Premiere ligne pseudo',
+      'mixedcase,, ,toulouse,https://source/pseudo-2,Ligne pseudo ville fusionnee plus complete'
+    ].join('\n');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin-api/prospects/import-csv',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { csv }
+    });
+
+    assert.equal(response.statusCode, 200);
+    const payload = response.json() as {
+      import: { created: number; merged: number; rejected: number };
+    };
+    assert.equal(payload.import.created, 3);
+    assert.equal(payload.import.merged, 3);
+    assert.equal(payload.import.rejected, 0);
+    await app.close();
+  });
+
   it('filters and exports prospects as CSV', async () => {
     const app = await createAuthTestApp();
     const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
@@ -1057,6 +1129,32 @@ describe('admin authentication and RBAC', () => {
         (item) => item.prospect_id === prospect.id
       )
     );
+    await app.close();
+  });
+
+  it('rejects invalid pipeline stages without changing the prospect', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const prospect = await createTestProspect(app, token, {
+      organizationId: ORG_A,
+      pseudo: 'invalid_stage_creator',
+      city: 'Albi',
+      status: 'to_contact'
+    });
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/prospects/${prospect.id}/pipeline-stage`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { stage: 'not_a_pipeline_stage' }
+    });
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/admin-api/prospects/${prospect.id}`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(moved.statusCode, 400);
+    assert.equal((detail.json() as { prospect: { status: string } }).prospect.status, 'to_contact');
     await app.close();
   });
 
@@ -2130,13 +2228,16 @@ async function createAuthMemoryDatabase(): Promise<Database> {
             row.organization_id === values[0] &&
             ((values[1] &&
               valueToString(row.email).toLowerCase() === valueToString(values[1]).toLowerCase()) ||
-              (values[2] && row.phone === values[2]) ||
-              (values[3] && row.source_url === values[3]) ||
+              (values[2] && normalizedPhone(row.phone) === values[2]) ||
+              (values[3] &&
+                valueToString(row.source_url).trim().toLowerCase() ===
+                  valueToString(values[3]).trim().toLowerCase()) ||
               (values[4] &&
                 values[5] &&
-                valueToString(row.pseudo).toLowerCase() ===
-                  valueToString(values[4]).toLowerCase() &&
-                valueToString(row.city).toLowerCase() === valueToString(values[5]).toLowerCase()))
+                valueToString(row.pseudo).trim().toLowerCase() ===
+                  valueToString(values[4]).trim().toLowerCase() &&
+                valueToString(row.city).trim().toLowerCase() ===
+                  valueToString(values[5]).trim().toLowerCase()))
         );
         return result(optional(duplicate));
       }
@@ -2723,6 +2824,10 @@ function valueToString(value: unknown): string {
   }
 
   return '';
+}
+
+function normalizedPhone(value: unknown): string {
+  return valueToString(value).replace(/[^\d+]/g, '');
 }
 
 function parseJsonArray(value: unknown): unknown[] {

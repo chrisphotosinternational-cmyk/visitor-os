@@ -52,6 +52,7 @@ createApp({
       prospectFilters: { status: '', city: '', scoreLabel: '', platform: '' },
       prospectForm: emptyProspectForm(),
       prospectImportCsv: '',
+      prospectImportResult: null,
       selectedProspect: null,
       contactHistory: [],
       contactChannels: [],
@@ -475,6 +476,7 @@ createApp({
         })
       });
       if (!response.ok) throw new Error('Import CSV impossible.');
+      this.prospectImportResult = (await response.json()).import;
       this.prospectImportCsv = '';
       await Promise.all([this.loadProspects(), this.refreshDashboard()]);
       this.navigate('prospects');
@@ -1080,6 +1082,10 @@ createApp({
             <select v-model="prospectFilters.scoreLabel" @change="loadProspects"><option value="">Tous scores</option><option v-for="label in prospectScoreLabels" :key="label" :value="label">{{ label }}</option></select>
             <select v-model="prospectFilters.platform" @change="loadProspects"><option value="">Toutes plateformes</option><option v-for="platform in prospectPlatforms" :key="platform" :value="platform">{{ platform }}</option></select>
           </form>
+          <div v-if="prospectImportResult" class="notice success">
+            Import CSV : {{ prospectImportResult.created }} cree(s), {{ prospectImportResult.merged }} fusionne(s), {{ prospectImportResult.rejected }} rejete(s), {{ prospectImportResult.accepted }} accepte(s).
+            <small v-if="prospectImportResult.errors?.length">Premiere erreur : ligne {{ prospectImportResult.errors[0].row }} - {{ prospectImportResult.errors[0].reason }}</small>
+          </div>
           <div class="table-wrap">
             <table><thead><tr><th>Prospect</th><th>Contact</th><th>Ville</th><th>Statut</th><th>Score</th><th></th></tr></thead>
               <tbody><tr v-for="prospect in prospects" :key="prospect.id">

@@ -143,6 +143,11 @@ export type ImportCsvResult = {
   created: number;
   merged: number;
   rows: number;
+  accepted: number;
+  rejected: number;
+  ignored: number;
+  errors: Array<{ row: number; reason: string }>;
+  previewLimit: number;
   prospects: ProspectRecord[];
 };
 
@@ -518,25 +523,49 @@ export class ProspectRepository {
   }
 
   async importCsv(organizationId: string, csv: string): Promise<ImportCsvResult> {
-    const rows = parseCsv(csv).map((row) => normalizeCsvRow(organizationId, row));
+    const parsedRows = parseCsv(csv);
+    const rows = parsedRows.map((row) => normalizeCsvRow(organizationId, row));
     const prospects: ProspectRecord[] = [];
     let created = 0;
     let merged = 0;
+    let rejected = 0;
+    const errors: Array<{ row: number; reason: string }> = [];
+    const previewLimit = 100;
 
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
+      const validationError = validateImportRow(row);
+      if (validationError) {
+        rejected += 1;
+        if (errors.length < 100) {
+          errors.push({ row: index + 2, reason: validationError });
+        }
+        continue;
+      }
+
       const duplicate = await this.findDuplicate(row);
       if (duplicate) {
         const mergedInput = mergeProspectInputs(duplicate, row);
         const updated = await this.updateCore(duplicate.id, duplicate.organization_id, mergedInput);
-        if (updated) prospects.push(updated);
+        if (updated && prospects.length < previewLimit) prospects.push(updated);
         merged += 1;
       } else {
-        prospects.push(await this.createCore(row));
+        const createdProspect = await this.createCore(row);
+        if (prospects.length < previewLimit) prospects.push(createdProspect);
         created += 1;
       }
     }
 
-    return { created, merged, rows: rows.length, prospects };
+    return {
+      created,
+      merged,
+      rows: parsedRows.length,
+      accepted: created + merged,
+      rejected,
+      ignored: 0,
+      errors,
+      previewLimit,
+      prospects
+    };
   }
 
   async exportCsv(filters: ProspectListFilters = {}): Promise<string> {
@@ -552,9 +581,14 @@ export class ProspectRepository {
       where organization_id = $1
         and (
           ($2::text is not null and lower(email) = lower($2))
-          or ($3::text is not null and phone = $3)
-          or ($4::text is not null and source_url = $4)
-          or ($5::text is not null and $6::text is not null and lower(pseudo) = lower($5) and lower(city) = lower($6))
+          or ($3::text is not null and regexp_replace(phone, '[^0-9+]', '', 'g') = $3)
+          or ($4::text is not null and lower(trim(source_url)) = lower($4))
+          or (
+            $5::text is not null
+            and $6::text is not null
+            and lower(trim(pseudo)) = lower($5)
+            and lower(trim(city)) = lower($6)
+          )
         )
       order by updated_at desc
       limit 1
@@ -562,10 +596,10 @@ export class ProspectRepository {
       [
         input.organizationId,
         emptyToNull(input.email),
-        emptyToNull(input.phone),
-        emptyToNull(input.sourceUrl),
-        emptyToNull(input.pseudo),
-        emptyToNull(input.city)
+        normalizedPhone(input.phone),
+        normalizedText(input.sourceUrl),
+        normalizedText(input.pseudo),
+        normalizedText(input.city)
       ]
     );
 
@@ -821,6 +855,16 @@ function emptyToNull(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizedPhone(value: string | undefined): string | null {
+  const normalized = value?.replace(/[^\d+]/g, '').trim();
+  return normalized ? normalized : null;
+}
+
+function normalizedText(value: string | undefined): string | null {
+  const normalized = value?.trim().replace(/\s+/g, ' ');
+  return normalized ? normalized : null;
+}
+
 function parseCsv(csv: string): Array<Record<string, string>> {
   const rows = csv
     .replace(/^\uFEFF/, '')
@@ -891,6 +935,36 @@ function normalizeCsvRow(organizationId: string, row: Record<string, string>): P
     ...optionalField('notes', first(row, 'notes')),
     ...(status ? { status } : {})
   };
+}
+
+function validateImportRow(row: ProspectInput): string | null {
+  const hasAnyUsefulValue = Boolean(
+    row.firstName ||
+    row.lastName ||
+    row.pseudo ||
+    row.company ||
+    row.email ||
+    row.phone ||
+    row.website ||
+    row.instagram ||
+    row.twitterX ||
+    row.mym ||
+    row.onlyfans ||
+    row.linktree ||
+    row.allmylinks ||
+    row.city ||
+    row.activity ||
+    row.description ||
+    row.sourceUrl
+  );
+
+  if (!hasAnyUsefulValue) return 'empty_row';
+  if (row.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) {
+    return 'invalid_email';
+  }
+  if (row.sourceUrl && row.sourceUrl.length > 2000) return 'source_url_too_long';
+  if (row.description && row.description.length > 5000) return 'description_too_long';
+  return null;
 }
 
 function first(row: Record<string, string>, ...keys: string[]): string | undefined {

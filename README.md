@@ -537,6 +537,26 @@ Production documents:
 - `docs/COVERAGE.md`;
 - `KNOWN_LIMITATIONS.md`.
 
+## Beta Validation
+
+Sprint 13 adds real-data validation datasets and reports for dirty CSV imports.
+
+Datasets:
+
+- `data/test-datasets/prospects_small_dirty.csv`;
+- `data/test-datasets/prospects_medium_dirty.csv`;
+- `data/test-datasets/prospects_large_dirty.csv`;
+- `data/test-datasets/prospects_extreme_dirty.csv`.
+
+Reports:
+
+- `docs/BETA_VALIDATION.md`;
+- `docs/BETA_IMPORT_REPORT.md`;
+- `docs/BETA_SCORING_REPORT.md`;
+- `docs/BETA_DASHBOARD_REPORT.md`.
+
+Large imports are validated for beta robustness, but 50k+ row imports should move to background jobs before broad production usage.
+
 ## Development Rule
 
 VISITOR-OS must stay simple, modular, and maintainable by one person. Avoid unnecessary infrastructure, premature microservices, and business-specific code in the core engine.

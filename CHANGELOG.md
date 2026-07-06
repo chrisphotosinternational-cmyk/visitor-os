@@ -19,6 +19,17 @@ All notable changes to VISITOR-OS will be documented here.
 - Updated deployment, backup, security and performance documentation.
 - Added production readiness documentation for observability, audit trail, feature flags, configuration, CI/CD, coverage, and known limitations.
 
+## Sprint 13 - Beta Validation
+
+- Added dirty prospect CSV datasets with 100, 5,000, 50,000 and 100,000 rows.
+- Hardened CSV import results with accepted, rejected, ignored and error counters.
+- Capped CSV import response previews to 100 prospects.
+- Added rejection for invalid emails and overlong import fields.
+- Improved deduplication normalization for phones, source URLs, pseudo and city.
+- Added admin import summary feedback.
+- Added beta validation reports for import, scoring and dashboard behavior.
+- Added backend tests for dirty imports, deduplication and invalid pipeline stage handling.
+
 ## v0.15.0-auth-production
 
 - Sprint 3 authentication validated in production.
