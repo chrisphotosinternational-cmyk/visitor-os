@@ -6,7 +6,7 @@ The first integration target is Moto CMS 4. Moto CMS remains a showcase website 
 
 ## Current Status
 
-Development version: `1.0.0-beta`.
+Development version: `v1.0.0-RC1`.
 
 The first working MVP is available:
 
@@ -31,6 +31,24 @@ The first working MVP is available:
 - Production deployment preparation with external SaaS guidance, health checks and backup/restore runbooks.
 - External SaaS deployment guidance for Render/Railway with managed PostgreSQL.
 - Production readiness layer with performance indexes, cache, queue, monitoring and optional file logs.
+- Release Candidate 1 packaging with audits, `/system`, installation guides, backup guides and QA checklist.
+
+## Release Candidate 1
+
+RC1 focuses on stability rather than new business functionality.
+
+- Project audit: `PROJECT_AUDIT.md`
+- Security audit: `SECURITY_AUDIT.md`
+- UX audit: `UX_AUDIT.md`
+- Admin guide: `docs/ADMIN_GUIDE.md`
+- User guide: `docs/USER_GUIDE.md`
+- Installation guide: `docs/INSTALLATION_GUIDE.md`
+- Backup guide: `docs/BACKUP_GUIDE.md`
+- Troubleshooting guide: `docs/TROUBLESHOOTING_GUIDE.md`
+- QA checklist: `docs/QA_CHECKLIST_RC1.md`
+- Release notes: `docs/RELEASE_NOTES_v1.0.0-RC1.md`
+
+The admin `/system` route displays API health, database state, cache, queue, logs, uptime and raw metrics.
 
 ## Planned Modules
 
@@ -506,12 +524,12 @@ Runtime capabilities:
 - audit trail foundation for important admin and CRM actions;
 - feature flags for AI, enrichment, forecast, advanced dashboard and exports;
 - central runtime configuration for scoring, pipeline, forecast, timeouts, rate limits, batch size and cache TTL;
-- GitHub Actions CI/CD for lint, tests, coverage, build, migration checks, security audit, packaging and releases.
+- CI/CD documentation is prepared; the workflow file is intentionally not part of RC1 until the GitHub token has `workflow` scope.
 
 Configuration:
 
 ```text
-APP_VERSION=1.0.0-beta
+APP_VERSION=v1.0.0-RC1
 CACHE_ENABLED=true
 CACHE_TTL_MS=30000
 FILE_LOGS_ENABLED=false

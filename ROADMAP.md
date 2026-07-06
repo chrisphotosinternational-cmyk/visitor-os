@@ -1,6 +1,18 @@
 # Roadmap
 
-## Current Development - 1.0.0-beta
+## Current Development - v1.0.0-RC1
+
+- First Release Candidate
+- Project audit
+- Security audit
+- UX audit
+- Admin `/system` monitoring page
+- RC1 documentation pack
+- macOS and Windows installation helpers
+- Complete export/import helper scripts
+- Final QA checklist before production release
+
+## Previous Development - 1.0.0-beta
 
 - Production readiness
 - PostgreSQL performance indexes

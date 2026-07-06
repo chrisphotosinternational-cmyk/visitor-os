@@ -2,6 +2,17 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## v1.0.0-RC1 - Sprint 14
+
+- Promoted VISITOR-OS from beta hardening to first Release Candidate.
+- Added project, security and UX audits.
+- Added admin `/system` page for API, DB, cache, queue, logs, uptime, version and metrics.
+- Improved admin keyboard accessibility with visible focus and current navigation state.
+- Updated application version metadata to `v1.0.0-RC1`.
+- Added administrator, user, installation, backup, troubleshooting, FAQ and QA checklist documentation.
+- Added macOS and Windows installation helpers.
+- Added complete export/import helper scripts for controlled backup workflows.
+
 ## 1.0.0-beta - Sprint 12
 
 - Added production readiness performance report.

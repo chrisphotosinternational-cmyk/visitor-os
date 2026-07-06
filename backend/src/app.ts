@@ -83,7 +83,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   app.get('/health', () => ({
     status: 'ok',
     app: dependencies.config.app.name,
-    version: dependencies.config.app.version ?? '1.0.0-beta',
+    version: dependencies.config.app.version ?? 'v1.0.0-RC1',
     environment: dependencies.config.app.environment,
     database:
       dependencies.readiness?.database ??
@@ -103,7 +103,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   app.get('/live', () => ({
     status: 'alive',
     app: dependencies.config.app.name,
-    version: dependencies.config.app.version ?? '1.0.0-beta',
+    version: dependencies.config.app.version ?? 'v1.0.0-RC1',
     environment: dependencies.config.app.environment
   }));
 
@@ -111,7 +111,7 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     return {
       status: 'ready',
       app: dependencies.config.app.name,
-      version: dependencies.config.app.version ?? '1.0.0-beta',
+      version: dependencies.config.app.version ?? 'v1.0.0-RC1',
       database: dependencies.readiness?.database ?? 'ok'
     };
   });

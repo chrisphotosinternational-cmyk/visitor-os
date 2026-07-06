@@ -101,7 +101,7 @@ describe('createApp', () => {
 
     assert.equal(body.status, 'ok');
     assert.equal(body.app, 'VISITOR-OS');
-    assert.equal(body.version, '1.0.0-beta');
+    assert.equal(body.version, 'v1.0.0-RC1');
     assert.equal(body.environment, 'test');
     assert.equal(body.database, 'ok');
     assert.equal(body.cache.enabled, true);

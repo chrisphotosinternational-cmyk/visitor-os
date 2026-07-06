@@ -7,7 +7,7 @@ const DEV_SESSION_SECRET = 'dev-only-session-secret-change-before-production';
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   APP_NAME: z.string().min(1).default('VISITOR-OS'),
-  APP_VERSION: z.string().min(1).default('1.0.0-beta'),
+  APP_VERSION: z.string().min(1).default('v1.0.0-RC1'),
   HOST: z.string().min(1).default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().max(65535).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),

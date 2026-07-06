@@ -35,6 +35,7 @@ createApp({
       dashboard: null,
       health: null,
       ready: null,
+      systemMetrics: '',
       organizations: [],
       organizationStatuses: [],
       organizationSearch: '',
@@ -201,12 +202,14 @@ createApp({
       }
     },
     async refreshTechnicalStatus() {
-      const [health, ready] = await Promise.allSettled([
+      const [health, ready, metrics] = await Promise.allSettled([
         this.apiRequest('/health'),
-        this.apiRequest('/ready')
+        this.apiRequest('/ready'),
+        this.apiRequest('/metrics')
       ]);
       this.health = await responseJsonOrFallback(health, { status: 'unreachable' });
       this.ready = await responseJsonOrFallback(ready, { status: 'unreachable', database: 'unknown' });
+      this.systemMetrics = await responseTextOrFallback(metrics, 'metrics_unavailable 1');
     },
     async loadOrganizations() {
       if (!this.token) return;
@@ -855,15 +858,16 @@ createApp({
       <aside class="sidebar" aria-label="Navigation principale">
         <div class="sidebar-brand">VISITOR-OS</div>
         <nav>
-          <button :class="['nav-item', { active: route === 'dashboard' }]" type="button" @click="navigate('dashboard')">Dashboard</button>
-          <button :class="['nav-item', { active: route === 'organizations' }]" type="button" @click="navigate('organizations')">Organisations</button>
-          <button :class="['nav-item', { active: route === 'users' }]" type="button" @click="navigate('users')">Utilisateurs</button>
-          <button :class="['nav-item', { active: route.startsWith('prospect') }]" type="button" @click="navigate('prospects')">Prospects</button>
-          <button :class="['nav-item', { active: route === 'pipeline' }]" type="button" @click="navigate('pipeline')">Pipeline</button>
-          <button :class="['nav-item', { active: route === 'enrichments' }]" type="button" @click="navigate('enrichments')">Enrichments</button>
-          <button :class="['nav-item', { active: route === 'follow-ups' }]" type="button" @click="navigate('follow-ups')">Relances</button>
-          <button :class="['nav-item', { active: route.startsWith('message-template') }]" type="button" @click="navigate('message-templates')">Messages</button>
-          <button :class="['nav-item', { active: route === 'settings' }]" type="button" @click="navigate('settings')">Parametres</button>
+          <button :class="['nav-item', { active: route === 'dashboard' }]" :aria-current="route === 'dashboard' ? 'page' : null" type="button" @click="navigate('dashboard')">Dashboard</button>
+          <button :class="['nav-item', { active: route === 'organizations' }]" :aria-current="route === 'organizations' ? 'page' : null" type="button" @click="navigate('organizations')">Organisations</button>
+          <button :class="['nav-item', { active: route === 'users' }]" :aria-current="route === 'users' ? 'page' : null" type="button" @click="navigate('users')">Utilisateurs</button>
+          <button :class="['nav-item', { active: route.startsWith('prospect') }]" :aria-current="route.startsWith('prospect') ? 'page' : null" type="button" @click="navigate('prospects')">Prospects</button>
+          <button :class="['nav-item', { active: route === 'pipeline' }]" :aria-current="route === 'pipeline' ? 'page' : null" type="button" @click="navigate('pipeline')">Pipeline</button>
+          <button :class="['nav-item', { active: route === 'enrichments' }]" :aria-current="route === 'enrichments' ? 'page' : null" type="button" @click="navigate('enrichments')">Enrichments</button>
+          <button :class="['nav-item', { active: route === 'follow-ups' }]" :aria-current="route === 'follow-ups' ? 'page' : null" type="button" @click="navigate('follow-ups')">Relances</button>
+          <button :class="['nav-item', { active: route.startsWith('message-template') }]" :aria-current="route.startsWith('message-template') ? 'page' : null" type="button" @click="navigate('message-templates')">Messages</button>
+          <button :class="['nav-item', { active: route === 'system' }]" :aria-current="route === 'system' ? 'page' : null" type="button" @click="navigate('system')">System</button>
+          <button :class="['nav-item', { active: route === 'settings' }]" :aria-current="route === 'settings' ? 'page' : null" type="button" @click="navigate('settings')">Parametres</button>
         </nav>
       </aside>
       <main class="content">
@@ -1343,11 +1347,30 @@ createApp({
             </article>
           </div>
         </section>
+
+        <section v-if="route === 'system'" class="panel">
+          <div class="panel-header">
+            <h2>System</h2>
+            <button type="button" @click="refreshTechnicalStatus">Actualiser</button>
+          </div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Version</span><strong>{{ health?.version || 'unknown' }}</strong><small>{{ health?.environment || 'environment' }}</small></article>
+            <article class="metric"><span>API</span><strong>{{ health?.status || 'unknown' }}</strong><small>/health</small></article>
+            <article class="metric"><span>DB</span><strong>{{ ready?.database || health?.database || 'unknown' }}</strong><small>/ready</small></article>
+            <article class="metric"><span>Uptime</span><strong>{{ health?.uptime ?? 0 }}s</strong><small>Backend</small></article>
+            <article class="metric"><span>Cache</span><strong>{{ health?.cache?.enabled ? 'enabled' : 'disabled' }}</strong><small>{{ health?.cache?.entries ?? 0 }} entree(s)</small></article>
+            <article class="metric"><span>Queue</span><strong>{{ health?.queue?.pending ?? 0 }}</strong><small>{{ health?.queue?.running ?? 0 }} running</small></article>
+            <article class="metric"><span>Logs</span><strong>{{ health?.disk?.logs || 'unknown' }}</strong><small>application / error / audit</small></article>
+            <article class="metric"><span>OpenTelemetry</span><strong>{{ health?.openTelemetry?.enabled ? 'enabled' : 'disabled' }}</strong><small>{{ health?.openTelemetry?.serviceName || '-' }}</small></article>
+          </div>
+          <pre class="metrics-output" tabindex="0">{{ systemMetrics }}</pre>
+        </section>
       </main>
     </section>\`
 }).mount('#app');
 
 function normalizeRoute(pathname) {
+  if (pathname === '/system') return 'system';
   if (pathname === '/pipeline') return 'pipeline';
   if (pathname === '/organizations') return 'organizations';
   if (pathname === '/users') return 'users';
@@ -1366,6 +1389,7 @@ function normalizeRoute(pathname) {
 
 function routePath(route, id) {
   if (route === 'dashboard') return '/';
+  if (route === 'system') return '/system';
   if (route === 'pipeline') return '/pipeline';
   if (route === 'prospect-new') return '/prospects/new';
   if (route === 'prospect-import') return '/prospects/import';
@@ -1379,6 +1403,7 @@ function routePath(route, id) {
 function routeTitle(route) {
   return {
     dashboard: 'Dashboard',
+    system: 'System',
     pipeline: 'Pipeline',
     organizations: 'Organisations',
     users: 'Utilisateurs',
@@ -1518,6 +1543,11 @@ async function responseJsonOrFallback(result, fallback) {
   return result.value.json();
 }
 
+async function responseTextOrFallback(result, fallback) {
+  if (result.status !== 'fulfilled' || !result.value.ok) return fallback;
+  return result.value.text();
+}
+
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -1555,6 +1585,10 @@ button {
 }
 button:hover { background: #10574b; }
 button:disabled { color: #8b95a7; background: #e6eaf0; cursor: not-allowed; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid #f5b942;
+  outline-offset: 3px;
+}
 .login-shell { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: #f5f7fa; }
 .login-panel {
   display: grid;
@@ -1637,6 +1671,20 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(22, 106, 91,
 .settings-grid { display: grid; grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr); gap: 18px; padding: 18px; }
 .settings-grid article { display: grid; align-content: start; gap: 12px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
 .settings-grid textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+.metrics-output {
+  overflow: auto;
+  max-height: 360px;
+  margin: 18px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  padding: 14px;
+  color: #172033;
+  background: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 .analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px; border-bottom: 1px solid #e6ebf2; }
 .analysis-grid article { display: grid; gap: 8px; border: 1px solid #e6ebf2; border-radius: 8px; padding: 14px; background: #fbfcfe; }
 .analysis-grid .analysis-main { grid-column: span 2; }
