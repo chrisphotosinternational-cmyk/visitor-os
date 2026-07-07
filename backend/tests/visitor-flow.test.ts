@@ -311,6 +311,10 @@ async function createMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('from knowledge_items k')) {
+        return result([]);
+      }
+
       if (sql.includes('insert into chatbot_unanswered_questions')) {
         return result([
           {

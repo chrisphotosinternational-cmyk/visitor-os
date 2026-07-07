@@ -36,6 +36,7 @@ The first working MVP is available:
 - AI CRM chatbot with read-only natural language access to prospects, follow-ups, pipeline and action lists.
 - Chatbot Multi-sites module for public widget conversations, site-specific business configuration, lead acquisition and CRM handoff.
 - Moto CMS widget integration with public script generation, allowed domains, site Q/A import, unanswered questions and lead capture settings.
+- Knowledge Engine administration for chatbot intentions, structured knowledge, suggestions, flows, personality and goals.
 
 ## Release Candidate 1
 
@@ -89,6 +90,21 @@ Documentation: `docs/CHATBOT_MULTI_SITES.md`.
 Moto CMS installation guide: `docs/MOTO_CMS_WIDGET_INSTALL.md`.
 
 Q/A CSV example: `examples/site_qa_import.csv`.
+
+## Knowledge Engine
+
+The Knowledge Engine adds an administration layer above the public multi-site chatbot.
+
+It manages per-site intentions, structured knowledge items, unanswered-question suggestions, simple conversation flows, chatbot personality and business goals. The widget now prioritizes active `knowledge_items`, then falls back to legacy site Q/A and the existing Decision Engine.
+
+The CRM, prospects, pipeline, enrichment, AI CRM chatbot and dashboards remain intact.
+
+Documentation:
+
+- `docs/KNOWLEDGE_ENGINE.md`
+- `docs/CHATBOT_ADMIN.md`
+- `docs/KNOWLEDGE_SUGGESTIONS.md`
+- `docs/CONVERSATION_FLOWS.md`
 
 ## Planned Modules
 

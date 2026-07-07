@@ -1,6 +1,18 @@
 # Roadmap
 
-## Current Development - Sprint 17
+## Current Development - Sprint 18
+
+- Knowledge Engine administration
+- `/chatbots` admin workspace
+- Intentions by site
+- Structured knowledge items
+- Improved unknown-question workflow
+- Knowledge suggestions
+- Conversation flows foundation
+- Chatbot personality and goals
+- Widget response order: Knowledge Engine, legacy Q/A, fallback
+
+## Previous Development - Sprint 17
 
 - Chatbot production hardening for Moto CMS 4
 - Public widget script route `/widget/:publicKey.js`

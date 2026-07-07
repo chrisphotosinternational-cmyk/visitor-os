@@ -8,6 +8,7 @@ import { CrmRepository } from '../crm/crm-repository.js';
 import type { NotificationEngine } from '../notifications/notification-engine.js';
 import { MultiSiteChatbotService } from '../chatbot-multisite/chatbot-multisite-service.js';
 import { ChatbotProductionService } from '../chatbot-production/chatbot-production-service.js';
+import { KnowledgeEngineService } from '../knowledge-engine/knowledge-engine-service.js';
 import { publicWidgetJs } from '../../core/static/public-widget-assets.js';
 
 const widgetSiteReferenceSchema = z
@@ -50,13 +51,15 @@ export function registerWidgetRoutes(
   const prospects = new ProspectRepository(database);
   const crm = new CrmRepository(database);
   const production = new ChatbotProductionService(database);
+  const knowledgeEngine = new KnowledgeEngineService(database);
   const chatbot = new MultiSiteChatbotService({
     conversations,
     prospects,
     crm,
     decisionEngine,
     ...(notificationEngine ? { notificationEngine } : {}),
-    production
+    production,
+    knowledgeEngine
   });
 
   app.get('/widget/:siteKey.js', (request, reply) => {

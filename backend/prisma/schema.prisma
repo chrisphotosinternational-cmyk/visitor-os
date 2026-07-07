@@ -26,6 +26,12 @@ model Organization {
   aiChatMessages AiChatMessage[]
   siteQaItems SiteQaItem[]
   chatbotUnansweredQuestions ChatbotUnansweredQuestion[]
+  chatbotIntents ChatbotIntent[]
+  knowledgeItems KnowledgeItem[]
+  conversationFlows ConversationFlow[]
+  chatbotPersonality ChatbotPersonality[]
+  chatbotGoals ChatbotGoal[]
+  knowledgeSuggestions KnowledgeSuggestion[]
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([createdAt])
@@ -478,6 +484,12 @@ model ChatbotUnansweredQuestion {
   suggestedAnswer String?      @map("suggested_answer")
   category        String?
   tags            String[]     @default([])
+  detectedIntent  String?      @map("detected_intent")
+  occurrenceCount Int          @default(1) @map("occurrence_count")
+  lastSeenAt      DateTime?    @map("last_seen_at") @db.Timestamptz
+  confidenceScore Decimal?     @map("confidence_score")
+  suggestedKnowledgeItem String? @map("suggested_knowledge_item") @db.Uuid
+  actionStatus    String       @default("pending") @map("action_status")
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz
   organization    Organization @relation(fields: [organizationId], references: [id])
@@ -485,4 +497,148 @@ model ChatbotUnansweredQuestion {
   @@index([siteId, status, createdAt])
   @@index([organizationId, createdAt])
   @@map("chatbot_unanswered_questions")
+}
+
+model ChatbotIntent {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  siteId         String       @map("site_id") @db.Uuid
+  name           String
+  slug           String
+  description    String?
+  category       String       @default("general")
+  examples       String[]     @default([])
+  synonyms       String[]     @default([])
+  priority       Int          @default(50)
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  knowledgeItems KnowledgeItem[]
+
+  @@unique([siteId, slug])
+  @@index([siteId, isActive, priority])
+  @@map("chatbot_intents")
+}
+
+model KnowledgeItem {
+  id                   String       @id @db.Uuid
+  organizationId       String       @map("organization_id") @db.Uuid
+  siteId               String       @map("site_id") @db.Uuid
+  intentId             String?      @map("intent_id") @db.Uuid
+  title                String
+  mainQuestion         String       @map("main_question")
+  alternativeQuestions String[]     @default([]) @map("alternative_questions")
+  shortAnswer          String       @map("short_answer")
+  detailedAnswer       String?      @map("detailed_answer")
+  commercialAnswer     String?      @map("commercial_answer")
+  reassuranceAnswer    String?      @map("reassurance_answer")
+  links                String[]     @default([])
+  ctaLabel             String?      @map("cta_label")
+  ctaUrl               String?      @map("cta_url")
+  conditions           String?
+  tags                 String[]     @default([])
+  priority             Int          @default(50)
+  status               String       @default("draft")
+  version              Int          @default(1)
+  createdByUserId      String?      @map("created_by_user_id") @db.Uuid
+  updatedByUserId      String?      @map("updated_by_user_id") @db.Uuid
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization         Organization @relation(fields: [organizationId], references: [id])
+  intent               ChatbotIntent? @relation(fields: [intentId], references: [id])
+
+  @@index([siteId, status, priority])
+  @@index([organizationId, updatedAt])
+  @@map("knowledge_items")
+}
+
+model ConversationFlow {
+  id              String       @id @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  siteId          String       @map("site_id") @db.Uuid
+  name            String
+  description     String?
+  triggerIntentId String?      @map("trigger_intent_id") @db.Uuid
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  steps           ConversationFlowStep[]
+
+  @@index([siteId, isActive])
+  @@map("conversation_flows")
+}
+
+model ConversationFlowStep {
+  id         String           @id @db.Uuid
+  flowId     String           @map("flow_id") @db.Uuid
+  stepOrder  Int              @map("step_order")
+  stepType   String           @map("step_type")
+  content    String
+  conditions String?
+  nextStepId String?          @map("next_step_id") @db.Uuid
+  actionType String?          @map("action_type")
+  metadata   Json             @default("{}")
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime         @default(now()) @map("updated_at") @db.Timestamptz
+  flow       ConversationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId, stepOrder])
+  @@map("conversation_flow_steps")
+}
+
+model ChatbotPersonality {
+  id                  String       @id @db.Uuid
+  organizationId      String       @map("organization_id") @db.Uuid
+  siteId              String       @unique @map("site_id") @db.Uuid
+  tone                String       @default("professionnel")
+  style               String?
+  answerLength        String       @default("medium") @map("answer_length")
+  formality           String       @default("vouvoiement")
+  emojiLevel          String       @default("none") @map("emoji_level")
+  commercialIntensity Int          @default(50) @map("commercial_intensity")
+  reassuranceLevel    Int          @default(70) @map("reassurance_level")
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization        Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("chatbot_personality")
+}
+
+model ChatbotGoal {
+  id             String       @id @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  siteId         String       @map("site_id") @db.Uuid
+  goalType       String       @map("goal_type")
+  description    String
+  priority       Int          @default(50)
+  successAction  String?      @map("success_action")
+  isActive       Boolean      @default(true) @map("is_active")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([siteId, isActive, priority])
+  @@map("chatbot_goals")
+}
+
+model KnowledgeSuggestion {
+  id                String       @id @db.Uuid
+  organizationId    String       @map("organization_id") @db.Uuid
+  siteId            String       @map("site_id") @db.Uuid
+  sourceType        String       @map("source_type")
+  sourceId          String?      @map("source_id") @db.Uuid
+  suggestedIntent   String?      @map("suggested_intent")
+  suggestedQuestion String       @map("suggested_question")
+  suggestedAnswer   String       @map("suggested_answer")
+  suggestedTags     String[]     @default([]) @map("suggested_tags")
+  confidenceScore   Decimal?     @map("confidence_score")
+  status            String       @default("pending")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime     @default(now()) @map("updated_at") @db.Timestamptz
+  organization      Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([siteId, status, createdAt])
+  @@map("knowledge_suggestions")
 }

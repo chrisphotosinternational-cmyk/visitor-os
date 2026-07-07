@@ -55,6 +55,22 @@ createApp({
       unansweredFilter: 'pending',
       unansweredAnswer: '',
       chatbotMetrics: null,
+      chatbots: [],
+      selectedChatbot: null,
+      chatbotOverview: null,
+      chatbotIntents: [],
+      chatbotKnowledge: [],
+      chatbotFlows: [],
+      chatbotPersonality: null,
+      chatbotGoals: [],
+      chatbotSuggestions: [],
+      intentForm: emptyIntentForm(),
+      knowledgeForm: emptyKnowledgeForm(),
+      flowForm: emptyFlowForm(),
+      flowStepForm: emptyFlowStepForm(),
+      personalityForm: emptyPersonalityForm(),
+      goalForm: emptyGoalForm(),
+      chatbotSearch: '',
       prospects: [],
       prospectStatuses: [],
       prospectScoreLabels: [],
@@ -217,6 +233,7 @@ createApp({
           this.loadUsers(),
           this.loadSites(),
           this.loadChatbotMetrics(),
+          this.loadChatbots(),
           this.loadProspects(),
           this.loadFollowUps(),
           this.loadMessageTemplates(),
@@ -523,6 +540,182 @@ createApp({
       if (!this.token) return;
       const response = await this.apiRequest('/admin-api/chatbot/dashboard', { authenticated: true });
       if (response.ok) this.chatbotMetrics = (await response.json()).metrics;
+    },
+    async loadChatbots() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/chatbots', { authenticated: true });
+      if (!response.ok) throw new Error('Chargement des chatbots impossible.');
+      this.chatbots = (await response.json()).chatbots;
+    },
+    async openChatbot(chatbot, tab = 'overview') {
+      this.selectedChatbot = chatbot;
+      await this.loadChatbotWorkspace(chatbot.id);
+      this.navigate('chatbot-' + tab, chatbot.id);
+    },
+    async loadChatbotWorkspace(siteId = this.selectedChatbot?.id) {
+      if (!siteId) return;
+      this.selectedChatbot = this.selectedChatbot?.id === siteId ? this.selectedChatbot : (this.chatbots.find((item) => item.id === siteId) || this.selectedChatbot);
+      const [
+        overview,
+        intents,
+        knowledge,
+        flows,
+        personality,
+        goals,
+        suggestions,
+        unanswered
+      ] = await Promise.all([
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/overview', { authenticated: true }),
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/intents?search=' + encodeURIComponent(this.chatbotSearch), { authenticated: true }),
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/knowledge?search=' + encodeURIComponent(this.chatbotSearch), { authenticated: true }),
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/flows', { authenticated: true }),
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/personality', { authenticated: true }),
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/goals', { authenticated: true }),
+        this.apiRequest('/admin-api/chatbots/' + siteId + '/suggestions', { authenticated: true }),
+        this.apiRequest('/admin-api/sites/' + siteId + '/unanswered?status=pending', { authenticated: true })
+      ]);
+      if (overview.ok) this.chatbotOverview = (await overview.json()).overview;
+      if (intents.ok) this.chatbotIntents = (await intents.json()).intents;
+      if (knowledge.ok) this.chatbotKnowledge = (await knowledge.json()).knowledge;
+      if (flows.ok) this.chatbotFlows = (await flows.json()).flows;
+      if (personality.ok) {
+        this.chatbotPersonality = (await personality.json()).personality;
+        this.personalityForm = personalityToForm(this.chatbotPersonality);
+      }
+      if (goals.ok) this.chatbotGoals = (await goals.json()).goals;
+      if (suggestions.ok) this.chatbotSuggestions = (await suggestions.json()).suggestions;
+      if (unanswered.ok) this.unansweredQuestions = (await unanswered.json()).unanswered;
+    },
+    async createChatbotIntent() {
+      if (!this.selectedChatbot) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/intents', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          ...this.intentForm,
+          examples: splitLines(this.intentForm.examples),
+          synonyms: splitLines(this.intentForm.synonyms),
+          priority: Number(this.intentForm.priority || 50)
+        })
+      });
+      if (!response.ok) throw new Error('Creation intention impossible.');
+      this.intentForm = emptyIntentForm();
+      await this.loadChatbotWorkspace();
+      this.notify('Intention creee.');
+    },
+    async createKnowledgeItem(status = 'draft') {
+      if (!this.selectedChatbot) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/knowledge', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          ...this.knowledgeForm,
+          status,
+          alternativeQuestions: splitLines(this.knowledgeForm.alternativeQuestions),
+          links: splitLines(this.knowledgeForm.links),
+          tags: splitTags(this.knowledgeForm.tags),
+          priority: Number(this.knowledgeForm.priority || 50)
+        })
+      });
+      if (!response.ok) throw new Error('Creation connaissance impossible.');
+      this.knowledgeForm = emptyKnowledgeForm();
+      await this.loadChatbotWorkspace();
+      this.notify('Connaissance creee.');
+    },
+    async publishKnowledge(item) {
+      const response = await this.apiRequest('/admin-api/knowledge/' + item.id + '/publish', { method: 'POST', authenticated: true });
+      if (!response.ok) throw new Error('Publication impossible.');
+      await this.loadChatbotWorkspace();
+    },
+    async archiveKnowledge(item) {
+      const response = await this.apiRequest('/admin-api/knowledge/' + item.id + '/archive', { method: 'POST', authenticated: true });
+      if (!response.ok) throw new Error('Archivage impossible.');
+      await this.loadChatbotWorkspace();
+    },
+    async duplicateKnowledge(item) {
+      const response = await this.apiRequest('/admin-api/knowledge/' + item.id + '/duplicate', { method: 'POST', authenticated: true });
+      if (!response.ok) throw new Error('Duplication impossible.');
+      await this.loadChatbotWorkspace();
+    },
+    async saveChatbotPersonality() {
+      if (!this.selectedChatbot) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/personality', {
+        method: 'PUT',
+        authenticated: true,
+        body: JSON.stringify({
+          ...this.personalityForm,
+          commercialIntensity: Number(this.personalityForm.commercialIntensity || 50),
+          reassuranceLevel: Number(this.personalityForm.reassuranceLevel || 70)
+        })
+      });
+      if (!response.ok) throw new Error('Sauvegarde personnalite impossible.');
+      await this.loadChatbotWorkspace();
+      this.notify('Personnalite sauvegardee.');
+    },
+    async createChatbotGoal() {
+      if (!this.selectedChatbot) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/goals', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          ...this.goalForm,
+          priority: Number(this.goalForm.priority || 50)
+        })
+      });
+      if (!response.ok) throw new Error('Creation objectif impossible.');
+      this.goalForm = emptyGoalForm();
+      await this.loadChatbotWorkspace();
+      this.notify('Objectif cree.');
+    },
+    async createChatbotFlow() {
+      if (!this.selectedChatbot) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/flows', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify(this.flowForm)
+      });
+      if (!response.ok) throw new Error('Creation parcours impossible.');
+      this.flowForm = emptyFlowForm();
+      await this.loadChatbotWorkspace();
+      this.notify('Parcours cree.');
+    },
+    async addFlowStep(flow) {
+      const response = await this.apiRequest('/admin-api/flows/' + flow.id + '/steps', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({
+          ...this.flowStepForm,
+          stepOrder: Number(this.flowStepForm.stepOrder || 1)
+        })
+      });
+      if (!response.ok) throw new Error('Ajout etape impossible.');
+      this.flowStepForm = emptyFlowStepForm();
+      await this.loadChatbotWorkspace();
+    },
+    async generateKnowledgeSuggestion(question) {
+      const response = await this.apiRequest('/admin-api/unanswered-questions/' + question.id + '/generate-suggestion', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Suggestion impossible.');
+      await this.loadChatbotWorkspace();
+      this.notify('Suggestion creee.');
+    },
+    async acceptKnowledgeSuggestion(suggestion) {
+      const response = await this.apiRequest('/admin-api/knowledge-suggestions/' + suggestion.id + '/accept', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Acceptation impossible.');
+      await this.loadChatbotWorkspace();
+    },
+    async rejectKnowledgeSuggestion(suggestion) {
+      const response = await this.apiRequest('/admin-api/knowledge-suggestions/' + suggestion.id + '/reject', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Rejet impossible.');
+      await this.loadChatbotWorkspace();
     },
     async refreshDashboard() {
       const response = await this.apiRequest('/admin-api/dashboard', { authenticated: true });
@@ -1039,6 +1232,11 @@ createApp({
       if (route === 'quality') void this.loadQualityReport();
       if (route === 'first-start') void this.loadOnboardingStatus();
       if (route === 'chat') void this.loadChatSessions();
+      if (route === 'chatbots') void this.loadChatbots();
+      if (route.startsWith('chatbot-')) {
+        const siteId = arguments[1] || this.selectedChatbot?.id;
+        if (siteId) void this.loadChatbotWorkspace(siteId);
+      }
       if (route === 'sites') {
         void this.loadSites();
         void this.loadChatbotMetrics();
@@ -1126,6 +1324,7 @@ createApp({
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" :aria-current="route.startsWith('prospect') ? 'page' : null" type="button" @click="navigate('prospects')">Prospects</button>
           <button :class="['nav-item', { active: route === 'pipeline' }]" :aria-current="route === 'pipeline' ? 'page' : null" type="button" @click="navigate('pipeline')">Pipeline</button>
           <button :class="['nav-item', { active: route === 'chat' }]" :aria-current="route === 'chat' ? 'page' : null" type="button" @click="navigate('chat')">Chat IA</button>
+          <button :class="['nav-item', { active: route.startsWith('chatbot') || route === 'chatbots' }]" :aria-current="route.startsWith('chatbot') || route === 'chatbots' ? 'page' : null" type="button" @click="navigate('chatbots')">Knowledge Engine</button>
           <button :class="['nav-item', { active: route.startsWith('site') || route === 'sites' }]" :aria-current="route.startsWith('site') || route === 'sites' ? 'page' : null" type="button" @click="navigate('sites')">Chatbot sites</button>
           <button :class="['nav-item', { active: route === 'enrichments' }]" :aria-current="route === 'enrichments' ? 'page' : null" type="button" @click="navigate('enrichments')">Enrichments</button>
           <button :class="['nav-item', { active: route === 'follow-ups' }]" :aria-current="route === 'follow-ups' ? 'page' : null" type="button" @click="navigate('follow-ups')">Relances</button>
@@ -1288,6 +1487,147 @@ createApp({
               <small>{{ item.previous_value || '-' }} -> {{ item.new_value || '-' }}</small>
             </article>
           </section>
+        </section>
+
+        <section v-if="route === 'chatbots'" class="panel">
+          <div class="panel-header">
+            <h2>Knowledge Engine</h2>
+            <div class="inline-actions"><input v-model="chatbotSearch" @input="loadChatbots" placeholder="Rechercher un chatbot" /><button type="button" @click="loadChatbots">Actualiser</button></div>
+          </div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Chatbots</span><strong>{{ chatbots.length }}</strong><small>Sites connectes</small></article>
+            <article class="metric"><span>Knowledge actifs</span><strong>{{ chatbots.reduce((sum, item) => sum + Number(item.knowledge_items || 0), 0) }}</strong><small>Reponses v2</small></article>
+            <article class="metric"><span>Intentions</span><strong>{{ chatbots.reduce((sum, item) => sum + Number(item.intents || 0), 0) }}</strong><small>Actives</small></article>
+            <article class="metric"><span>Inconnues</span><strong>{{ chatbots.reduce((sum, item) => sum + Number(item.unanswered || 0), 0) }}</strong><small>A traiter</small></article>
+          </div>
+          <table class="admin-table">
+            <thead><tr><th>Site</th><th>Domaine</th><th>Statut</th><th>Conversations</th><th>Knowledge</th><th>Inconnues</th><th>Leads</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="chatbot in chatbots" :key="chatbot.id">
+                <td>{{ chatbot.name }}</td>
+                <td>{{ chatbot.domain || '-' }}</td>
+                <td><span class="badge">{{ chatbot.status }} / {{ chatbot.widget_enabled ? 'actif' : 'inactif' }}</span></td>
+                <td>{{ chatbot.conversations ?? 0 }}</td>
+                <td>{{ chatbot.knowledge_items ?? 0 }}</td>
+                <td>{{ chatbot.unanswered ?? 0 }}</td>
+                <td>{{ chatbot.leads_captured ?? 0 }}</td>
+                <td><button type="button" @click="openChatbot(chatbot)">Administrer</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section v-if="route.startsWith('chatbot-')" class="panel">
+          <div class="panel-header">
+            <div><h2>{{ selectedChatbot?.name || 'Chatbot' }}</h2><p>{{ selectedChatbot?.domain || selectedChatbot?.id }}</p></div>
+            <button type="button" @click="navigate('chatbots')">Retour</button>
+          </div>
+          <nav class="tabs">
+            <button type="button" @click="openChatbot(selectedChatbot, 'overview')">Vue d’ensemble</button>
+            <button type="button" @click="navigate('chatbot-intents', selectedChatbot?.id)">Intentions</button>
+            <button type="button" @click="navigate('chatbot-knowledge', selectedChatbot?.id)">Connaissances</button>
+            <button type="button" @click="navigate('chatbot-unanswered', selectedChatbot?.id)">Questions inconnues</button>
+            <button type="button" @click="navigate('chatbot-flows', selectedChatbot?.id)">Parcours</button>
+            <button type="button" @click="navigate('chatbot-personality', selectedChatbot?.id)">Personnalite</button>
+            <button type="button" @click="navigate('chatbot-goals', selectedChatbot?.id)">Objectifs</button>
+            <button type="button" @click="openSiteWidget(selectedChatbot)">Widget</button>
+          </nav>
+          <div class="filters"><input v-model="chatbotSearch" @input="loadChatbotWorkspace()" placeholder="Rechercher intention, connaissance, tag" /></div>
+
+          <div v-if="route === 'chatbot-overview'" class="dashboard-grid compact-grid">
+            <article class="metric"><span>Conversations</span><strong>{{ chatbotOverview?.conversations ?? 0 }}</strong><small>Total site</small></article>
+            <article class="metric"><span>Knowledge</span><strong>{{ chatbotOverview?.knowledge_items ?? 0 }}</strong><small>Tous statuts</small></article>
+            <article class="metric"><span>Intentions</span><strong>{{ chatbotOverview?.intents ?? 0 }}</strong><small>Configurees</small></article>
+            <article class="metric"><span>Suggestions</span><strong>{{ chatbotOverview?.suggestions ?? 0 }}</strong><small>En attente</small></article>
+          </div>
+
+          <div v-if="route === 'chatbot-intents'" class="split-layout">
+            <form class="admin-form" @submit.prevent="createChatbotIntent">
+              <input v-model="intentForm.name" placeholder="Nom intention" required />
+              <input v-model="intentForm.category" placeholder="Categorie" />
+              <textarea v-model="intentForm.examples" placeholder="Exemples, une ligne par phrase"></textarea>
+              <textarea v-model="intentForm.synonyms" placeholder="Synonymes, un par ligne"></textarea>
+              <input v-model.number="intentForm.priority" type="number" min="0" max="100" />
+              <label class="checkbox-line"><input v-model="intentForm.isActive" type="checkbox" /> Active</label>
+              <button type="submit">Creer intention</button>
+            </form>
+            <div class="activity-list">
+              <article v-for="intent in chatbotIntents" :key="intent.id">
+                <strong>{{ intent.name }}</strong><span>{{ intent.category }}</span><small>{{ intent.examples?.join(', ') }}</small>
+              </article>
+            </div>
+          </div>
+
+          <div v-if="route === 'chatbot-knowledge'" class="split-layout">
+            <form class="admin-form" @submit.prevent="createKnowledgeItem('active')">
+              <input v-model="knowledgeForm.title" placeholder="Titre" required />
+              <input v-model="knowledgeForm.mainQuestion" placeholder="Question principale" required />
+              <textarea v-model="knowledgeForm.alternativeQuestions" placeholder="Questions alternatives, une par ligne"></textarea>
+              <textarea v-model="knowledgeForm.shortAnswer" placeholder="Reponse courte" required></textarea>
+              <textarea v-model="knowledgeForm.detailedAnswer" placeholder="Reponse detaillee"></textarea>
+              <textarea v-model="knowledgeForm.commercialAnswer" placeholder="Reponse commerciale"></textarea>
+              <input v-model="knowledgeForm.tags" placeholder="Tags separes par virgule" />
+              <select v-model="knowledgeForm.intentId"><option value="">Aucune intention</option><option v-for="intent in chatbotIntents" :key="intent.id" :value="intent.id">{{ intent.name }}</option></select>
+              <button type="submit">Creer et publier</button>
+              <button type="button" @click="createKnowledgeItem('draft')">Enregistrer brouillon</button>
+            </form>
+            <div class="activity-list">
+              <article v-for="item in chatbotKnowledge" :key="item.id">
+                <strong>{{ item.title }}</strong><span>{{ item.status }} · {{ item.intent_name || 'sans intention' }}</span><small>{{ item.main_question }}</small>
+                <div class="inline-actions"><button type="button" @click="publishKnowledge(item)">Publier</button><button type="button" @click="duplicateKnowledge(item)">Dupliquer</button><button type="button" @click="archiveKnowledge(item)">Archiver</button></div>
+              </article>
+            </div>
+          </div>
+
+          <div v-if="route === 'chatbot-unanswered'" class="activity-list">
+            <article v-for="question in unansweredQuestions" :key="question.id">
+              <strong>{{ question.question }}</strong><span>{{ question.detected_intent || question.category || 'intention inconnue' }} · {{ question.occurrence_count || 1 }} occurrence(s)</span>
+              <small>{{ question.action_status || question.status }}</small>
+              <div class="inline-actions"><button type="button" @click="generateKnowledgeSuggestion(question)">Creer suggestion</button><button type="button" @click="ignoreUnanswered(question)">Ignorer</button></div>
+            </article>
+            <article v-for="suggestion in chatbotSuggestions" :key="suggestion.id">
+              <strong>Suggestion : {{ suggestion.suggested_question }}</strong><span>{{ suggestion.status }} · {{ suggestion.suggested_intent || 'general' }}</span>
+              <small>{{ suggestion.suggested_answer }}</small>
+              <div class="inline-actions"><button type="button" @click="acceptKnowledgeSuggestion(suggestion)">Accepter</button><button type="button" @click="rejectKnowledgeSuggestion(suggestion)">Rejeter</button></div>
+            </article>
+          </div>
+
+          <div v-if="route === 'chatbot-flows'" class="split-layout">
+            <form class="admin-form" @submit.prevent="createChatbotFlow">
+              <input v-model="flowForm.name" placeholder="Nom du parcours" required />
+              <textarea v-model="flowForm.description" placeholder="Description"></textarea>
+              <select v-model="flowForm.triggerIntentId"><option value="">Declencheur libre</option><option v-for="intent in chatbotIntents" :key="intent.id" :value="intent.id">{{ intent.name }}</option></select>
+              <button type="submit">Creer parcours</button>
+            </form>
+            <div class="activity-list">
+              <article v-for="flow in chatbotFlows" :key="flow.id">
+                <strong>{{ flow.name }}</strong><span>{{ flow.is_active ? 'actif' : 'inactif' }}</span><small>{{ flow.description }}</small>
+                <form class="inline-actions" @submit.prevent="addFlowStep(flow)"><input v-model.number="flowStepForm.stepOrder" type="number" min="1" /><select v-model="flowStepForm.stepType"><option>question</option><option>answer</option><option>lead_capture</option><option>end</option></select><input v-model="flowStepForm.content" placeholder="Contenu etape" /><button type="submit">Ajouter etape</button></form>
+              </article>
+            </div>
+          </div>
+
+          <form v-if="route === 'chatbot-personality'" class="admin-form" @submit.prevent="saveChatbotPersonality">
+            <select v-model="personalityForm.tone"><option>professionnel</option><option>chaleureux</option><option>premium</option><option>direct</option><option>rassurant</option><option>technique</option></select>
+            <select v-model="personalityForm.answerLength"><option>short</option><option>medium</option><option>detailed</option></select>
+            <select v-model="personalityForm.formality"><option>vouvoiement</option><option>tutoiement</option></select>
+            <select v-model="personalityForm.emojiLevel"><option>none</option><option>low</option><option>medium</option></select>
+            <input v-model.number="personalityForm.commercialIntensity" type="number" min="0" max="100" placeholder="Intensite commerciale" />
+            <input v-model.number="personalityForm.reassuranceLevel" type="number" min="0" max="100" placeholder="Niveau reassurance" />
+            <textarea v-model="personalityForm.style" placeholder="Consignes de style"></textarea>
+            <button type="submit">Sauvegarder personnalite</button>
+          </form>
+
+          <div v-if="route === 'chatbot-goals'" class="split-layout">
+            <form class="admin-form" @submit.prevent="createChatbotGoal">
+              <input v-model="goalForm.goalType" placeholder="Type objectif" required />
+              <textarea v-model="goalForm.description" placeholder="Description" required></textarea>
+              <input v-model.number="goalForm.priority" type="number" min="0" max="100" />
+              <input v-model="goalForm.successAction" placeholder="Action de succes" />
+              <button type="submit">Ajouter objectif</button>
+            </form>
+            <div class="activity-list"><article v-for="goal in chatbotGoals" :key="goal.id"><strong>{{ goal.goal_type }}</strong><span>{{ goal.priority }}</span><small>{{ goal.description }}</small></article></div>
+          </div>
         </section>
 
         <section v-if="route === 'organizations'" class="panel">
@@ -1904,6 +2244,17 @@ function normalizeRoute(pathname) {
   if (pathname === '/first-start') return 'first-start';
   if (pathname === '/chat') return 'chat';
   if (pathname === '/pipeline') return 'pipeline';
+  if (pathname === '/chatbots') return 'chatbots';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/intents')) return 'chatbot-intents';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/knowledge')) return 'chatbot-knowledge';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/conversations')) return 'chatbot-conversations';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/unanswered')) return 'chatbot-unanswered';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/flows')) return 'chatbot-flows';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/stats')) return 'chatbot-stats';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/personality')) return 'chatbot-personality';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/goals')) return 'chatbot-goals';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/widget')) return 'site-widget';
+  if (pathname.startsWith('/chatbots/')) return 'chatbot-overview';
   if (pathname === '/sites') return 'sites';
   if (pathname.startsWith('/sites/') && pathname.endsWith('/unanswered')) return 'site-unanswered';
   if (pathname.startsWith('/sites/') && pathname.endsWith('/widget')) return 'site-widget';
@@ -1931,6 +2282,16 @@ function routePath(route, id) {
   if (route === 'first-start') return '/first-start';
   if (route === 'chat') return '/chat';
   if (route === 'pipeline') return '/pipeline';
+  if (route === 'chatbots') return '/chatbots';
+  if (route === 'chatbot-overview') return '/chatbots/' + id;
+  if (route === 'chatbot-intents') return '/chatbots/' + id + '/intents';
+  if (route === 'chatbot-knowledge') return '/chatbots/' + id + '/knowledge';
+  if (route === 'chatbot-conversations') return '/chatbots/' + id + '/conversations';
+  if (route === 'chatbot-unanswered') return '/chatbots/' + id + '/unanswered';
+  if (route === 'chatbot-flows') return '/chatbots/' + id + '/flows';
+  if (route === 'chatbot-stats') return '/chatbots/' + id + '/stats';
+  if (route === 'chatbot-personality') return '/chatbots/' + id + '/personality';
+  if (route === 'chatbot-goals') return '/chatbots/' + id + '/goals';
   if (route === 'sites') return '/sites';
   if (route === 'site-widget') return '/sites/' + id + '/widget';
   if (route === 'site-unanswered') return '/sites/' + id + '/unanswered';
@@ -1952,6 +2313,16 @@ function routeTitle(route) {
     quality: 'Quality Report',
     'first-start': 'Premier demarrage',
     chat: 'Chat IA CRM',
+    chatbots: 'Knowledge Engine',
+    'chatbot-overview': 'Vue chatbot',
+    'chatbot-intents': 'Intentions',
+    'chatbot-knowledge': 'Connaissances',
+    'chatbot-conversations': 'Conversations chatbot',
+    'chatbot-unanswered': 'Questions inconnues',
+    'chatbot-flows': 'Parcours',
+    'chatbot-stats': 'Statistiques chatbot',
+    'chatbot-personality': 'Personnalite',
+    'chatbot-goals': 'Objectifs',
     sites: 'Chatbot multi-sites',
     'site-widget': 'Integration widget',
     'site-unanswered': 'Questions sans reponse',
@@ -2017,6 +2388,75 @@ function siteWidgetToForm(site, settings) {
     widgetEnabled: Boolean(site?.widget_enabled ?? true),
     status: site?.status ?? 'active'
   };
+}
+
+function emptyIntentForm() {
+  return { name: '', slug: '', description: '', category: 'general', examples: '', synonyms: '', priority: 50, isActive: true };
+}
+
+function emptyKnowledgeForm() {
+  return {
+    intentId: '',
+    title: '',
+    mainQuestion: '',
+    alternativeQuestions: '',
+    shortAnswer: '',
+    detailedAnswer: '',
+    commercialAnswer: '',
+    reassuranceAnswer: '',
+    links: '',
+    ctaLabel: '',
+    ctaUrl: '',
+    conditions: '',
+    tags: '',
+    priority: 50,
+    status: 'draft'
+  };
+}
+
+function emptyFlowForm() {
+  return { name: '', description: '', triggerIntentId: '', isActive: true };
+}
+
+function emptyFlowStepForm() {
+  return { stepOrder: 1, stepType: 'answer', content: '', conditions: '', nextStepId: '', actionType: 'show_answer', metadata: {} };
+}
+
+function emptyPersonalityForm() {
+  return {
+    tone: 'professionnel',
+    style: '',
+    answerLength: 'medium',
+    formality: 'vouvoiement',
+    emojiLevel: 'none',
+    commercialIntensity: 50,
+    reassuranceLevel: 70
+  };
+}
+
+function personalityToForm(personality) {
+  if (!personality) return emptyPersonalityForm();
+  return {
+    tone: personality.tone ?? 'professionnel',
+    style: personality.style ?? '',
+    answerLength: personality.answer_length ?? 'medium',
+    formality: personality.formality ?? 'vouvoiement',
+    emojiLevel: personality.emoji_level ?? 'none',
+    commercialIntensity: personality.commercial_intensity ?? 50,
+    reassuranceLevel: personality.reassurance_level ?? 70
+  };
+}
+
+function emptyGoalForm() {
+  return { goalType: 'information', description: '', priority: 50, successAction: '', isActive: true };
+}
+
+function splitLines(value) {
+  return String(value || '').split('\\n').map((item) => item.trim()).filter(Boolean);
+}
+
+function splitTags(value) {
+  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
 }
 
 function emptyProspectForm(organizationId = '') {

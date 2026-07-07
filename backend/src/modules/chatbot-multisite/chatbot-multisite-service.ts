@@ -9,6 +9,7 @@ import type { CrmRepository } from '../crm/crm-repository.js';
 import type { DecisionEngine, DecisionEngineResult } from '../decision-engine/decision-engine.js';
 import type { NotificationEngine } from '../notifications/notification-engine.js';
 import type { ChatbotProductionService } from '../chatbot-production/chatbot-production-service.js';
+import type { KnowledgeEngineService } from '../knowledge-engine/knowledge-engine-service.js';
 
 export type ChatbotSiteReference = {
   siteKey?: string | undefined;
@@ -83,6 +84,7 @@ export class MultiSiteChatbotService {
       decisionEngine: DecisionEngine;
       notificationEngine?: { notify(input: NotificationRequest): Promise<unknown> } | undefined;
       production?: ChatbotProductionService | undefined;
+      knowledgeEngine?: KnowledgeEngineService | undefined;
     }
   ) {}
 
@@ -267,12 +269,23 @@ export class MultiSiteChatbotService {
     }
 
     if (['fallback', 'human_escalation'].includes(decision.source) || decision.confidence < 0.4) {
-      await this.dependencies.production?.recordUnanswered({
-        organizationId: conversation.organization_id,
-        siteId: conversation.site_id,
-        conversationId: conversation.id,
-        question: input.content
-      });
+      if (this.dependencies.knowledgeEngine) {
+        await this.dependencies.knowledgeEngine.enhancedUnanswered({
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          conversationId: conversation.id,
+          question: input.content,
+          detectedIntent: decision.reason,
+          confidenceScore: decision.confidence
+        });
+      } else {
+        await this.dependencies.production?.recordUnanswered({
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          conversationId: conversation.id,
+          question: input.content
+        });
+      }
     }
 
     const prospectId = prospect?.id ?? conversation.prospect_id;
@@ -404,6 +417,24 @@ export class MultiSiteChatbotService {
   private async decideWithSiteKnowledge(
     input: Parameters<DecisionEngine['decide']>[0]
   ): Promise<DecisionEngineResult> {
+    const knowledge = await this.dependencies.knowledgeEngine?.answerQuestion({
+      organizationId: input.organizationId,
+      siteId: input.siteId,
+      question: input.message
+    });
+
+    if (knowledge) {
+      return {
+        reply: knowledge.reply,
+        source: 'knowledge_base',
+        confidence: knowledge.confidence,
+        shouldEscalate: false,
+        processingTimeMs: 1,
+        ...(knowledge.matchedItemId ? { matchedItemId: knowledge.matchedItemId } : {}),
+        reason: knowledge.reason
+      };
+    }
+
     const qa = await this.dependencies.production?.findQaAnswer({
       organizationId: input.organizationId,
       siteId: input.siteId,

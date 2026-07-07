@@ -2,6 +2,16 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 18 - Knowledge Engine Administration
+
+- Added Knowledge Engine administration for public multi-site chatbots.
+- Added `/chatbots` admin navigation with chatbot overview, intentions, knowledge, unanswered questions, flows, personality, goals and widget access.
+- Added `chatbot_intents`, `knowledge_items`, `conversation_flows`, `chatbot_personality`, `chatbot_goals` and `knowledge_suggestions`.
+- Enhanced unanswered questions with detected intent, occurrence count, confidence and action status.
+- Added KnowledgeEngineService response order before legacy site Q/A.
+- Preserved legacy `site_qa_items` compatibility and CRM modules.
+- Added documentation for Knowledge Engine, chatbot administration, suggestions and conversation flows.
+
 ## Sprint 17 - Chatbot Production Hardening & Moto CMS Integration
 
 - Added Railway-hosted public widget script route `/widget/:publicKey.js` for simple Moto CMS integration.

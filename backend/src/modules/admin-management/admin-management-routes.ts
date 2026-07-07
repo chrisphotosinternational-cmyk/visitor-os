@@ -58,6 +58,12 @@ import {
   ChatbotProductionService,
   leadCaptureTriggers
 } from '../chatbot-production/chatbot-production-service.js';
+import {
+  flowActionTypes,
+  flowStepTypes,
+  KnowledgeEngineService,
+  knowledgeItemStatuses
+} from '../knowledge-engine/knowledge-engine-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -353,6 +359,87 @@ const chatMessagePayloadSchema = z.object({
   content: z.string().min(1).max(1500)
 });
 
+const chatbotSearchQuerySchema = z.object({
+  search: z.string().optional(),
+  status: z.string().optional(),
+  intentId: z.string().uuid().optional(),
+  organizationId: z.string().uuid().optional()
+});
+
+const intentPayloadSchema = z.object({
+  name: z.string().min(1),
+  slug: z.string().min(1).optional(),
+  description: z.string().optional(),
+  category: z.string().default('general'),
+  examples: z.array(z.string()).default([]),
+  synonyms: z.array(z.string()).default([]),
+  priority: z.number().int().min(0).max(100).default(50),
+  isActive: z.boolean().default(true)
+});
+
+const partialIntentPayloadSchema = intentPayloadSchema.partial();
+
+const knowledgePayloadSchema = z.object({
+  intentId: z.string().uuid().nullable().optional(),
+  title: z.string().min(1),
+  mainQuestion: z.string().min(1),
+  alternativeQuestions: z.array(z.string()).default([]),
+  shortAnswer: z.string().min(1),
+  detailedAnswer: z.string().optional(),
+  commercialAnswer: z.string().optional(),
+  reassuranceAnswer: z.string().optional(),
+  links: z.array(z.string()).default([]),
+  ctaLabel: z.string().optional(),
+  ctaUrl: z.string().optional(),
+  conditions: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+  priority: z.number().int().min(0).max(100).default(50),
+  status: z.enum(knowledgeItemStatuses).default('draft')
+});
+
+const partialKnowledgePayloadSchema = knowledgePayloadSchema.partial();
+
+const flowPayloadSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  triggerIntentId: z.string().uuid().nullable().optional(),
+  isActive: z.boolean().default(true)
+});
+
+const partialFlowPayloadSchema = flowPayloadSchema.partial();
+
+const flowStepPayloadSchema = z.object({
+  stepOrder: z.number().int().min(1),
+  stepType: z.enum(flowStepTypes),
+  content: z.string().min(1),
+  conditions: z.string().optional(),
+  nextStepId: z.string().uuid().nullable().optional(),
+  actionType: z.enum(flowActionTypes).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+
+const partialFlowStepPayloadSchema = flowStepPayloadSchema.partial();
+
+const personalityPayloadSchema = z.object({
+  tone: z.string().min(1),
+  style: z.string().optional(),
+  answerLength: z.enum(['short', 'medium', 'detailed']),
+  formality: z.enum(['tutoiement', 'vouvoiement']),
+  emojiLevel: z.enum(['none', 'low', 'medium']),
+  commercialIntensity: z.number().int().min(0).max(100),
+  reassuranceLevel: z.number().int().min(0).max(100)
+});
+
+const goalPayloadSchema = z.object({
+  goalType: z.string().min(1),
+  description: z.string().min(1),
+  priority: z.number().int().min(0).max(100).default(50),
+  successAction: z.string().optional(),
+  isActive: z.boolean().default(true)
+});
+
+const partialGoalPayloadSchema = goalPayloadSchema.partial();
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -377,6 +464,7 @@ export function registerAdminManagementRoutes(
   const settings = new SettingsService(database);
   const aiChat = new AIChatService(database);
   const chatbotProduction = new ChatbotProductionService(database);
+  const knowledgeEngine = new KnowledgeEngineService(database);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
   const productionValidation = new ProductionValidationService({
@@ -950,6 +1038,379 @@ export function registerAdminManagementRoutes(
         () => chatbotProduction.metrics(organizationId)
       )
     };
+  });
+
+  app.get('/admin-api/chatbots', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationScope(context.user, query.organizationId);
+
+    return { chatbots: await knowledgeEngine.listChatbots(organizationId) };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/overview', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { overview: await knowledgeEngine.getOverview(site.id, site.organization_id) };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/intents', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const query = chatbotSearchQuerySchema.parse(request.query);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      intents: await knowledgeEngine.listIntents({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        search: query.search
+      })
+    };
+  });
+
+  app.post('/admin-api/chatbots/:siteId/intents', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = intentPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { intent: await knowledgeEngine.createIntent(site.organization_id, site.id, body) };
+  });
+
+  app.patch('/admin-api/chatbot-intents/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = partialIntentPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { intent: await knowledgeEngine.updateIntent(params.id, organizationId, body) };
+  });
+
+  app.delete('/admin-api/chatbot-intents/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+    await knowledgeEngine.deleteIntent(params.id, organizationId);
+
+    return { deleted: true };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/knowledge', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const query = chatbotSearchQuerySchema.parse(request.query);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      knowledge: await knowledgeEngine.listKnowledge({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        search: query.search,
+        status: query.status,
+        intentId: query.intentId
+      })
+    };
+  });
+
+  app.post('/admin-api/chatbots/:siteId/knowledge', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = knowledgePayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      knowledge: await knowledgeEngine.createKnowledge(site.organization_id, site.id, {
+        ...body,
+        userId: context.user.id
+      })
+    };
+  });
+
+  app.get('/admin-api/knowledge/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { knowledge: await knowledgeEngine.getKnowledge(params.id, organizationId) };
+  });
+
+  app.patch('/admin-api/knowledge/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = partialKnowledgePayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return {
+      knowledge: await knowledgeEngine.updateKnowledge(params.id, organizationId, {
+        ...body,
+        userId: context.user.id
+      })
+    };
+  });
+
+  app.delete('/admin-api/knowledge/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+    await knowledgeEngine.deleteKnowledge(params.id, organizationId);
+
+    return { archived: true };
+  });
+
+  app.post('/admin-api/knowledge/:id/duplicate', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return {
+      knowledge: await knowledgeEngine.duplicateKnowledge(
+        params.id,
+        organizationId,
+        context.user.id
+      )
+    };
+  });
+
+  app.post('/admin-api/knowledge/:id/publish', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return {
+      knowledge: await knowledgeEngine.setKnowledgeStatus(
+        params.id,
+        organizationId,
+        'active',
+        context.user.id
+      )
+    };
+  });
+
+  app.post('/admin-api/knowledge/:id/archive', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return {
+      knowledge: await knowledgeEngine.setKnowledgeStatus(
+        params.id,
+        organizationId,
+        'archived',
+        context.user.id
+      )
+    };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/flows', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { flows: await knowledgeEngine.listFlows(site.organization_id, site.id) };
+  });
+
+  app.post('/admin-api/chatbots/:siteId/flows', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = flowPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { flow: await knowledgeEngine.createFlow(site.organization_id, site.id, body) };
+  });
+
+  app.get('/admin-api/flows/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { flow: await knowledgeEngine.getFlow(params.id, organizationId) };
+  });
+
+  app.patch('/admin-api/flows/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = partialFlowPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { flow: await knowledgeEngine.updateFlow(params.id, organizationId, body) };
+  });
+
+  app.delete('/admin-api/flows/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+    await knowledgeEngine.deleteFlow(params.id, organizationId);
+
+    return { deleted: true };
+  });
+
+  app.post('/admin-api/flows/:id/steps', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = flowStepPayloadSchema.parse(request.body);
+
+    return { step: await knowledgeEngine.addFlowStep({ ...body, flowId: params.id }) };
+  });
+
+  app.patch('/admin-api/flow-steps/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = partialFlowStepPayloadSchema.parse(request.body);
+
+    return { step: await knowledgeEngine.updateFlowStep(params.id, body) };
+  });
+
+  app.delete('/admin-api/flow-steps/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    await knowledgeEngine.deleteFlowStep(params.id);
+
+    return { deleted: true };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/personality', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { personality: await knowledgeEngine.getPersonality(site.organization_id, site.id) };
+  });
+
+  app.put('/admin-api/chatbots/:siteId/personality', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = personalityPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      personality: await knowledgeEngine.savePersonality(site.organization_id, site.id, body)
+    };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/goals', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { goals: await knowledgeEngine.listGoals(site.organization_id, site.id) };
+  });
+
+  app.post('/admin-api/chatbots/:siteId/goals', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = goalPayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { goal: await knowledgeEngine.createGoal(site.organization_id, site.id, body) };
+  });
+
+  app.patch('/admin-api/chatbot-goals/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = partialGoalPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { goal: await knowledgeEngine.updateGoal(params.id, organizationId, body) };
+  });
+
+  app.delete('/admin-api/chatbot-goals/:id', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+    await knowledgeEngine.deleteGoal(params.id, organizationId);
+
+    return { deleted: true };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/suggestions', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return { suggestions: await knowledgeEngine.listSuggestions(site.organization_id, site.id) };
+  });
+
+  app.post('/admin-api/unanswered-questions/:id/generate-suggestion', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { suggestion: await knowledgeEngine.generateSuggestion(params.id, organizationId) };
+  });
+
+  app.post('/admin-api/knowledge-suggestions/:id/accept', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return knowledgeEngine.acceptSuggestion(params.id, organizationId, context.user.id);
+  });
+
+  app.post('/admin-api/knowledge-suggestions/:id/reject', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+
+    return { suggestion: await knowledgeEngine.rejectSuggestion(params.id, organizationId) };
   });
 
   app.get('/admin-api/prospects', async (request) => {
