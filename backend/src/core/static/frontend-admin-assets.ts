@@ -64,6 +64,18 @@ createApp({
       chatbotPersonality: null,
       chatbotGoals: [],
       chatbotSuggestions: [],
+      studioDashboard: null,
+      studioTemplates: [],
+      studioBusinessTypes: [],
+      studioGoals: [],
+      selectedStudio: null,
+      studioVersions: [],
+      studioDiff: null,
+      studioWizard: emptyStudioWizard(),
+      studioImport: emptyStudioImport(),
+      studioImportProposal: null,
+      studioSimulationMessage: '',
+      studioSimulation: null,
       intentForm: emptyIntentForm(),
       knowledgeForm: emptyKnowledgeForm(),
       flowForm: emptyFlowForm(),
@@ -234,6 +246,7 @@ createApp({
           this.loadSites(),
           this.loadChatbotMetrics(),
           this.loadChatbots(),
+          this.loadStudioDashboard(),
           this.loadProspects(),
           this.loadFollowUps(),
           this.loadMessageTemplates(),
@@ -716,6 +729,100 @@ createApp({
       });
       if (!response.ok) throw new Error('Rejet impossible.');
       await this.loadChatbotWorkspace();
+    },
+    async loadStudioDashboard() {
+      if (!this.token) return;
+      const [dashboardResponse, templatesResponse] = await Promise.all([
+        this.apiRequest('/admin-api/studio', { authenticated: true }),
+        this.apiRequest('/admin-api/studio/templates', { authenticated: true })
+      ]);
+      if (dashboardResponse.ok) this.studioDashboard = await dashboardResponse.json();
+      if (templatesResponse.ok) {
+        const data = await templatesResponse.json();
+        this.studioTemplates = data.templates;
+        this.studioBusinessTypes = data.businessTypes;
+        this.studioGoals = data.goals;
+      }
+    },
+    async openStudio(site) {
+      this.selectedStudio = site;
+      await this.loadStudioSite(site.id);
+      this.navigate('studio-detail', site.id);
+    },
+    async loadStudioSite(siteId = this.selectedStudio?.site_id || this.selectedStudio?.id) {
+      if (!siteId) return;
+      const response = await this.apiRequest('/admin-api/studio/' + siteId, { authenticated: true });
+      if (!response.ok) throw new Error('Studio indisponible.');
+      const data = await response.json();
+      this.selectedStudio = data.studio;
+      this.studioVersions = data.versions;
+      this.studioDiff = data.diff;
+      this.studioWizard = studioWizardFromSite(data.studio, this.studioWizard);
+    },
+    async runStudioWizard() {
+      if (!this.selectedStudio?.site_id) return;
+      const response = await this.apiRequest('/admin-api/studio/' + this.selectedStudio.site_id + '/wizard', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify(this.studioWizard)
+      });
+      if (!response.ok) throw new Error('Assistant Studio impossible.');
+      await Promise.all([this.loadStudioSite(this.selectedStudio.site_id), this.loadChatbots()]);
+      this.notify('Base chatbot creee en brouillon.');
+    },
+    async importStudioDocument() {
+      if (!this.selectedStudio?.site_id) return;
+      const response = await this.apiRequest('/admin-api/studio/' + this.selectedStudio.site_id + '/import-document', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify(this.studioImport)
+      });
+      if (!response.ok) throw new Error('Import documentaire impossible.');
+      this.studioImportProposal = (await response.json()).proposal;
+      this.notify('Proposition de connaissances creee.');
+    },
+    async acceptStudioImportProposal() {
+      if (!this.studioImportProposal) return;
+      const response = await this.apiRequest('/admin-api/studio/import-proposals/' + this.studioImportProposal.id + '/accept', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Validation import impossible.');
+      this.studioImportProposal = null;
+      this.studioImport = emptyStudioImport();
+      await this.loadStudioSite();
+      this.notify('Connaissances ajoutees en brouillon.');
+    },
+    async simulateStudio() {
+      if (!this.selectedStudio?.site_id || !this.studioSimulationMessage.trim()) return;
+      const response = await this.apiRequest('/admin-api/studio/' + this.selectedStudio.site_id + '/simulate', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ message: this.studioSimulationMessage })
+      });
+      if (!response.ok) throw new Error('Simulation impossible.');
+      this.studioSimulation = await response.json();
+    },
+    async publishStudio() {
+      if (!this.selectedStudio?.site_id) return;
+      const response = await this.apiRequest('/admin-api/studio/' + this.selectedStudio.site_id + '/publish', {
+        method: 'POST',
+        authenticated: true
+      });
+      if (!response.ok) throw new Error('Publication impossible.');
+      await this.loadStudioSite();
+      this.notify('Chatbot publie.');
+    },
+    async rollbackStudio(version) {
+      if (!this.selectedStudio?.site_id) return;
+      const response = await this.apiRequest('/admin-api/studio/' + this.selectedStudio.site_id + '/rollback', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ versionNumber: Number(version.version_number || version.versionNumber) })
+      });
+      if (!response.ok) throw new Error('Rollback impossible.');
+      await this.loadStudioSite();
+      this.notify('Version restauree.');
     },
     async refreshDashboard() {
       const response = await this.apiRequest('/admin-api/dashboard', { authenticated: true });
@@ -1233,6 +1340,11 @@ createApp({
       if (route === 'first-start') void this.loadOnboardingStatus();
       if (route === 'chat') void this.loadChatSessions();
       if (route === 'chatbots') void this.loadChatbots();
+      if (route === 'studio') void this.loadStudioDashboard();
+      if (route === 'studio-detail') {
+        const siteId = arguments[1] || this.selectedStudio?.site_id;
+        if (siteId) void this.loadStudioSite(siteId);
+      }
       if (route.startsWith('chatbot-')) {
         const siteId = arguments[1] || this.selectedChatbot?.id;
         if (siteId) void this.loadChatbotWorkspace(siteId);
@@ -1324,6 +1436,7 @@ createApp({
           <button :class="['nav-item', { active: route.startsWith('prospect') }]" :aria-current="route.startsWith('prospect') ? 'page' : null" type="button" @click="navigate('prospects')">Prospects</button>
           <button :class="['nav-item', { active: route === 'pipeline' }]" :aria-current="route === 'pipeline' ? 'page' : null" type="button" @click="navigate('pipeline')">Pipeline</button>
           <button :class="['nav-item', { active: route === 'chat' }]" :aria-current="route === 'chat' ? 'page' : null" type="button" @click="navigate('chat')">Chat IA</button>
+          <button :class="['nav-item', { active: route.startsWith('studio') }]" :aria-current="route.startsWith('studio') ? 'page' : null" type="button" @click="navigate('studio')">Chatbot Studio</button>
           <button :class="['nav-item', { active: route.startsWith('chatbot') || route === 'chatbots' }]" :aria-current="route.startsWith('chatbot') || route === 'chatbots' ? 'page' : null" type="button" @click="navigate('chatbots')">Knowledge Engine</button>
           <button :class="['nav-item', { active: route.startsWith('site') || route === 'sites' }]" :aria-current="route.startsWith('site') || route === 'sites' ? 'page' : null" type="button" @click="navigate('sites')">Chatbot sites</button>
           <button :class="['nav-item', { active: route === 'enrichments' }]" :aria-current="route === 'enrichments' ? 'page' : null" type="button" @click="navigate('enrichments')">Enrichments</button>
@@ -1515,6 +1628,103 @@ createApp({
               </tr>
             </tbody>
           </table>
+        </section>
+
+        <section v-if="route === 'studio'" class="panel">
+          <div class="panel-header">
+            <div><h2>Chatbot Studio</h2><p>Creation no-code des chatbots publics, de la base de connaissances a la publication.</p></div>
+            <button type="button" @click="loadStudioDashboard">Actualiser</button>
+          </div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Studios</span><strong>{{ studioDashboard?.studios?.length || 0 }}</strong><small>Chatbots constructibles</small></article>
+            <article class="metric"><span>Intentions</span><strong>{{ (studioDashboard?.studios || []).reduce((sum, item) => sum + Number(item.intents || 0), 0) }}</strong><small>Total</small></article>
+            <article class="metric"><span>Connaissances</span><strong>{{ (studioDashboard?.studios || []).reduce((sum, item) => sum + Number(item.knowledge_items || 0), 0) }}</strong><small>Publiees</small></article>
+            <article class="metric"><span>Questions inconnues</span><strong>{{ (studioDashboard?.studios || []).reduce((sum, item) => sum + Number(item.unknown_questions || 0), 0) }}</strong><small>A traiter</small></article>
+          </div>
+          <table class="admin-table">
+            <thead><tr><th>Chatbot</th><th>Domaine</th><th>Etat</th><th>Intentions</th><th>Knowledge</th><th>Reponse</th><th>Version</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="studio in studioDashboard?.studios || []" :key="studio.site_id">
+                <td><strong>{{ studio.name }}</strong></td>
+                <td>{{ studio.domain || '-' }}</td>
+                <td><span class="badge">{{ studio.current_stage }}</span></td>
+                <td>{{ studio.intents }}</td>
+                <td>{{ studio.knowledge_items }}</td>
+                <td>{{ studio.answer_rate }}%</td>
+                <td>v{{ studio.published_version || 0 }}</td>
+                <td><button type="button" @click="openStudio(studio)">Ouvrir Studio</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section v-if="route === 'studio-detail'" class="panel">
+          <div class="panel-header">
+            <div><h2>{{ selectedStudio?.name || 'Studio' }}</h2><p>{{ selectedStudio?.domain || selectedStudio?.site_id }}</p></div>
+            <div class="inline-actions"><button type="button" @click="publishStudio">Publier</button><button type="button" @click="navigate('studio')">Retour</button></div>
+          </div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Etat</span><strong>{{ selectedStudio?.current_stage || 'draft' }}</strong><small>Version active</small></article>
+            <article class="metric"><span>Intentions</span><strong>{{ selectedStudio?.intents || 0 }}</strong><small>Configurees</small></article>
+            <article class="metric"><span>Connaissances</span><strong>{{ selectedStudio?.knowledge_items || 0 }}</strong><small>Actives</small></article>
+            <article class="metric"><span>Conversations jour</span><strong>{{ selectedStudio?.conversations_today || 0 }}</strong><small>Aujourd'hui</small></article>
+            <article class="metric"><span>Inconnues</span><strong>{{ selectedStudio?.unknown_questions || 0 }}</strong><small>A enrichir</small></article>
+            <article class="metric"><span>Taux reponse</span><strong>{{ selectedStudio?.answer_rate || 0 }}%</strong><small>Estime</small></article>
+            <article class="metric"><span>Leads</span><strong>{{ selectedStudio?.leads_generated || 0 }}</strong><small>Generes</small></article>
+            <article class="metric"><span>Publiee</span><strong>v{{ selectedStudio?.published_version || 0 }}</strong><small>{{ selectedStudio?.last_published_at || 'jamais' }}</small></article>
+          </div>
+
+          <div class="split-layout">
+            <form class="admin-form" @submit.prevent="runStudioWizard">
+              <h3>Assistant creation</h3>
+              <input v-model="studioWizard.name" placeholder="Nom du chatbot" required />
+              <input v-model="studioWizard.domain" placeholder="Domaine" required />
+              <select v-model="studioWizard.businessType"><option v-for="type in studioBusinessTypes" :key="type" :value="type">{{ type }}</option></select>
+              <select v-model="studioWizard.primaryGoal"><option v-for="goal in studioGoals" :key="goal" :value="goal">{{ goal }}</option></select>
+              <select v-model="studioWizard.templateId"><option value="">Template automatique</option><option v-for="template in studioTemplates" :key="template.id" :value="template.id">{{ template.name }}</option></select>
+              <input v-model="studioWizard.tone" placeholder="Ton : professionnel, premium..." />
+              <button type="submit">Generer la base brouillon</button>
+            </form>
+
+            <form class="admin-form" @submit.prevent="importStudioDocument">
+              <h3>Import documentaire</h3>
+              <input v-model="studioImport.fileName" placeholder="Nom du fichier" required />
+              <select v-model="studioImport.fileType"><option>pdf</option><option>docx</option><option>markdown</option><option>txt</option><option>html</option></select>
+              <textarea v-model="studioImport.content" placeholder="Collez ici le contenu extrait ou le document texte" required></textarea>
+              <button type="submit">Analyser le document</button>
+              <article v-if="studioImportProposal" class="empty-state">
+                <strong>{{ studioImportProposal.extracted_questions?.length || 0 }} questions detectees</strong>
+                <p>Une proposition de base de connaissances est prete.</p>
+                <button type="button" @click="acceptStudioImportProposal">Valider en brouillon</button>
+              </article>
+            </form>
+          </div>
+
+          <div class="split-layout">
+            <form class="admin-form" @submit.prevent="simulateStudio">
+              <h3>Tester mon chatbot</h3>
+              <textarea v-model="studioSimulationMessage" placeholder="Posez une question comme un visiteur"></textarea>
+              <button type="submit">Simuler</button>
+              <article v-if="studioSimulation" class="empty-state">
+                <strong>{{ studioSimulation.fallback ? 'Fallback' : 'Reponse trouvee' }}</strong>
+                <p>{{ studioSimulation.reply }}</p>
+                <small>Intention: {{ studioSimulation.intent || '-' }} · Confiance: {{ Math.round((studioSimulation.confidence || 0) * 100) }}%</small>
+                <small>Actions: {{ studioSimulation.actions?.join(', ') }}</small>
+              </article>
+            </form>
+            <div class="activity-list">
+              <h3>Monitoring versions</h3>
+              <article>
+                <strong>Brouillon vs publie</strong>
+                <span>{{ studioDiff?.draft_items || 0 }} brouillons · {{ studioDiff?.published_items || 0 }} publies · {{ studioDiff?.needs_review || 0 }} a revoir</span>
+              </article>
+              <article v-for="version in studioVersions" :key="version.id">
+                <strong>Version {{ version.version_number }}</strong>
+                <span>{{ version.status }} · {{ version.created_at }}</span>
+                <button type="button" @click="rollbackStudio(version)">Rollback</button>
+              </article>
+            </div>
+          </div>
         </section>
 
         <section v-if="route.startsWith('chatbot-')" class="panel">
@@ -2243,6 +2453,8 @@ function normalizeRoute(pathname) {
   if (pathname === '/quality') return 'quality';
   if (pathname === '/first-start') return 'first-start';
   if (pathname === '/chat') return 'chat';
+  if (pathname === '/studio') return 'studio';
+  if (pathname.startsWith('/studio/')) return 'studio-detail';
   if (pathname === '/pipeline') return 'pipeline';
   if (pathname === '/chatbots') return 'chatbots';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/intents')) return 'chatbot-intents';
@@ -2281,6 +2493,8 @@ function routePath(route, id) {
   if (route === 'quality') return '/quality';
   if (route === 'first-start') return '/first-start';
   if (route === 'chat') return '/chat';
+  if (route === 'studio') return '/studio';
+  if (route === 'studio-detail') return '/studio/' + id;
   if (route === 'pipeline') return '/pipeline';
   if (route === 'chatbots') return '/chatbots';
   if (route === 'chatbot-overview') return '/chatbots/' + id;
@@ -2313,6 +2527,8 @@ function routeTitle(route) {
     quality: 'Quality Report',
     'first-start': 'Premier demarrage',
     chat: 'Chat IA CRM',
+    studio: 'Chatbot Studio',
+    'studio-detail': 'Studio chatbot',
     chatbots: 'Knowledge Engine',
     'chatbot-overview': 'Vue chatbot',
     'chatbot-intents': 'Intentions',
@@ -2449,6 +2665,36 @@ function personalityToForm(personality) {
 
 function emptyGoalForm() {
   return { goalType: 'information', description: '', priority: 50, successAction: '', isActive: true };
+}
+
+function emptyStudioWizard() {
+  return {
+    name: '',
+    domain: '',
+    businessType: 'chambre_hotes',
+    primaryGoal: 'reservation',
+    tone: 'professionnel et rassurant',
+    templateId: ''
+  };
+}
+
+function studioWizardFromSite(site, current = emptyStudioWizard()) {
+  return {
+    ...current,
+    name: current.name || site?.name || '',
+    domain: current.domain || site?.domain || '',
+    businessType: current.businessType || site?.business_type || 'chambre_hotes',
+    primaryGoal: current.primaryGoal || site?.primary_goal || 'reservation',
+    tone: current.tone || site?.tone || 'professionnel et rassurant'
+  };
+}
+
+function emptyStudioImport() {
+  return {
+    fileName: '',
+    fileType: 'txt',
+    content: ''
+  };
 }
 
 function splitLines(value) {

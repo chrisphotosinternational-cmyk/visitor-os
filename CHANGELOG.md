@@ -2,6 +2,17 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 19 - Chatbot Studio & No-Code Builder
+
+- Added `/studio` admin workspace for no-code chatbot creation.
+- Added Chatbot Studio dashboard with state, intentions, knowledge, conversations, unknown questions, answer rate, leads and published version.
+- Added wizard-driven chatbot setup with business type, goal, tone and template selection.
+- Added business template library for common domains such as guest houses, photographers, restaurants, SEO and coaching.
+- Added document import proposals for PDF, DOCX, Markdown, TXT and HTML content.
+- Added Studio versioning with draft, published versions and rollback support.
+- Added chatbot simulation with detected intent, matched knowledge, confidence, fallback and actions.
+- Preserved CRM, Knowledge Engine, widget and existing chatbot modules.
+
 ## Sprint 18 - Knowledge Engine Administration
 
 - Added Knowledge Engine administration for public multi-site chatbots.

@@ -64,6 +64,11 @@ import {
   KnowledgeEngineService,
   knowledgeItemStatuses
 } from '../knowledge-engine/knowledge-engine-service.js';
+import {
+  ChatbotStudioService,
+  studioBusinessTypes,
+  studioGoals
+} from '../chatbot-studio/chatbot-studio-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -440,6 +445,33 @@ const goalPayloadSchema = z.object({
 
 const partialGoalPayloadSchema = goalPayloadSchema.partial();
 
+const studioWizardPayloadSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  name: z.string().min(1),
+  domain: z.string().min(1),
+  businessType: z.enum(studioBusinessTypes),
+  primaryGoal: z.enum(studioGoals),
+  tone: z.string().min(1).default('professionnel'),
+  templateId: z.string().optional()
+});
+
+const studioImportPayloadSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  fileName: z.string().min(1),
+  fileType: z.enum(['pdf', 'docx', 'markdown', 'txt', 'html']),
+  content: z.string().min(1)
+});
+
+const studioSimulationPayloadSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  message: z.string().min(1).max(1500)
+});
+
+const studioRollbackPayloadSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  versionNumber: z.number().int().positive()
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -465,6 +497,7 @@ export function registerAdminManagementRoutes(
   const aiChat = new AIChatService(database);
   const chatbotProduction = new ChatbotProductionService(database);
   const knowledgeEngine = new KnowledgeEngineService(database);
+  const chatbotStudio = new ChatbotStudioService(database, knowledgeEngine);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
   const productionValidation = new ProductionValidationService({
@@ -1413,6 +1446,134 @@ export function registerAdminManagementRoutes(
     return { suggestion: await knowledgeEngine.rejectSuggestion(params.id, organizationId) };
   });
 
+  app.get('/admin-api/studio', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return await chatbotStudio.dashboard(organizationId);
+  });
+
+  app.get('/admin-api/studio/templates', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+
+    return {
+      templates: await chatbotStudio.templates(),
+      businessTypes: studioBusinessTypes,
+      goals: studioGoals
+    };
+  });
+
+  app.get('/admin-api/studio/:siteId', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return {
+      studio: await chatbotStudio.dashboard(organizationId, params.siteId),
+      versions: await chatbotStudio.versions(organizationId, params.siteId),
+      diff: await chatbotStudio.diff(organizationId, params.siteId)
+    };
+  });
+
+  app.post('/admin-api/studio/:siteId/wizard', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = studioWizardPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return await chatbotStudio.createFromWizard({
+      organizationId,
+      siteId: params.siteId,
+      name: body.name,
+      domain: body.domain,
+      businessType: body.businessType,
+      primaryGoal: body.primaryGoal,
+      tone: body.tone,
+      templateId: body.templateId,
+      userId: context.user.id
+    });
+  });
+
+  app.post('/admin-api/studio/:siteId/import-document', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = studioImportPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return {
+      proposal: await chatbotStudio.importDocument({
+        organizationId,
+        siteId: params.siteId,
+        fileName: body.fileName,
+        fileType: body.fileType,
+        content: body.content
+      })
+    };
+  });
+
+  app.post('/admin-api/studio/import-proposals/:proposalId/accept', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ proposalId: z.string().uuid() }).parse(request.params);
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return await chatbotStudio.acceptImportProposal(
+      params.proposalId,
+      organizationId,
+      context.user.id
+    );
+  });
+
+  app.post('/admin-api/studio/:siteId/simulate', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = studioSimulationPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return await chatbotStudio.simulate({
+      organizationId,
+      siteId: params.siteId,
+      message: body.message
+    });
+  });
+
+  app.post('/admin-api/studio/:siteId/publish', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return { version: await chatbotStudio.publish(organizationId, params.siteId, context.user.id) };
+  });
+
+  app.post('/admin-api/studio/:siteId/rollback', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = studioRollbackPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return {
+      version: await chatbotStudio.rollback(organizationId, params.siteId, body.versionNumber)
+    };
+  });
+
   app.get('/admin-api/prospects', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'prospects:read');
@@ -2127,6 +2288,20 @@ function requireOrganizationAccess(user: UserRecord, organizationId: string): vo
       statusCode: 403,
       code: 'ORGANIZATION_ACCESS_DENIED'
     });
+  }
+}
+
+async function requireSiteAccess(
+  database: Database,
+  siteId: string,
+  organizationId: string
+): Promise<void> {
+  const result = await database.query<{ id: string }>(
+    `select id from sites where id = $1 and organization_id = $2`,
+    [siteId, organizationId]
+  );
+  if (!result.rows[0]) {
+    throw new AppError('Site access denied', { statusCode: 404, code: 'SITE_NOT_FOUND' });
   }
 }
 

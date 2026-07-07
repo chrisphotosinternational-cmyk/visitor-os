@@ -1,6 +1,17 @@
 # Roadmap
 
-## Current Development - Sprint 18
+## Current Development - Sprint 19
+
+- Chatbot Studio no-code builder
+- `/studio` admin workspace
+- Wizard chatbot creation
+- Business templates
+- Document import proposals
+- Draft / published versioning
+- Simulation mode
+- Publish and rollback workflow
+
+## Previous Development - Sprint 18
 
 - Knowledge Engine administration
 - `/chatbots` admin workspace

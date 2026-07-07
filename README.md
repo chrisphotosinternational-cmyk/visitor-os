@@ -37,6 +37,7 @@ The first working MVP is available:
 - Chatbot Multi-sites module for public widget conversations, site-specific business configuration, lead acquisition and CRM handoff.
 - Moto CMS widget integration with public script generation, allowed domains, site Q/A import, unanswered questions and lead capture settings.
 - Knowledge Engine administration for chatbot intentions, structured knowledge, suggestions, flows, personality and goals.
+- Chatbot Studio for no-code chatbot creation, business templates, document import proposals, simulation, publication and rollback.
 
 ## Release Candidate 1
 
@@ -105,6 +106,21 @@ Documentation:
 - `docs/CHATBOT_ADMIN.md`
 - `docs/KNOWLEDGE_SUGGESTIONS.md`
 - `docs/CONVERSATION_FLOWS.md`
+
+## Chatbot Studio
+
+The admin `/studio` route provides a no-code builder for each public chatbot.
+
+It lets an administrator create a chatbot from a wizard, apply business templates, import documents as proposed knowledge, simulate visitor questions, publish a version and roll back when needed.
+
+The Studio is additive. It orchestrates the existing Knowledge Engine and widget infrastructure without replacing CRM, prospects, pipeline, AI qualification, enrichment, dashboards or existing chatbot modules.
+
+Documentation:
+
+- `docs/CHATBOT_STUDIO.md`
+- `docs/TEMPLATES.md`
+- `docs/IMPORTER_DES_CONNAISSANCES.md`
+- `docs/VERSIONING.md`
 
 ## Planned Modules
 
