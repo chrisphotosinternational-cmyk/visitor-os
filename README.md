@@ -71,6 +71,12 @@ The architecture guardrails are documented in `docs/ARCHITECTURE_GUARDRAILS.md`.
 
 No future sprint should remove, rename or break existing modules, public APIs, migrations, the public widget, Railway deployment, PostgreSQL compatibility or Moto CMS integration.
 
+## Decision Principles
+
+Product decisions must prioritize the product over isolated features, the chatbot before the CRM, observation before development, and simplicity before complexity.
+
+The decision framework is documented in `docs/DECISION_PRINCIPLES.md`.
+
 ## Documentation officielle
 
 The official product and architecture references are:
@@ -78,8 +84,9 @@ The official product and architecture references are:
 - `docs/PRODUCT_MANIFEST.md`
 - `docs/ARCHITECTURE_GUARDRAILS.md`
 - `docs/PRODUCT_REQUIREMENTS.md`
+- `docs/DECISION_PRINCIPLES.md`
 
-Every future sprint must respect these three documents before implementation.
+Every future sprint must respect these documents before implementation.
 
 ## Release Candidate 1
 
