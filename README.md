@@ -6,6 +6,12 @@ The CRM is an important module, but it is not the product core. The product core
 
 The first integration target is Moto CMS 4. Moto CMS remains a showcase website only. VISITOR-OS is embedded through an external JavaScript widget, while all intelligence, data, administration, and automation run on an external Node.js-compatible SaaS platform such as Render, Railway, Fly.io, or DigitalOcean App Platform.
 
+## Pourquoi VISITOR-OS ?
+
+VISITOR-OS does not try to replace LLMs, chat widgets, CRMs or FAQ tools. It orchestrates them around a business objective.
+
+The official value proposition is documented in `docs/VALUE_PROPOSITION.md`.
+
 ## Current Status
 
 Development version: `v1.0.0-RC1`.
