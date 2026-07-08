@@ -2,6 +2,16 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 20 - Reasoning Engine & Goal-Oriented Conversations
+
+- Added Reasoning Engine service for intent detection, goal-oriented responses, personality adaptation and next best action selection.
+- Added visitor conversation context with lead readiness score and detected needs.
+- Added reasoning traces for admin/debug visibility without exposing traces to public visitors.
+- Integrated Reasoning Engine into the public widget pipeline while preserving the existing widget response contract.
+- Added protected admin routes for conversation context, reasoning traces, replay and Reasoning Lab tests.
+- Added Reasoning Lab tab in chatbot administration.
+- Added documentation for reasoning, lead readiness and next best actions.
+
 ## Sprint 19 - Chatbot Studio & No-Code Builder
 
 - Added `/studio` admin workspace for no-code chatbot creation.

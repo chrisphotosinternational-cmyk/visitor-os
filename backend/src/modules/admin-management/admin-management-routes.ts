@@ -69,6 +69,8 @@ import {
   studioBusinessTypes,
   studioGoals
 } from '../chatbot-studio/chatbot-studio-service.js';
+import { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
+import { ConversationRepository } from '../conversations/conversation-repository.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -472,6 +474,15 @@ const studioRollbackPayloadSchema = z.object({
   versionNumber: z.number().int().positive()
 });
 
+const reasoningTestPayloadSchema = z.object({
+  organizationId: z.string().uuid().optional(),
+  message: z.string().min(1).max(1500)
+});
+
+const reasoningReplayPayloadSchema = z.object({
+  message: z.string().min(1).max(1500).optional()
+});
+
 export function registerAdminManagementRoutes(
   app: FastifyInstance,
   database: Database,
@@ -498,6 +509,8 @@ export function registerAdminManagementRoutes(
   const chatbotProduction = new ChatbotProductionService(database);
   const knowledgeEngine = new KnowledgeEngineService(database);
   const chatbotStudio = new ChatbotStudioService(database, knowledgeEngine);
+  const reasoningEngine = new ReasoningEngineService(database, knowledgeEngine);
+  const conversations = new ConversationRepository(database);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
   const productionValidation = new ProductionValidationService({
@@ -1444,6 +1457,78 @@ export function registerAdminManagementRoutes(
     const organizationId = resolveOrganizationFilter(context.user);
 
     return { suggestion: await knowledgeEngine.rejectSuggestion(params.id, organizationId) };
+  });
+
+  app.get('/admin-api/conversations/:id/context', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+    const conversation = await conversations.findConversation(params.id, organizationId);
+    if (!conversation) throw notFound('Conversation not found', 'CONVERSATION_NOT_FOUND');
+
+    return { context: await reasoningEngine.getContext(organizationId, conversation.id) };
+  });
+
+  app.get('/admin-api/conversations/:id/reasoning-traces', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = resolveOrganizationFilter(context.user);
+    const conversation = await conversations.findConversation(params.id, organizationId);
+    if (!conversation) throw notFound('Conversation not found', 'CONVERSATION_NOT_FOUND');
+
+    return { traces: await reasoningEngine.listTraces(organizationId, conversation.id) };
+  });
+
+  app.post('/admin-api/conversations/:id/reasoning/replay', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = reasoningReplayPayloadSchema.parse(request.body ?? {});
+    const organizationId = resolveOrganizationFilter(context.user);
+    const conversation = await conversations.findConversation(params.id, organizationId);
+    if (!conversation) throw notFound('Conversation not found', 'CONVERSATION_NOT_FOUND');
+    const messages = await conversations.listMessages(conversation.id, organizationId);
+    const lastVisitorMessage = [...messages]
+      .reverse()
+      .find((message) => message.sender_type === 'visitor')?.content;
+
+    return {
+      reasoning: await reasoningEngine.replay({
+        organizationId,
+        siteId: conversation.site_id,
+        visitorId: conversation.visitor_id,
+        conversationId: conversation.id,
+        message: body.message ?? lastVisitorMessage ?? ''
+      })
+    };
+  });
+
+  app.post('/admin-api/chatbots/:siteId/reasoning/test', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = reasoningTestPayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
+    await requireSiteAccess(database, params.siteId, organizationId);
+
+    return {
+      reasoning: await reasoningEngine.test({
+        organizationId,
+        siteId: params.siteId,
+        message: body.message
+      })
+    };
+  });
+
+  app.get('/admin-api/reasoning/dashboard', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const query = optionalOrganizationQuerySchema.parse(request.query);
+    const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
+
+    return { metrics: await reasoningEngine.metrics(organizationId) };
   });
 
   app.get('/admin-api/studio', async (request) => {

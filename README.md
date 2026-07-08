@@ -38,6 +38,7 @@ The first working MVP is available:
 - Moto CMS widget integration with public script generation, allowed domains, site Q/A import, unanswered questions and lead capture settings.
 - Knowledge Engine administration for chatbot intentions, structured knowledge, suggestions, flows, personality and goals.
 - Chatbot Studio for no-code chatbot creation, business templates, document import proposals, simulation, publication and rollback.
+- Reasoning Engine for intent detection, goal-oriented responses, lead readiness, next best action and admin-only reasoning traces.
 
 ## Release Candidate 1
 
@@ -121,6 +122,19 @@ Documentation:
 - `docs/TEMPLATES.md`
 - `docs/IMPORTER_DES_CONNAISSANCES.md`
 - `docs/VERSIONING.md`
+
+## Reasoning Engine
+
+The Reasoning Engine adds a decision layer between visitor questions and public chatbot answers.
+
+It detects intent, reads conversation context, applies site goals and personality, selects the next best action and calculates lead readiness. The public widget stays compatible, while admin users can inspect context and reasoning traces through the Reasoning Lab.
+
+Documentation:
+
+- `docs/REASONING_ENGINE.md`
+- `docs/REASONING_LAB.md`
+- `docs/LEAD_READINESS.md`
+- `docs/NEXT_BEST_ACTION.md`
 
 ## Planned Modules
 

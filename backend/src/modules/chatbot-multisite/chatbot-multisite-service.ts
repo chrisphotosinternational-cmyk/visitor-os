@@ -10,6 +10,7 @@ import type { DecisionEngine, DecisionEngineResult } from '../decision-engine/de
 import type { NotificationEngine } from '../notifications/notification-engine.js';
 import type { ChatbotProductionService } from '../chatbot-production/chatbot-production-service.js';
 import type { KnowledgeEngineService } from '../knowledge-engine/knowledge-engine-service.js';
+import type { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
 
 export type ChatbotSiteReference = {
   siteKey?: string | undefined;
@@ -85,6 +86,7 @@ export class MultiSiteChatbotService {
       notificationEngine?: { notify(input: NotificationRequest): Promise<unknown> } | undefined;
       production?: ChatbotProductionService | undefined;
       knowledgeEngine?: KnowledgeEngineService | undefined;
+      reasoningEngine?: ReasoningEngineService | undefined;
     }
   ) {}
 
@@ -197,7 +199,7 @@ export class MultiSiteChatbotService {
     const site = await this.dependencies.conversations.findSite(conversation.site_id);
     this.dependencies.production?.assertDomainAllowed(site ?? {}, input.sourceUrl);
 
-    await this.dependencies.conversations.addMessage({
+    const visitorMessage = await this.dependencies.conversations.addMessage({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
       senderType: 'visitor',
@@ -219,7 +221,7 @@ export class MultiSiteChatbotService {
     }
 
     const recentHistory = await this.dependencies.conversations.listMessages(conversation.id);
-    const decision = await this.decideWithSiteKnowledge({
+    const baseDecision = await this.decideWithSiteKnowledge({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
       siteId: conversation.site_id,
@@ -231,6 +233,50 @@ export class MultiSiteChatbotService {
       })),
       pageUrl: conversation.page_url
     });
+    const reasoning = this.dependencies.reasoningEngine
+      ? await this.dependencies.reasoningEngine.reason({
+          organizationId: conversation.organization_id,
+          siteId: conversation.site_id,
+          visitorId: conversation.visitor_id,
+          conversationId: conversation.id,
+          messageId: visitorMessage.id,
+          userMessage: input.content,
+          conversationHistory: recentHistory.map((message) => ({
+            senderType: message.sender_type,
+            content: message.content
+          })),
+          detectedIntent: baseDecision.reason,
+          knowledgeAnswer:
+            baseDecision.source === 'knowledge_base' || baseDecision.source === 'faq'
+              ? {
+                  reply: baseDecision.reply,
+                  source: baseDecision.source === 'knowledge_base' ? 'knowledge_engine' : 'site_qa',
+                  confidence: baseDecision.confidence,
+                  matchedItemId: baseDecision.matchedItemId,
+                  detectedIntent: baseDecision.reason,
+                  reason: baseDecision.reason ?? baseDecision.source
+                }
+              : null
+        })
+      : null;
+    const decision = reasoning
+      ? {
+          ...baseDecision,
+          reply:
+            baseDecision.source === 'human_escalation'
+              ? baseDecision.reply
+              : reasoning.response_text,
+          source:
+            baseDecision.source === 'human_escalation' && reasoning.response_type === 'fallback'
+              ? baseDecision.source
+              : reasoning.response_type,
+          confidence: reasoning.confidence_score,
+          shouldEscalate:
+            baseDecision.shouldEscalate || reasoning.next_best_action === 'escalate_to_admin',
+          matchedItemId: reasoning.selected_knowledge_item_id ?? baseDecision.matchedItemId,
+          reason: reasoning.detected_intent
+        }
+      : baseDecision;
 
     const assistantMessage = await this.dependencies.conversations.addMessage({
       organizationId: conversation.organization_id,
@@ -332,13 +378,14 @@ export class MultiSiteChatbotService {
     }
 
     const shouldCaptureLead =
-      site &&
-      (await this.dependencies.production?.shouldPromptLeadCapture({
-        site,
-        conversationId: conversation.id,
-        lastDecisionSource: decision.source,
-        lastMessage: input.content
-      }));
+      reasoning?.lead_capture_recommended ||
+      (site &&
+        (await this.dependencies.production?.shouldPromptLeadCapture({
+          site,
+          conversationId: conversation.id,
+          lastDecisionSource: decision.source,
+          lastMessage: input.content
+        })));
     const leadSettings = site ? this.dependencies.production?.widgetSettings(site) : undefined;
 
     return {

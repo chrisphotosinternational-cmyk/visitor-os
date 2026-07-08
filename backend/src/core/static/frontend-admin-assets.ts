@@ -64,6 +64,9 @@ createApp({
       chatbotPersonality: null,
       chatbotGoals: [],
       chatbotSuggestions: [],
+      reasoningLabMessage: '',
+      reasoningLabResult: null,
+      reasoningMetrics: null,
       studioDashboard: null,
       studioTemplates: [],
       studioBusinessTypes: [],
@@ -245,6 +248,7 @@ createApp({
           this.loadUsers(),
           this.loadSites(),
           this.loadChatbotMetrics(),
+          this.loadReasoningMetrics(),
           this.loadChatbots(),
           this.loadStudioDashboard(),
           this.loadProspects(),
@@ -554,6 +558,11 @@ createApp({
       const response = await this.apiRequest('/admin-api/chatbot/dashboard', { authenticated: true });
       if (response.ok) this.chatbotMetrics = (await response.json()).metrics;
     },
+    async loadReasoningMetrics() {
+      if (!this.token) return;
+      const response = await this.apiRequest('/admin-api/reasoning/dashboard', { authenticated: true });
+      if (response.ok) this.reasoningMetrics = (await response.json()).metrics;
+    },
     async loadChatbots() {
       if (!this.token) return;
       const response = await this.apiRequest('/admin-api/chatbots', { authenticated: true });
@@ -598,6 +607,17 @@ createApp({
       if (goals.ok) this.chatbotGoals = (await goals.json()).goals;
       if (suggestions.ok) this.chatbotSuggestions = (await suggestions.json()).suggestions;
       if (unanswered.ok) this.unansweredQuestions = (await unanswered.json()).unanswered;
+    },
+    async testReasoningLab() {
+      if (!this.selectedChatbot || !this.reasoningLabMessage.trim()) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/reasoning/test', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ message: this.reasoningLabMessage })
+      });
+      if (!response.ok) throw new Error('Test Reasoning impossible.');
+      this.reasoningLabResult = (await response.json()).reasoning;
+      await this.loadReasoningMetrics();
     },
     async createChatbotIntent() {
       if (!this.selectedChatbot) return;
@@ -1740,6 +1760,7 @@ createApp({
             <button type="button" @click="navigate('chatbot-flows', selectedChatbot?.id)">Parcours</button>
             <button type="button" @click="navigate('chatbot-personality', selectedChatbot?.id)">Personnalite</button>
             <button type="button" @click="navigate('chatbot-goals', selectedChatbot?.id)">Objectifs</button>
+            <button type="button" @click="navigate('chatbot-reasoning', selectedChatbot?.id)">Reasoning Lab</button>
             <button type="button" @click="openSiteWidget(selectedChatbot)">Widget</button>
           </nav>
           <div class="filters"><input v-model="chatbotSearch" @input="loadChatbotWorkspace()" placeholder="Rechercher intention, connaissance, tag" /></div>
@@ -1749,6 +1770,29 @@ createApp({
             <article class="metric"><span>Knowledge</span><strong>{{ chatbotOverview?.knowledge_items ?? 0 }}</strong><small>Tous statuts</small></article>
             <article class="metric"><span>Intentions</span><strong>{{ chatbotOverview?.intents ?? 0 }}</strong><small>Configurees</small></article>
             <article class="metric"><span>Suggestions</span><strong>{{ chatbotOverview?.suggestions ?? 0 }}</strong><small>En attente</small></article>
+          </div>
+
+          <div v-if="route === 'chatbot-reasoning'" class="split-layout">
+            <form class="admin-form" @submit.prevent="testReasoningLab">
+              <h3>Reasoning Lab</h3>
+              <textarea v-model="reasoningLabMessage" placeholder="Question visiteur a tester"></textarea>
+              <button type="submit">Tester la question</button>
+            </form>
+            <div class="activity-list">
+              <article v-if="reasoningLabResult">
+                <strong>{{ reasoningLabResult.response_text }}</strong>
+                <span>Intention : {{ reasoningLabResult.detected_intent }} · confiance {{ Math.round((reasoningLabResult.confidence_score || 0) * 100) }}%</span>
+                <small>Action : {{ reasoningLabResult.next_best_action }} · lead readiness {{ reasoningLabResult.lead_readiness_score }}</small>
+                <small>Connaissance : {{ reasoningLabResult.selected_knowledge_item_id || '-' }}</small>
+                <small>Objectif : {{ reasoningLabResult.applied_goal || '-' }} · personnalite : {{ reasoningLabResult.applied_personality || '-' }}</small>
+                <pre>{{ reasoningLabResult.reasoning_trace }}</pre>
+              </article>
+              <article v-if="reasoningMetrics">
+                <strong>Metriques Reasoning</strong>
+                <span>Lead >60 : {{ reasoningMetrics.lead_readiness_over_60 || 0 }} · Lead >80 : {{ reasoningMetrics.lead_readiness_over_80 || 0 }}</span>
+                <small>Confiance moyenne : {{ reasoningMetrics.average_confidence || 0 }} · Escalades : {{ reasoningMetrics.admin_escalations || 0 }}</small>
+              </article>
+            </div>
           </div>
 
           <div v-if="route === 'chatbot-intents'" class="split-layout">
@@ -2465,6 +2509,7 @@ function normalizeRoute(pathname) {
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/stats')) return 'chatbot-stats';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/personality')) return 'chatbot-personality';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/goals')) return 'chatbot-goals';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/reasoning')) return 'chatbot-reasoning';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/widget')) return 'site-widget';
   if (pathname.startsWith('/chatbots/')) return 'chatbot-overview';
   if (pathname === '/sites') return 'sites';
@@ -2506,6 +2551,7 @@ function routePath(route, id) {
   if (route === 'chatbot-stats') return '/chatbots/' + id + '/stats';
   if (route === 'chatbot-personality') return '/chatbots/' + id + '/personality';
   if (route === 'chatbot-goals') return '/chatbots/' + id + '/goals';
+  if (route === 'chatbot-reasoning') return '/chatbots/' + id + '/reasoning';
   if (route === 'sites') return '/sites';
   if (route === 'site-widget') return '/sites/' + id + '/widget';
   if (route === 'site-unanswered') return '/sites/' + id + '/unanswered';
@@ -2539,6 +2585,7 @@ function routeTitle(route) {
     'chatbot-stats': 'Statistiques chatbot',
     'chatbot-personality': 'Personnalite',
     'chatbot-goals': 'Objectifs',
+    'chatbot-reasoning': 'Reasoning Lab',
     sites: 'Chatbot multi-sites',
     'site-widget': 'Integration widget',
     'site-unanswered': 'Questions sans reponse',

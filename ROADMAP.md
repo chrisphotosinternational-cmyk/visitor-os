@@ -1,6 +1,18 @@
 # Roadmap
 
-## Current Development - Sprint 19
+## Current Development - Sprint 20
+
+- Reasoning Engine for public chatbot conversations
+- Intent detection without mandatory external AI
+- Goal-oriented responses per site
+- Personality-aware answers
+- Visitor conversation memory
+- Lead readiness score
+- Next best action selection
+- Reasoning traces for admin debugging
+- Reasoning Lab in chatbot administration
+
+## Previous Development - Sprint 19
 
 - Chatbot Studio no-code builder
 - `/studio` admin workspace
