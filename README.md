@@ -57,6 +57,14 @@ If the answer is no, the feature should not enter the core product.
 
 Reference: `docs/PRODUCT_MANIFEST.md`.
 
+## Architecture Principles
+
+Future development must preserve the existing foundation and evolve VISITOR-OS by adding modules, extensions, providers or plugins.
+
+The architecture guardrails are documented in `docs/ARCHITECTURE_GUARDRAILS.md`.
+
+No future sprint should remove, rename or break existing modules, public APIs, migrations, the public widget, Railway deployment, PostgreSQL compatibility or Moto CMS integration.
+
 ## Release Candidate 1
 
 RC1 focuses on stability rather than new business functionality.
