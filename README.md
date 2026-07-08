@@ -65,6 +65,16 @@ The architecture guardrails are documented in `docs/ARCHITECTURE_GUARDRAILS.md`.
 
 No future sprint should remove, rename or break existing modules, public APIs, migrations, the public widget, Railway deployment, PostgreSQL compatibility or Moto CMS integration.
 
+## Documentation officielle
+
+The official product and architecture references are:
+
+- `docs/PRODUCT_MANIFEST.md`
+- `docs/ARCHITECTURE_GUARDRAILS.md`
+- `docs/PRODUCT_REQUIREMENTS.md`
+
+Every future sprint must respect these three documents before implementation.
+
 ## Release Candidate 1
 
 RC1 focuses on stability rather than new business functionality.
