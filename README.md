@@ -12,6 +12,12 @@ VISITOR-OS does not try to replace LLMs, chat widgets, CRMs or FAQ tools. It orc
 
 The official value proposition is documented in `docs/VALUE_PROPOSITION.md`.
 
+## Vision long terme
+
+The 3 to 5 year product ambition is documented in `docs/LONG_TERM_VISION.md`.
+
+VISITOR-OS must evolve toward a durable no-code platform for specialized business assistants, with stable modules, exportable data, interchangeable AI providers and continuous improvement through conversations.
+
 ## Current Status
 
 Development version: `v1.0.0-RC1`.
