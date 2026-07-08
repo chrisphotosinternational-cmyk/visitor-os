@@ -39,6 +39,7 @@ The first working MVP is available:
 - Knowledge Engine administration for chatbot intentions, structured knowledge, suggestions, flows, personality and goals.
 - Chatbot Studio for no-code chatbot creation, business templates, document import proposals, simulation, publication and rollback.
 - Reasoning Engine for intent detection, goal-oriented responses, lead readiness, next best action and admin-only reasoning traces.
+- Runtime optimization layer for widget diagnostics, response quality scoring, short TTL cache and chatbot review queue.
 
 ## Release Candidate 1
 
@@ -128,6 +129,12 @@ Documentation:
 The Reasoning Engine adds a decision layer between visitor questions and public chatbot answers.
 
 It detects intent, reads conversation context, applies site goals and personality, selects the next best action and calculates lead readiness. The public widget stays compatible, while admin users can inspect context and reasoning traces through the Reasoning Lab.
+
+## Runtime Optimization
+
+Sprint 21 adds operational visibility around the public widget and chatbot runtime.
+
+It measures response time, Knowledge Engine time, Reasoning Engine time, payload size, cache usage and errors by site. It also adds widget debug mode, admin widget diagnostics, response quality scoring and a review queue for conversations that need human correction.
 
 Documentation:
 

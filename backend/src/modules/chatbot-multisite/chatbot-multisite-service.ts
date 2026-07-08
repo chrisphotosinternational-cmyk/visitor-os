@@ -10,7 +10,14 @@ import type { DecisionEngine, DecisionEngineResult } from '../decision-engine/de
 import type { NotificationEngine } from '../notifications/notification-engine.js';
 import type { ChatbotProductionService } from '../chatbot-production/chatbot-production-service.js';
 import type { KnowledgeEngineService } from '../knowledge-engine/knowledge-engine-service.js';
-import type { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
+import type {
+  ReasoningEngineService,
+  ReasoningOutput
+} from '../reasoning/reasoning-engine-service.js';
+import type {
+  ChatbotRuntimeCache,
+  ChatbotRuntimeService
+} from '../chatbot-runtime/chatbot-runtime-service.js';
 
 export type ChatbotSiteReference = {
   siteKey?: string | undefined;
@@ -87,16 +94,26 @@ export class MultiSiteChatbotService {
       production?: ChatbotProductionService | undefined;
       knowledgeEngine?: KnowledgeEngineService | undefined;
       reasoningEngine?: ReasoningEngineService | undefined;
+      runtime?: ChatbotRuntimeService | undefined;
+      runtimeCache?: ChatbotRuntimeCache | undefined;
     }
   ) {}
 
   async getWidgetConfig(input: ChatbotSiteReference): Promise<ChatbotWidgetConfig> {
     const site = await this.resolveSite(input);
     this.dependencies.production?.assertDomainAllowed(site, input.sourceUrl);
-    const businessConfig = await this.dependencies.decisionEngine.getBusinessConfig(
-      site.business_config_id
-    );
-    const widgetSettings = this.dependencies.production?.widgetSettings(site);
+    const businessConfig =
+      (await this.dependencies.runtimeCache?.getOrSet(
+        `business-config:${site.organization_id}:${site.id}:${site.business_config_id}`,
+        [`site:${site.id}`, 'business-config', 'widget-config'],
+        () => this.dependencies.decisionEngine.getBusinessConfig(site.business_config_id)
+      )) ?? (await this.dependencies.decisionEngine.getBusinessConfig(site.business_config_id));
+    const widgetSettings =
+      (await this.dependencies.runtimeCache?.getOrSet(
+        `widget-settings:${site.organization_id}:${site.id}`,
+        [`site:${site.id}`, 'site-settings', 'widget-config'],
+        () => Promise.resolve(this.dependencies.production?.widgetSettings(site))
+      )) ?? this.dependencies.production?.widgetSettings(site);
 
     return {
       siteKey: site.widget_public_key,
@@ -176,6 +193,15 @@ export class MultiSiteChatbotService {
         conversationUrl: `/admin/conversations/${conversation.id}`
       }
     });
+    await this.dependencies.runtime?.recordWidgetEvent({
+      organizationId: site.organization_id,
+      siteId: site.id,
+      conversationId: conversation.id,
+      eventType: 'conversation_started',
+      publicKey: site.widget_public_key,
+      sourceUrl: input.sourceUrl ?? input.pageUrl,
+      metadata: { referrer: input.referrer ?? null }
+    });
 
     return {
       conversationId: conversation.id,
@@ -185,6 +211,8 @@ export class MultiSiteChatbotService {
   }
 
   async sendMessage(input: SendChatbotMessageInput): Promise<ChatbotMessageResponse> {
+    const startedAt = Date.now();
+    const payloadBytes = byteLength(input.content);
     const conversation = await this.dependencies.conversations.findConversation(
       input.conversationId
     );
@@ -221,6 +249,7 @@ export class MultiSiteChatbotService {
     }
 
     const recentHistory = await this.dependencies.conversations.listMessages(conversation.id);
+    const knowledgeStartedAt = Date.now();
     const baseDecision = await this.decideWithSiteKnowledge({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
@@ -233,6 +262,8 @@ export class MultiSiteChatbotService {
       })),
       pageUrl: conversation.page_url
     });
+    const knowledgeTimeMs = Date.now() - knowledgeStartedAt;
+    const reasoningStartedAt = Date.now();
     const reasoning = this.dependencies.reasoningEngine
       ? await this.dependencies.reasoningEngine.reason({
           organizationId: conversation.organization_id,
@@ -259,6 +290,7 @@ export class MultiSiteChatbotService {
               : null
         })
       : null;
+    const reasoningTimeMs = Date.now() - reasoningStartedAt;
     const decision = reasoning
       ? {
           ...baseDecision,
@@ -289,7 +321,10 @@ export class MultiSiteChatbotService {
         shouldEscalate: decision.shouldEscalate,
         processingTimeMs: decision.processingTimeMs,
         ...(decision.matchedItemId ? { matchedItemId: decision.matchedItemId } : {}),
-        ...(decision.reason ? { decisionReason: decision.reason } : {})
+        ...(decision.reason ? { decisionReason: decision.reason } : {}),
+        ...(reasoning?.quality_scores.response_quality_score
+          ? { responseQualityScore: reasoning.quality_scores.response_quality_score }
+          : {})
       }
     });
 
@@ -333,6 +368,18 @@ export class MultiSiteChatbotService {
         });
       }
     }
+
+    await this.recordRuntimeReview({
+      organizationId: conversation.organization_id,
+      siteId: conversation.site_id,
+      conversationId: conversation.id,
+      messageId: assistantMessage.id,
+      question: input.content,
+      source: decision.source,
+      confidence: decision.confidence,
+      matchedItemId: decision.matchedItemId,
+      reasoning
+    });
 
     const prospectId = prospect?.id ?? conversation.prospect_id;
     if (prospectId) {
@@ -388,7 +435,7 @@ export class MultiSiteChatbotService {
         })));
     const leadSettings = site ? this.dependencies.production?.widgetSettings(site) : undefined;
 
-    return {
+    const response: ChatbotMessageResponse = {
       conversationId: conversation.id,
       prospectId,
       reply: decision.reply,
@@ -401,12 +448,38 @@ export class MultiSiteChatbotService {
       leadCapture:
         shouldCaptureLead && leadSettings
           ? {
-              enabled: true,
+              enabled: true as const,
               fields: leadSettings.leadCaptureFields,
               privacyMessage: leadSettings.privacyMessage
             }
           : undefined
     };
+    await this.dependencies.runtime?.recordMetrics({
+      organizationId: conversation.organization_id,
+      siteId: conversation.site_id,
+      conversationId: conversation.id,
+      messageId: assistantMessage.id,
+      totalTimeMs: Date.now() - startedAt,
+      knowledgeTimeMs,
+      reasoningTimeMs,
+      payloadBytes,
+      responseBytes: byteLength(JSON.stringify(response)),
+      cache: this.dependencies.runtimeCache?.snapshot()
+    });
+    await this.dependencies.runtime?.recordWidgetEvent({
+      organizationId: conversation.organization_id,
+      siteId: conversation.site_id,
+      conversationId: conversation.id,
+      eventType: 'message_sent',
+      sourceUrl: input.sourceUrl,
+      message: 'Widget message processed',
+      metadata: {
+        responseSource: decision.source,
+        confidence: decision.confidence,
+        nextBestAction: reasoning?.next_best_action ?? null
+      }
+    });
+    return response;
   }
 
   async captureLead(input: {
@@ -453,6 +526,15 @@ export class MultiSiteChatbotService {
       conversationId: conversation.id,
       senderType: 'system',
       content: 'Coordonnees prospect capturees via le chatbot.'
+    });
+    await this.dependencies.runtime?.recordWidgetEvent({
+      organizationId: conversation.organization_id,
+      siteId: conversation.site_id,
+      conversationId: conversation.id,
+      eventType: 'lead_sent',
+      sourceUrl: input.sourceUrl,
+      message: 'Lead capture submitted',
+      metadata: { deduplicated: captured.deduplicated }
     });
 
     return {
@@ -503,6 +585,50 @@ export class MultiSiteChatbotService {
     return this.dependencies.decisionEngine.decide(input);
   }
 
+  private async recordRuntimeReview(input: {
+    organizationId: string;
+    siteId: string;
+    conversationId: string;
+    messageId: string;
+    question: string;
+    source: string;
+    confidence: number;
+    matchedItemId?: string | undefined;
+    reasoning: ReasoningOutput | null;
+  }): Promise<void> {
+    const reasons: string[] = [];
+    if (input.confidence < 0.45) reasons.push('low_confidence');
+    if (input.source === 'fallback' || input.source === 'human_escalation') {
+      reasons.push('fallback_used');
+    }
+    if (!input.matchedItemId) reasons.push('missing_knowledge_item');
+    if (
+      (input.reasoning?.lead_readiness_score ?? 0) >= 70 &&
+      input.reasoning?.next_best_action !== 'create_prospect'
+    ) {
+      reasons.push('hot_lead_without_capture');
+    }
+    if (input.reasoning?.next_best_action === 'escalate_to_admin') {
+      reasons.push('admin_escalation');
+    }
+    if ((input.reasoning?.quality_scores.response_quality_score ?? 1) < 0.5) {
+      reasons.push('low_quality_score');
+    }
+    if (reasons.length === 0) return;
+
+    await this.dependencies.runtime?.enqueueReview({
+      organizationId: input.organizationId,
+      siteId: input.siteId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      reason: reasons.join(','),
+      confidenceScore: input.reasoning?.confidence_score ?? input.confidence,
+      leadReadinessScore: input.reasoning?.lead_readiness_score ?? null,
+      nextBestAction: input.reasoning?.next_best_action ?? null,
+      question: input.question
+    });
+  }
+
   private async resolveSite(input: ChatbotSiteReference): Promise<SiteRecord> {
     if (input.siteId) {
       const site = await this.dependencies.conversations.findSite(input.siteId);
@@ -530,4 +656,8 @@ export class MultiSiteChatbotService {
 
     throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
   }
+}
+
+function byteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8');
 }

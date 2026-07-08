@@ -2,6 +2,17 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Sprint 21 - Runtime Optimization & Real Widget Validation
+
+- Added chatbot runtime metrics by site for response time, Knowledge Engine time, Reasoning Engine time, payload size, cache usage and errors.
+- Added short TTL runtime cache for public chatbot configuration and widget settings.
+- Hardened the public widget for debug mode, double loading, missing localStorage, browser errors and readable diagnostics.
+- Added widget runtime events for script loads, conversations, messages, leads and client-side errors.
+- Added response quality scoring with confidence, intent, knowledge match, goal alignment and lead action signals.
+- Added chatbot review queue for low confidence, fallback, missing knowledge, hot lead without capture and admin escalation cases.
+- Added admin widget diagnostics and chatbot review page.
+- Added documentation for widget debug mode, runtime optimization and review queue.
+
 ## Sprint 20 - Reasoning Engine & Goal-Oriented Conversations
 
 - Added Reasoning Engine service for intent detection, goal-oriented responses, personality adaptation and next best action selection.

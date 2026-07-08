@@ -1,4 +1,7 @@
 export const publicWidgetJs = String.raw`(function () {
+  if (window.__VISITOR_OS_WIDGET_LOADED__) return;
+  window.__VISITOR_OS_WIDGET_LOADED__ = true;
+
   const currentScript = document.currentScript;
   const scriptUrl = currentScript?.src ? new URL(currentScript.src) : null;
   const apiBaseUrl = currentScript?.dataset.apiUrl || scriptUrl?.origin || 'http://localhost:3000';
@@ -6,10 +9,17 @@ export const publicWidgetJs = String.raw`(function () {
   const siteKey = currentScript?.dataset.siteKey || inferredKey || 'demo-site-key';
   const siteId = currentScript?.dataset.siteId || '';
   const siteSlug = currentScript?.dataset.siteSlug || '';
+  const debugEnabled = currentScript?.dataset.debug === 'true';
   const anonymousId = getAnonymousId();
   let conversationId = null;
   let config = null;
   let leadCaptureVisible = false;
+
+  debug('script_loaded', {
+    publicKey: siteKey,
+    domain: window.location.hostname,
+    apiBaseUrl
+  });
 
   const launcher = document.createElement('button');
   launcher.type = 'button';
@@ -189,7 +199,13 @@ export const publicWidgetJs = String.raw`(function () {
       const data = await response.json();
       addMessage('assistant', data.reply || 'Votre message a bien ete recu.');
       if (data.leadCapture?.enabled) showLeadCapture(data.leadCapture);
-    } catch {
+    } catch (error) {
+      debug('error', { scope: 'send_message', error: errorMessage(error), conversationId });
+      await reportWidgetEvent('error', {
+        conversationId,
+        message: errorMessage(error),
+        metadata: { scope: 'send_message' }
+      });
       addMessage('assistant', "Le message n'a pas pu etre envoye. Veuillez reessayer.");
     }
   });
@@ -209,7 +225,13 @@ export const publicWidgetJs = String.raw`(function () {
       addMessage('assistant', data.message || 'Merci, vos coordonnees ont bien ete transmises.');
       leadForm.hidden = true;
       leadCaptureVisible = false;
-    } catch {
+    } catch (error) {
+      debug('error', { scope: 'lead_capture', error: errorMessage(error), conversationId });
+      await reportWidgetEvent('error', {
+        conversationId,
+        message: errorMessage(error),
+        metadata: { scope: 'lead_capture' }
+      });
       addMessage('assistant', "Vos coordonnees n'ont pas pu etre transmises. Veuillez reessayer.");
     }
   });
@@ -230,6 +252,7 @@ export const publicWidgetJs = String.raw`(function () {
     });
     const data = await response.json();
     conversationId = data.conversationId;
+    debug('conversation_started', { conversationId });
     addMessage('assistant', config?.welcomeMessage || data.message || 'Bonjour, je peux vous aider. Posez-moi votre question.');
   }
 
@@ -238,6 +261,11 @@ export const publicWidgetJs = String.raw`(function () {
     params.set('sourceUrl', window.location.href);
     const response = await fetch(apiBaseUrl + '/api/widget/config?' + params.toString());
     config = response.ok ? await response.json() : null;
+    debug('site_loaded', { ok: response.ok, siteId: config?.siteId, siteSlug: config?.siteSlug });
+    await reportWidgetEvent('script_loaded', {
+      message: response.ok ? 'Widget script loaded' : 'Widget config failed',
+      metadata: { status: response.status, siteId: config?.siteId || null }
+    });
     const color = config?.primaryColor || '#1f6f5b';
     launcher.style.background = color;
     panel.querySelector('.visitor-os-header').style.background = color;
@@ -272,11 +300,48 @@ export const publicWidgetJs = String.raw`(function () {
 
   function getAnonymousId() {
     const key = 'visitor-os-anonymous-id';
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
+    try {
+      const existing = window.localStorage?.getItem(key);
+      if (existing) return existing;
+    } catch {
+      debug('localStorage_unavailable', {});
+    }
 
-    const value = crypto.randomUUID();
-    window.localStorage.setItem(key, value);
+    const value = window.crypto?.randomUUID ? crypto.randomUUID() : 'visitor-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    try {
+      window.localStorage?.setItem(key, value);
+    } catch {
+      debug('localStorage_write_failed', {});
+    }
     return value;
+  }
+
+  async function reportWidgetEvent(eventType, options) {
+    try {
+      await fetch(apiBaseUrl + '/api/widget/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...buildSiteReference(),
+          sourceUrl: window.location.href,
+          eventType,
+          debugEnabled,
+          conversationId: options?.conversationId || undefined,
+          message: options?.message || undefined,
+          metadata: options?.metadata || undefined
+        })
+      });
+    } catch (error) {
+      debug('event_report_failed', { error: errorMessage(error) });
+    }
+  }
+
+  function debug(event, payload) {
+    if (!debugEnabled) return;
+    console.info('[VISITOR-OS widget]', event, payload);
+  }
+
+  function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error || 'unknown_error');
   }
 })();`;

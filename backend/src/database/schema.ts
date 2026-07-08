@@ -770,13 +770,70 @@ export async function initializeSchema(database: Database): Promise<void> {
       message_id uuid references messages(id) on delete set null,
       detected_intent text not null,
       intent_confidence numeric(4, 3) not null default 0,
-        selected_knowledge_item_id text,
+      selected_knowledge_item_id text,
       applied_goal text,
       applied_personality text,
       next_best_action text not null,
       confidence_score numeric(4, 3) not null default 0,
+      knowledge_match_score numeric(4, 3),
+      goal_alignment_score numeric(4, 3),
+      lead_action_score numeric(4, 3),
+      response_quality_score numeric(4, 3),
       trace_json jsonb not null default '{}'::jsonb,
       created_at timestamptz not null default now()
+    );
+
+    create table if not exists chatbot_runtime_metrics (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid not null references sites(id) on delete cascade,
+      conversation_id uuid references conversations(id) on delete cascade,
+      message_id uuid references messages(id) on delete set null,
+      total_time_ms integer not null default 0,
+      knowledge_time_ms integer not null default 0,
+      reasoning_time_ms integer not null default 0,
+      db_time_ms integer not null default 0,
+      payload_bytes integer not null default 0,
+      response_bytes integer not null default 0,
+      cache_hits integer not null default 0,
+      cache_misses integer not null default 0,
+      error_code text,
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists widget_runtime_events (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid not null references sites(id) on delete cascade,
+      conversation_id uuid references conversations(id) on delete set null,
+      event_type text not null,
+      public_key text,
+      source_url text,
+      domain text,
+      user_agent text,
+      debug_enabled boolean not null default false,
+      message text,
+      metadata jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists chatbot_review_queue (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid not null references sites(id) on delete cascade,
+      conversation_id uuid references conversations(id) on delete cascade,
+      message_id uuid references messages(id) on delete set null,
+      reason text not null,
+      status text not null default 'pending',
+      confidence_score numeric(4, 3),
+      lead_readiness_score integer,
+      next_best_action text,
+      question text,
+      admin_note text,
+      resolved_by_user_id uuid references users(id) on delete set null,
+      resolved_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
     );
 
     create table if not exists ai_configurations (
@@ -816,6 +873,7 @@ export async function initializeSchema(database: Database): Promise<void> {
     alter table messages add column if not exists processing_time_ms integer;
     alter table messages add column if not exists matched_item_id text;
     alter table messages add column if not exists decision_reason text;
+    alter table messages add column if not exists response_quality_score numeric(4, 3);
 
     create index if not exists idx_sites_widget_public_key on sites(widget_public_key);
     create index if not exists idx_sites_allowed_domains on sites using gin(allowed_domains);
@@ -851,6 +909,12 @@ export async function initializeSchema(database: Database): Promise<void> {
       on reasoning_traces(organization_id, detected_intent);
     create index if not exists idx_reasoning_traces_org_action
       on reasoning_traces(organization_id, next_best_action);
+    create index if not exists idx_runtime_metrics_site_created
+      on chatbot_runtime_metrics(site_id, created_at desc);
+    create index if not exists idx_widget_events_site_created
+      on widget_runtime_events(site_id, created_at desc);
+    create index if not exists idx_review_queue_site_status
+      on chatbot_review_queue(site_id, status, created_at desc);
     create index if not exists idx_site_qa_items_site_active_priority
       on site_qa_items(site_id, is_active, priority desc);
     create index if not exists idx_site_qa_items_tags on site_qa_items using gin(tags);

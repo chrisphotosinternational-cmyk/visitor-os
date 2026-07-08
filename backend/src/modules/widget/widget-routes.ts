@@ -11,6 +11,11 @@ import { ChatbotProductionService } from '../chatbot-production/chatbot-producti
 import { KnowledgeEngineService } from '../knowledge-engine/knowledge-engine-service.js';
 import { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
 import { publicWidgetJs } from '../../core/static/public-widget-assets.js';
+import {
+  ChatbotRuntimeCache,
+  ChatbotRuntimeService
+} from '../chatbot-runtime/chatbot-runtime-service.js';
+import { AppError } from '../../core/errors/app-error.js';
 
 const widgetSiteReferenceSchema = z
   .object({
@@ -42,6 +47,14 @@ const leadCaptureSchema = z.object({
   need: z.string().max(1000).optional()
 });
 
+const widgetEventSchema = widgetSiteReferenceSchema.extend({
+  conversationId: z.string().uuid().optional(),
+  eventType: z.enum(['script_loaded', 'error']),
+  debugEnabled: z.boolean().optional(),
+  message: z.string().max(1000).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional()
+});
+
 export function registerWidgetRoutes(
   app: FastifyInstance,
   database: Database,
@@ -54,6 +67,8 @@ export function registerWidgetRoutes(
   const production = new ChatbotProductionService(database);
   const knowledgeEngine = new KnowledgeEngineService(database);
   const reasoningEngine = new ReasoningEngineService(database, knowledgeEngine);
+  const runtime = new ChatbotRuntimeService(database);
+  const runtimeCache = new ChatbotRuntimeCache(30_000);
   const chatbot = new MultiSiteChatbotService({
     conversations,
     prospects,
@@ -62,7 +77,9 @@ export function registerWidgetRoutes(
     ...(notificationEngine ? { notificationEngine } : {}),
     production,
     knowledgeEngine,
-    reasoningEngine
+    reasoningEngine,
+    runtime,
+    runtimeCache
   });
 
   app.get('/widget/:siteKey.js', (request, reply) => {
@@ -106,6 +123,44 @@ export function registerWidgetRoutes(
       payload: body
     });
   });
+
+  app.post('/api/widget/events', async (request) => {
+    const body = widgetEventSchema.parse(request.body);
+    const site = await resolveEventSite(conversations, body);
+    production.assertDomainAllowed(site, body.sourceUrl ?? sourceUrlFromRequest(request));
+    await runtime.recordWidgetEvent({
+      organizationId: site.organization_id,
+      siteId: site.id,
+      conversationId: body.conversationId,
+      eventType: body.eventType,
+      publicKey: site.widget_public_key,
+      sourceUrl: body.sourceUrl ?? sourceUrlFromRequest(request),
+      userAgent: headerValue(request.headers['user-agent']),
+      debugEnabled: body.debugEnabled,
+      message: body.message,
+      metadata: body.metadata
+    });
+    return { ok: true };
+  });
+}
+
+async function resolveEventSite(
+  conversations: ConversationRepository,
+  input: z.infer<typeof widgetSiteReferenceSchema>
+) {
+  if (input.siteId) {
+    const site = await conversations.findSite(input.siteId);
+    if (site) return site;
+  }
+  if (input.siteSlug) {
+    const site = await conversations.findSiteBySlug(input.siteSlug);
+    if (site) return site;
+  }
+  if (input.siteKey) {
+    const site = await conversations.findSiteByWidgetKey(input.siteKey);
+    if (site) return site;
+  }
+  throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
 }
 
 function sourceUrlFromRequest(request: { headers: Record<string, string | string[] | undefined> }) {

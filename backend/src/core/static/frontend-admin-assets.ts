@@ -67,6 +67,8 @@ createApp({
       reasoningLabMessage: '',
       reasoningLabResult: null,
       reasoningMetrics: null,
+      chatbotReviewQueue: [],
+      chatbotReviewStatus: 'pending',
       studioDashboard: null,
       studioTemplates: [],
       studioBusinessTypes: [],
@@ -475,8 +477,17 @@ createApp({
       this.selectedSite = data.site;
       this.siteWidget = data.widget;
       this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
+      await this.loadWidgetDiagnostics(data.site.id);
       await this.loadUnansweredQuestions();
       this.navigate('site-widget', site.id);
+    },
+    async loadWidgetDiagnostics(siteId = this.selectedSite?.id) {
+      if (!siteId) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + siteId + '/widget-diagnostics', { authenticated: true });
+      if (response.ok) {
+        const data = await response.json();
+        this.siteWidget = { ...(this.siteWidget || {}), diagnostics: data.diagnostics };
+      }
     },
     async saveSiteWidgetSettings() {
       if (!this.selectedSite) return;
@@ -503,13 +514,18 @@ createApp({
       this.selectedSite = data.site;
       this.siteWidget = data.widget;
       this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
-      await Promise.all([this.loadSites(), this.loadChatbotMetrics()]);
+      await Promise.all([this.loadSites(), this.loadChatbotMetrics(), this.loadWidgetDiagnostics(data.site.id)]);
       this.notify('Configuration widget sauvegardee.');
     },
     async copyWidgetScript() {
       if (!this.siteWidget?.scriptCode) return;
       await navigator.clipboard.writeText(this.siteWidget.scriptCode);
       this.notify('Code widget copie.');
+    },
+    async copyWidgetDebugScript() {
+      if (!this.siteWidget?.debugScriptCode) return;
+      await navigator.clipboard.writeText(this.siteWidget.debugScriptCode);
+      this.notify('Code widget debug copie.');
     },
     async importSiteQa() {
       if (!this.selectedSite || !this.siteQaCsv.trim()) return;
@@ -618,6 +634,22 @@ createApp({
       if (!response.ok) throw new Error('Test Reasoning impossible.');
       this.reasoningLabResult = (await response.json()).reasoning;
       await this.loadReasoningMetrics();
+    },
+    async loadChatbotReviewQueue(siteId = this.selectedChatbot?.id) {
+      if (!siteId) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + siteId + '/review?status=' + this.chatbotReviewStatus, { authenticated: true });
+      if (!response.ok) throw new Error('File de revue indisponible.');
+      this.chatbotReviewQueue = (await response.json()).review;
+    },
+    async resolveChatbotReview(item, status) {
+      if (!this.selectedChatbot) return;
+      const response = await this.apiRequest('/admin-api/chatbots/' + this.selectedChatbot.id + '/review/' + item.id + '/resolve', {
+        method: 'POST',
+        authenticated: true,
+        body: JSON.stringify({ status })
+      });
+      if (!response.ok) throw new Error('Mise a jour revue impossible.');
+      await this.loadChatbotReviewQueue();
     },
     async createChatbotIntent() {
       if (!this.selectedChatbot) return;
@@ -1368,12 +1400,14 @@ createApp({
       if (route.startsWith('chatbot-')) {
         const siteId = arguments[1] || this.selectedChatbot?.id;
         if (siteId) void this.loadChatbotWorkspace(siteId);
+        if (route === 'chatbot-review' && siteId) void this.loadChatbotReviewQueue(siteId);
       }
       if (route === 'sites') {
         void this.loadSites();
         void this.loadChatbotMetrics();
       }
       if (route === 'site-unanswered') void this.loadUnansweredQuestions();
+      if (route === 'site-widget') void this.loadWidgetDiagnostics(arguments[1] || this.selectedSite?.id);
     },
     syncRouteFromLocation() {
       this.route = normalizeRoute(window.location.pathname);
@@ -1761,6 +1795,7 @@ createApp({
             <button type="button" @click="navigate('chatbot-personality', selectedChatbot?.id)">Personnalite</button>
             <button type="button" @click="navigate('chatbot-goals', selectedChatbot?.id)">Objectifs</button>
             <button type="button" @click="navigate('chatbot-reasoning', selectedChatbot?.id)">Reasoning Lab</button>
+            <button type="button" @click="navigate('chatbot-review', selectedChatbot?.id)">Review</button>
             <button type="button" @click="openSiteWidget(selectedChatbot)">Widget</button>
           </nav>
           <div class="filters"><input v-model="chatbotSearch" @input="loadChatbotWorkspace()" placeholder="Rechercher intention, connaissance, tag" /></div>
@@ -1791,8 +1826,24 @@ createApp({
                 <strong>Metriques Reasoning</strong>
                 <span>Lead >60 : {{ reasoningMetrics.lead_readiness_over_60 || 0 }} · Lead >80 : {{ reasoningMetrics.lead_readiness_over_80 || 0 }}</span>
                 <small>Confiance moyenne : {{ reasoningMetrics.average_confidence || 0 }} · Escalades : {{ reasoningMetrics.admin_escalations || 0 }}</small>
+                <small v-if="reasoningMetrics.runtime?.bySite?.length">Runtime moyen : {{ reasoningMetrics.runtime.bySite[0].average_response_ms }} ms</small>
               </article>
             </div>
+          </div>
+
+          <div v-if="route === 'chatbot-review'" class="activity-list">
+            <div class="inline-actions">
+              <select v-model="chatbotReviewStatus" @change="loadChatbotReviewQueue()"><option value="pending">pending</option><option value="fixed">fixed</option><option value="ignored">ignored</option></select>
+              <button type="button" @click="loadChatbotReviewQueue()">Actualiser</button>
+            </div>
+            <article v-for="item in chatbotReviewQueue" :key="item.id">
+              <strong>{{ item.question || item.reason }}</strong>
+              <span>{{ item.reason }} · {{ item.status }}</span>
+              <small>Confiance {{ Math.round((item.confidence_score || 0) * 100) }}% · lead {{ item.lead_readiness_score || 0 }} · action {{ item.next_best_action || '-' }}</small>
+              <small>Conversation : {{ item.conversation_id || '-' }}</small>
+              <div class="inline-actions"><button type="button" @click="resolveChatbotReview(item, 'fixed')">Marquer corrige</button><button type="button" @click="resolveChatbotReview(item, 'ignored')">Ignorer</button></div>
+            </article>
+            <p v-if="chatbotReviewQueue.length === 0" class="muted">Aucune conversation a revoir.</p>
           </div>
 
           <div v-if="route === 'chatbot-intents'" class="split-layout">
@@ -1974,7 +2025,8 @@ createApp({
               <h3>Code Moto CMS</h3>
               <p>Collez ce script dans Moto CMS 4.</p>
               <textarea readonly rows="3">{{ siteWidget?.scriptCode }}</textarea>
-              <div class="inline-actions"><button type="button" @click="copyWidgetScript">Copier le script</button><a :href="siteWidget?.scriptUrl" target="_blank" rel="noreferrer">Voir le script</a></div>
+              <textarea readonly rows="3">{{ siteWidget?.debugScriptCode }}</textarea>
+              <div class="inline-actions"><button type="button" @click="copyWidgetScript">Copier le script</button><button type="button" @click="copyWidgetDebugScript">Copier debug</button><a :href="siteWidget?.scriptUrl" target="_blank" rel="noreferrer">Voir le script</a></div>
             </article>
             <article>
               <h3>Apercu live</h3>
@@ -1985,6 +2037,24 @@ createApp({
               </div>
             </article>
           </div>
+          <div class="dashboard-grid compact-grid">
+            <article class="metric"><span>Script</span><strong>{{ siteWidget?.diagnostics?.scriptStatus || '-' }}</strong><small>Etat widget</small></article>
+            <article class="metric"><span>Conversations</span><strong>{{ siteWidget?.diagnostics?.conversationsCreated || 0 }}</strong><small>Depuis widget</small></article>
+            <article class="metric"><span>Temps moyen</span><strong>{{ siteWidget?.diagnostics?.metrics?.average_response_ms || 0 }} ms</strong><small>7 derniers jours</small></article>
+            <article class="metric"><span>Erreurs</span><strong>{{ siteWidget?.diagnostics?.metrics?.errors || 0 }}</strong><small>Runtime</small></article>
+          </div>
+          <section class="timeline-section">
+            <div class="panel-header"><h2>Diagnostics widget</h2><button type="button" @click="loadWidgetDiagnostics()">Tester API</button></div>
+            <p>Dernier chargement : {{ siteWidget?.diagnostics?.lastWidgetLoad?.created_at || '-' }}</p>
+            <p>Domaines autorises : {{ (siteWidget?.diagnostics?.allowedDomains || []).join(', ') || '-' }}</p>
+            <div class="activity-list">
+              <article v-for="error in siteWidget?.diagnostics?.recentErrors || []" :key="error.id">
+                <strong>{{ error.message || error.event_type }}</strong>
+                <span>{{ error.domain || error.source_url || '-' }}</span>
+                <small>{{ error.created_at }}</small>
+              </article>
+            </div>
+          </section>
           <form class="admin-form prospect-form" @submit.prevent="saveSiteWidgetSettings">
             <label class="checkbox-field"><input v-model="siteWidgetForm.widgetEnabled" type="checkbox" /> Widget actif</label>
             <select v-model="siteWidgetForm.status"><option value="active">active</option><option value="inactive">inactive</option></select>
@@ -2510,6 +2580,7 @@ function normalizeRoute(pathname) {
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/personality')) return 'chatbot-personality';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/goals')) return 'chatbot-goals';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/reasoning')) return 'chatbot-reasoning';
+  if (pathname.startsWith('/chatbots/') && pathname.endsWith('/review')) return 'chatbot-review';
   if (pathname.startsWith('/chatbots/') && pathname.endsWith('/widget')) return 'site-widget';
   if (pathname.startsWith('/chatbots/')) return 'chatbot-overview';
   if (pathname === '/sites') return 'sites';
@@ -2552,6 +2623,7 @@ function routePath(route, id) {
   if (route === 'chatbot-personality') return '/chatbots/' + id + '/personality';
   if (route === 'chatbot-goals') return '/chatbots/' + id + '/goals';
   if (route === 'chatbot-reasoning') return '/chatbots/' + id + '/reasoning';
+  if (route === 'chatbot-review') return '/chatbots/' + id + '/review';
   if (route === 'sites') return '/sites';
   if (route === 'site-widget') return '/sites/' + id + '/widget';
   if (route === 'site-unanswered') return '/sites/' + id + '/unanswered';
@@ -2586,6 +2658,7 @@ function routeTitle(route) {
     'chatbot-personality': 'Personnalite',
     'chatbot-goals': 'Objectifs',
     'chatbot-reasoning': 'Reasoning Lab',
+    'chatbot-review': 'Review chatbot',
     sites: 'Chatbot multi-sites',
     'site-widget': 'Integration widget',
     'site-unanswered': 'Questions sans reponse',

@@ -770,6 +770,10 @@ model ReasoningTrace {
   appliedPersonality      String?      @map("applied_personality")
   nextBestAction          String       @map("next_best_action")
   confidenceScore         Decimal      @default(0) @map("confidence_score") @db.Decimal(4, 3)
+  knowledgeMatchScore     Decimal?     @map("knowledge_match_score") @db.Decimal(4, 3)
+  goalAlignmentScore      Decimal?     @map("goal_alignment_score") @db.Decimal(4, 3)
+  leadActionScore         Decimal?     @map("lead_action_score") @db.Decimal(4, 3)
+  responseQualityScore    Decimal?     @map("response_quality_score") @db.Decimal(4, 3)
   traceJson               Json         @default("{}") @map("trace_json")
   createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz
   organization            Organization @relation(fields: [organizationId], references: [id])
@@ -778,4 +782,66 @@ model ReasoningTrace {
   @@index([organizationId, detectedIntent])
   @@index([organizationId, nextBestAction])
   @@map("reasoning_traces")
+}
+
+model ChatbotRuntimeMetric {
+  id             String   @id @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  siteId         String   @map("site_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+  messageId      String?  @map("message_id") @db.Uuid
+  totalTimeMs    Int      @default(0) @map("total_time_ms")
+  knowledgeTimeMs Int     @default(0) @map("knowledge_time_ms")
+  reasoningTimeMs Int     @default(0) @map("reasoning_time_ms")
+  dbTimeMs       Int      @default(0) @map("db_time_ms")
+  payloadBytes   Int      @default(0) @map("payload_bytes")
+  responseBytes  Int      @default(0) @map("response_bytes")
+  cacheHits      Int      @default(0) @map("cache_hits")
+  cacheMisses    Int      @default(0) @map("cache_misses")
+  errorCode      String?  @map("error_code")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([siteId, createdAt])
+  @@map("chatbot_runtime_metrics")
+}
+
+model WidgetRuntimeEvent {
+  id             String   @id @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  siteId         String   @map("site_id") @db.Uuid
+  conversationId String?  @map("conversation_id") @db.Uuid
+  eventType      String   @map("event_type")
+  publicKey      String?  @map("public_key")
+  sourceUrl      String?  @map("source_url")
+  domain         String?
+  userAgent      String?  @map("user_agent")
+  debugEnabled   Boolean  @default(false) @map("debug_enabled")
+  message        String?
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([siteId, createdAt])
+  @@map("widget_runtime_events")
+}
+
+model ChatbotReviewQueue {
+  id                 String    @id @db.Uuid
+  organizationId     String    @map("organization_id") @db.Uuid
+  siteId             String    @map("site_id") @db.Uuid
+  conversationId     String?   @map("conversation_id") @db.Uuid
+  messageId          String?   @map("message_id") @db.Uuid
+  reason             String
+  status             String    @default("pending")
+  confidenceScore    Decimal?  @map("confidence_score") @db.Decimal(4, 3)
+  leadReadinessScore Int?      @map("lead_readiness_score")
+  nextBestAction     String?   @map("next_best_action")
+  question           String?
+  adminNote          String?   @map("admin_note")
+  resolvedByUserId   String?   @map("resolved_by_user_id") @db.Uuid
+  resolvedAt         DateTime? @map("resolved_at") @db.Timestamptz
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@index([siteId, status, createdAt])
+  @@map("chatbot_review_queue")
 }

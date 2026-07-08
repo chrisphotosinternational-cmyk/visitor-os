@@ -57,6 +57,7 @@ export type MessageRecord = {
   processing_time_ms: number | null;
   matched_item_id: string | null;
   decision_reason: string | null;
+  response_quality_score: number | null;
   created_at: Date;
 };
 
@@ -67,6 +68,7 @@ export type DecisionMetadata = {
   processingTimeMs: number;
   matchedItemId?: string;
   decisionReason?: string;
+  responseQualityScore?: number;
 };
 
 export type AdminConversationListItem = {
@@ -191,9 +193,10 @@ export class ConversationRepository {
         should_escalate,
         processing_time_ms,
         matched_item_id,
-        decision_reason
+        decision_reason,
+        response_quality_score
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       returning *
       `,
       [
@@ -207,7 +210,8 @@ export class ConversationRepository {
         input.decision?.shouldEscalate ?? null,
         input.decision?.processingTimeMs ?? null,
         input.decision?.matchedItemId ?? null,
-        input.decision?.decisionReason ?? null
+        input.decision?.decisionReason ?? null,
+        input.decision?.responseQualityScore ?? null
       ]
     );
 

@@ -4,6 +4,10 @@ import type {
   KnowledgeEngineService,
   KnowledgeAnswer
 } from '../knowledge-engine/knowledge-engine-service.js';
+import {
+  calculateQualityScores,
+  type QualityScores
+} from '../chatbot-runtime/chatbot-runtime-service.js';
 
 export const nextBestActions = [
   'answer_only',
@@ -45,6 +49,7 @@ export type ReasoningOutput = {
   lead_readiness_score: number;
   applied_goal: string | null;
   applied_personality: string | null;
+  quality_scores: QualityScores;
 };
 
 type IntentCandidate = {
@@ -129,6 +134,14 @@ export class ReasoningEngineService {
       0.05,
       Math.min(0.99, (chosenAnswer.confidence + detected.confidence) / 2)
     );
+    const qualityScores = calculateQualityScores({
+      confidenceScore: confidence,
+      intentConfidence: detected.confidence,
+      knowledgeMatched: Boolean(baseAnswer?.matchedItemId ?? selectedKnowledge?.id),
+      goalAligned: Boolean(chosenAnswer.appliedGoal),
+      nextBestAction: action,
+      leadReadinessScore: leadScore
+    });
     const updatedContext = await this.updateContext(input, context, detected.intent, leadScore);
     const output: ReasoningOutput = {
       detected_intent: detected.intent,
@@ -151,7 +164,8 @@ export class ReasoningEngineService {
       confidence_score: roundScore(confidence),
       lead_readiness_score: leadScore,
       applied_goal: chosenAnswer.appliedGoal,
-      applied_personality: summarizePersonality(personality)
+      applied_personality: summarizePersonality(personality),
+      quality_scores: qualityScores
     };
 
     await this.recordTrace(input, output);
@@ -331,9 +345,10 @@ export class ReasoningEngineService {
       insert into reasoning_traces (
         id, organization_id, site_id, conversation_id, message_id, detected_intent,
         intent_confidence, selected_knowledge_item_id, applied_goal, applied_personality,
-        next_best_action, confidence_score, trace_json
+        next_best_action, confidence_score, knowledge_match_score, goal_alignment_score,
+        lead_action_score, response_quality_score, trace_json
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       `,
       [
         randomUUID(),
@@ -348,6 +363,10 @@ export class ReasoningEngineService {
         output.applied_personality,
         output.next_best_action,
         output.confidence_score,
+        output.quality_scores.knowledge_match_score,
+        output.quality_scores.goal_alignment_score,
+        output.quality_scores.lead_action_score,
+        output.quality_scores.response_quality_score,
         JSON.stringify(output.reasoning_trace)
       ]
     );

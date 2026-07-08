@@ -71,6 +71,11 @@ import {
 } from '../chatbot-studio/chatbot-studio-service.js';
 import { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
+import {
+  assertReviewStatus,
+  ChatbotRuntimeCache,
+  ChatbotRuntimeService
+} from '../chatbot-runtime/chatbot-runtime-service.js';
 
 const organizationPayloadSchema = z.object({
   name: z.string().min(1),
@@ -347,6 +352,15 @@ const unansweredQuerySchema = z.object({
   status: z.enum(['pending', 'ignored', 'converted']).default('pending')
 });
 
+const reviewQueueQuerySchema = z.object({
+  status: z.enum(['pending', 'ignored', 'fixed']).default('pending')
+});
+
+const reviewResolvePayloadSchema = z.object({
+  status: z.enum(['ignored', 'fixed']),
+  adminNote: z.string().max(1000).optional()
+});
+
 const qaImportPayloadSchema = z.object({
   csv: z.string().min(1)
 });
@@ -511,6 +525,8 @@ export function registerAdminManagementRoutes(
   const chatbotStudio = new ChatbotStudioService(database, knowledgeEngine);
   const reasoningEngine = new ReasoningEngineService(database, knowledgeEngine);
   const conversations = new ConversationRepository(database);
+  const chatbotRuntime = new ChatbotRuntimeService(database);
+  const chatbotRuntimeCache = new ChatbotRuntimeCache(30_000);
   const cache = dependencies?.cache;
   const queue = dependencies?.queue;
   const productionValidation = new ProductionValidationService({
@@ -962,8 +978,29 @@ export function registerAdminManagementRoutes(
         publicKey: site.widget_public_key,
         scriptUrl: `${baseUrl}/widget/${site.widget_public_key}.js`,
         scriptCode,
-        active: site.status === 'active' && site.widget_enabled
+        debugScriptCode: `<script src="${baseUrl}/widget/${site.widget_public_key}.js" data-debug="true"></script>`,
+        active: site.status === 'active' && site.widget_enabled,
+        diagnostics: await chatbotRuntime.diagnostics({
+          organizationId: site.organization_id,
+          site
+        })
       }
+    };
+  });
+
+  app.get('/admin-api/chatbots/:siteId/widget-diagnostics', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      diagnostics: await chatbotRuntime.diagnostics({
+        organizationId: site.organization_id,
+        site
+      })
     };
   });
 
@@ -980,6 +1017,7 @@ export function registerAdminManagementRoutes(
       existing.organization_id,
       body
     );
+    chatbotRuntimeCache.invalidate([`site:${params.siteId}`, 'site-settings', 'widget-config']);
 
     return {
       site,
@@ -1068,6 +1106,47 @@ export function registerAdminManagementRoutes(
       ...(body.category ? { category: body.category } : {}),
       tags: body.tags
     });
+  });
+
+  app.get('/admin-api/chatbots/:siteId/review', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:read');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const query = reviewQueueQuerySchema.parse(request.query);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      review: await chatbotRuntime.listReviewQueue({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        status: query.status
+      })
+    };
+  });
+
+  app.post('/admin-api/chatbots/:siteId/review/:reviewId/resolve', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z
+      .object({ siteId: z.string().uuid(), reviewId: z.string().uuid() })
+      .parse(request.params);
+    const body = reviewResolvePayloadSchema.parse(request.body);
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+
+    return {
+      review: await chatbotRuntime.resolveReview({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        reviewId: params.reviewId,
+        status: assertReviewStatus(body.status),
+        adminNote: body.adminNote,
+        userId: context.user.id
+      })
+    };
   });
 
   app.get('/admin-api/chatbot/dashboard', async (request) => {
@@ -1528,7 +1607,12 @@ export function registerAdminManagementRoutes(
     const query = optionalOrganizationQuerySchema.parse(request.query);
     const organizationId = resolveOrganizationFilter(context.user, query.organizationId);
 
-    return { metrics: await reasoningEngine.metrics(organizationId) };
+    return {
+      metrics: {
+        ...(await reasoningEngine.metrics(organizationId)),
+        runtime: await chatbotRuntime.organizationMetrics(organizationId)
+      }
+    };
   });
 
   app.get('/admin-api/studio', async (request) => {

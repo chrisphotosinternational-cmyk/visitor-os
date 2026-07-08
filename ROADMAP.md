@@ -1,6 +1,17 @@
 # Roadmap
 
-## Current Development - Sprint 20
+## Current Development - Sprint 21
+
+- Runtime optimization for public chatbot conversations
+- Per-site response-time and payload metrics
+- Short TTL cache for widget and chatbot configuration
+- Real-world widget hardening for Moto CMS, mobile and browsers
+- Widget debug mode with readable console logs
+- Admin widget diagnostics
+- Response quality scoring
+- Chatbot review queue
+
+## Previous Development - Sprint 20
 
 - Reasoning Engine for public chatbot conversations
 - Intent detection without mandatory external AI
