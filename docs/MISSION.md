@@ -1,6 +1,6 @@
 # Mission
 
-VISITOR-OS est une Customer Intelligence Platform.
+VISITOR-OS est une plateforme conversationnelle pour creer, administrer, deployer, faire evoluer et optimiser des chatbots metier sans code.
 
 Sa mission est de :
 
@@ -19,12 +19,19 @@ Les visiteurs passent, posent parfois une question, hesitent, quittent le site, 
 
 VISITOR-OS transforme ces signaux faibles en donnees utiles, en conversations lisibles et en opportunites suivies.
 
+Le CRM conserve ces opportunites et organise le suivi commercial, mais il n'est pas le coeur du produit.
+
+Le coeur du produit est le chatbot metier : il comprend le site, exploite la connaissance, qualifie la demande et alimente le CRM.
+
 ## Mission Produit
 
 VISITOR-OS doit :
 
 - aider les visiteurs rapidement ;
 - repondre avec des informations fiables ;
+- creer des chatbots metier administrables sans code ;
+- apprendre des conversations sous controle humain ;
+- proposer des optimisations de connaissance et de parcours ;
 - collecter uniquement ce qui est utile ;
 - qualifier les intentions ;
 - creer une memoire exploitable ;
@@ -48,7 +55,7 @@ VISITOR-OS doit fournir une base :
 VISITOR-OS doit etre vendable comme une solution claire :
 
 ```text
-Un systeme simple pour comprendre les visiteurs, capter les opportunites et structurer la connaissance client.
+Une plateforme simple pour creer des chatbots metier intelligents, capter les opportunites et alimenter le CRM sans complexite inutile.
 ```
 
 Le produit doit etre comprehensible sans jargon technique.
@@ -57,5 +64,4 @@ Le produit doit etre comprehensible sans jargon technique.
 
 VISITOR-OS doit rester utile avant d'etre impressionnant.
 
-Une fonctionnalite qui impressionne mais n'aide pas l'utilisateur a mieux comprendre, qualifier ou agir ne doit pas entrer dans le coeur produit.
-
+Une fonctionnalite qui impressionne mais ne rend pas VISITOR-OS plus intelligent ou plus simple a administrer ne doit pas entrer dans le coeur produit.

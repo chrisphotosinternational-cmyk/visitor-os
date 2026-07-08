@@ -1,14 +1,16 @@
 # VISITOR-OS Vision 2030
 
-VISITOR-OS n'est pas un chatbot.
+VISITOR-OS n'est pas un CRM.
 
-VISITOR-OS est une Customer Intelligence Platform.
+VISITOR-OS n'est pas un simple chatbot.
+
+VISITOR-OS est une plateforme conversationnelle de creation, d'administration, de deploiement et d'optimisation de chatbots metier specialises.
 
 Sa mission est de transformer chaque visiteur en conversation, chaque conversation en connaissance, chaque connaissance en opportunite, et chaque opportunite en relation durable.
 
 ## Vision Officielle
 
-D'ici 2030, VISITOR-OS doit devenir une plateforme simple, modulaire et independante permettant a toute organisation de comprendre ses visiteurs, structurer sa connaissance, assister ses equipes et convertir les interactions en relations utiles.
+D'ici 2030, VISITOR-OS doit devenir une plateforme simple, modulaire et independante permettant a toute organisation de creer un assistant metier, structurer sa connaissance, comprendre ses visiteurs et convertir les interactions utiles en opportunites commerciales.
 
 VISITOR-OS doit rester suffisamment simple pour etre exploite par une petite equipe, mais suffisamment robuste pour devenir une base SaaS multi-tenant durable.
 
@@ -18,14 +20,16 @@ La relation client commence avant le CRM.
 
 Elle commence au moment ou un visiteur pose une question, cherche une information, compare une offre, hesite a reserver, ou exprime un besoin encore mal formule.
 
-VISITOR-OS existe pour capturer ce moment, l'organiser, l'enrichir et le rendre actionnable.
+VISITOR-OS existe pour transformer ce moment en conversation, cette conversation en connaissance, cette connaissance en action, puis cette action en opportunite transmise au CRM.
 
 ## Ce Que VISITOR-OS Veut Devenir
 
 VISITOR-OS veut devenir une plateforme capable de :
 
 - comprendre les visiteurs ;
+- creer des chatbots metier sans code ;
 - centraliser la connaissance ;
+- raisonner selon les objectifs du site ;
 - assister les equipes ;
 - qualifier les prospects ;
 - automatiser les taches repetitives ;
@@ -43,6 +47,7 @@ VISITOR-OS n'est pas :
 - un CMS generaliste ;
 - un outil marketing de masse ;
 - un simple chatbot OpenAI ;
+- un CRM comme coeur produit ;
 - un clone de HubSpot ;
 - un clone d'Intercom ;
 - une plateforme de paiement ;
@@ -58,13 +63,23 @@ Elles evitent la dispersion, la dette technique et la confusion commerciale.
 VISITOR-OS doit permettre a une organisation de :
 
 1. brancher un widget sur son site ;
-2. repondre correctement aux visiteurs ;
-3. collecter les bonnes informations sans etre intrusif ;
-4. conserver les conversations ;
-5. transformer les demandes en prospects ;
-6. exploiter ses documents et sa connaissance ;
-7. comprendre ce qui se passe ;
-8. agir plus vite.
+2. creer un chatbot metier en moins de 30 minutes ;
+3. importer ou structurer sa connaissance ;
+4. definir les objectifs du site ;
+5. repondre correctement aux visiteurs ;
+6. collecter les bonnes informations sans etre intrusif ;
+7. transformer les demandes en prospects ;
+8. alimenter automatiquement le CRM.
+
+## Architecture Produit Cible
+
+Le noyau produit est :
+
+```text
+Organisations -> Sites -> Chatbots -> Knowledge Engine -> Reasoning Engine -> Widget Public -> Conversations -> Leads -> CRM
+```
+
+Le CRM reste un module essentiel, mais le coeur de VISITOR-OS est le chatbot metier administrable sans code.
 
 ## Horizon 2030
 

@@ -1,6 +1,8 @@
 # VISITOR-OS
 
-VISITOR-OS is a modular SaaS platform designed to become a lightweight operating system for customer relationships: visitor assistance, lead capture, qualification, CRM, analytics, notifications, exports, and future AI-powered modules.
+VISITOR-OS is a modular conversational SaaS platform designed to create, administer, deploy, improve and optimize specialized business chatbots without code.
+
+The CRM is an important module, but it is not the product core. The product core is the business chatbot: Knowledge Engine, Reasoning Engine, Chatbot Studio, public widget, conversation learning, lead capture and CRM handoff.
 
 The first integration target is Moto CMS 4. Moto CMS remains a showcase website only. VISITOR-OS is embedded through an external JavaScript widget, while all intelligence, data, administration, and automation run on an external Node.js-compatible SaaS platform such as Render, Railway, Fly.io, or DigitalOcean App Platform.
 
@@ -40,6 +42,20 @@ The first working MVP is available:
 - Chatbot Studio for no-code chatbot creation, business templates, document import proposals, simulation, publication and rollback.
 - Reasoning Engine for intent detection, goal-oriented responses, lead readiness, next best action and admin-only reasoning traces.
 - Runtime optimization layer for widget diagnostics, response quality scoring, short TTL cache and chatbot review queue.
+
+## Product Manifest
+
+VISITOR-OS must be developed as a conversational platform first.
+
+Future work must answer one question:
+
+```text
+Does this make VISITOR-OS smarter or easier to administer?
+```
+
+If the answer is no, the feature should not enter the core product.
+
+Reference: `docs/PRODUCT_MANIFEST.md`.
 
 ## Release Candidate 1
 
@@ -199,7 +215,7 @@ Documentation:
 Current architecture:
 
 ```text
-Organization -> Sites -> Business Configuration -> Widget -> Chatbot Multi-sites -> Conversations -> Prospects -> CRM
+Organization -> Sites -> Chatbots -> Knowledge Engine -> Reasoning Engine -> Widget Public -> Conversations -> Leads -> CRM
 ```
 
 ## Quick Start

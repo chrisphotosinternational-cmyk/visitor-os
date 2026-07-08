@@ -1,5 +1,12 @@
 # Roadmap
 
+## Product Direction
+
+- VISITOR-OS is a conversational platform for no-code business chatbots.
+- The chatbot, Knowledge Engine, Reasoning Engine, Chatbot Studio, AI Trainer and Conversation Graph are the product center.
+- The CRM remains a compatible module for lead management, pipeline, scoring, enrichment and commercial follow-up.
+- Every future feature must make VISITOR-OS smarter or easier to administer.
+
 ## Current Development - Sprint 21
 
 - Runtime optimization for public chatbot conversations

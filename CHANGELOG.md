@@ -2,6 +2,14 @@
 
 All notable changes to VISITOR-OS will be documented here.
 
+## Product Manifest - Conversational Platform Alignment
+
+- Clarified that VISITOR-OS is no longer positioned as a CRM-first product.
+- Defined the CRM as a stable module that receives and manages leads, not as the product core.
+- Established the chatbot, Knowledge Engine, Reasoning Engine, Chatbot Studio, AI Trainer and Conversation Graph as the future product center.
+- Added the absolute product rule: every new feature must make VISITOR-OS smarter or easier to administer.
+- Added `docs/PRODUCT_MANIFEST.md` as the reference document for future architecture decisions.
+
 ## Sprint 21 - Runtime Optimization & Real Widget Validation
 
 - Added chatbot runtime metrics by site for response time, Knowledge Engine time, Reasoning Engine time, payload size, cache usage and errors.

@@ -7,13 +7,20 @@ VISITOR-OS doit évoluer par modules sans perdre la simplicité du coeur produit
 Une fonctionnalité appartient au coeur si elle est nécessaire pour la promesse principale :
 
 ```text
-Transformer un visiteur en information exploitable.
+Créer, administrer, publier et améliorer un chatbot métier qui transforme les conversations en opportunités.
 ```
 
 Le coeur contient :
 
 - widget ;
+- chatbots ;
+- Chatbot Studio ;
 - conversations ;
+- Knowledge Engine ;
+- Reasoning Engine ;
+- AI Trainer ;
+- Conversation Graph ;
+- objectifs par site ;
 - prospects ;
 - Decision Engine ;
 - Business Configuration ;
@@ -23,6 +30,8 @@ Le coeur contient :
 - multi-tenant ;
 - notifications système ;
 - analytics essentiels.
+
+Le CRM, les prospects et le pipeline restent dans l'architecture, mais comme modules d'exploitation commerciale des leads, pas comme centre du produit.
 
 ## Module Optionnel
 
@@ -49,14 +58,15 @@ Exemples :
 
 Avant d'ajouter une fonctionnalité, répondre :
 
-1. Est-ce nécessaire pour tous les clients ?
-2. Est-ce nécessaire pour la V1 ?
-3. Est-ce configurable sans code ?
-4. Est-ce maintenable par une seule personne ?
-5. Est-ce testable simplement ?
-6. Est-ce isolé par organisation ?
-7. Peut-on le désactiver ?
-8. Peut-on le reporter ?
+1. Rend-elle VISITOR-OS plus intelligent ?
+2. Rend-elle VISITOR-OS plus simple à administrer ?
+3. Aide-t-elle à créer ou améliorer un chatbot métier ?
+4. Est-elle configurable sans code ?
+5. Est-elle maintenable par une seule personne ?
+6. Est-elle testable simplement ?
+7. Est-elle isolée par organisation ?
+8. Peut-on la désactiver ?
+9. Peut-on la reporter ?
 
 ## Matrice de Décision
 

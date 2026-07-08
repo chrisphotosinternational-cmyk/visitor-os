@@ -4,25 +4,32 @@ VISITOR-OS doit evoluer comme une plateforme produit, pas comme une accumulation
 
 ## Positionnement
 
-VISITOR-OS est positionne entre :
+VISITOR-OS est positionne comme une plateforme conversationnelle no-code pour assistants metier.
+
+Il combine :
 
 - un widget de conversation ;
-- un mini CRM ;
+- un Chatbot Studio ;
 - un moteur de connaissance ;
-- un moteur d'intelligence client ;
+- un Reasoning Engine ;
+- un AI Trainer ;
+- un Conversation Graph ;
+- un CRM comme module de reception et suivi des leads ;
 - une plateforme SaaS modulaire.
 
-Le produit doit rester plus simple qu'un CRM enterprise et plus intelligent qu'un simple chatbot.
+Le produit doit rester plus simple qu'une plateforme enterprise et beaucoup plus administrable qu'un simple chatbot connecte a une IA generique.
 
 ## Strategie Produit
 
-La strategie produit repose sur cinq piliers :
+La strategie produit repose sur sept piliers :
 
 1. conversation ;
 2. connaissance ;
 3. qualification ;
-4. action ;
-5. mesure.
+4. objectif ;
+5. apprentissage supervise ;
+6. action ;
+7. mesure.
 
 Chaque nouvelle capacite doit renforcer au moins un de ces piliers.
 
@@ -30,15 +37,21 @@ Chaque nouvelle capacite doit renforcer au moins un de ces piliers.
 
 Le coeur produit contient :
 
-- widget visiteur ;
+- organisations ;
+- utilisateurs ;
+- sites ;
+- chatbots ;
+- Chatbot Studio ;
+- widget public ;
 - conversations ;
-- prospects ;
-- configuration metier ;
-- Decision Engine ;
-- KMS ;
-- CRM minimal ;
-- notifications essentielles ;
+- Knowledge Engine ;
+- Reasoning Engine ;
+- AI Trainer ;
+- Conversation Graph ;
+- CRM comme module de reception des leads ;
+- pipeline ;
 - analytics utiles ;
+- monitoring ;
 - RBAC ;
 - multi-tenant.
 
@@ -61,7 +74,8 @@ Un module optionnel ne doit pas alourdir le coeur produit.
 
 Une fonctionnalite entre dans le coeur produit uniquement si :
 
-- elle sert la mission principale ;
+- elle rend VISITOR-OS plus intelligent ou plus simple a administrer ;
+- elle sert la creation, l'exploitation ou l'amelioration d'un chatbot metier ;
 - elle est utile a la majorite des organisations ;
 - elle peut etre maintenue par une petite equipe ;
 - elle respecte l'isolation multi-tenant ;
@@ -83,6 +97,16 @@ VISITOR-OS doit :
 - eviter de coder la logique metier dans les prompts ;
 - conserver une strategie de fallback.
 
+## Strategie CRM
+
+Le CRM reste compatible et indispensable.
+
+Il gere les prospects, le pipeline, le scoring, l'IA CRM et l'enrichissement.
+
+Il ne doit pas redevenir le centre de gravite du produit.
+
+Le chatbot cree les conversations et les leads. Le CRM les exploite.
+
 ## Strategie Marche
 
 Les premiers segments naturels sont :
@@ -96,4 +120,3 @@ Les premiers segments naturels sont :
 - sites vitrines avec demandes entrantes.
 
 VISITOR-OS doit d'abord devenir excellent pour les petites organisations avant de viser les grands comptes.
-
