@@ -420,6 +420,19 @@ const knowledgePayloadSchema = z.object({
 
 const partialKnowledgePayloadSchema = knowledgePayloadSchema.partial();
 
+const suggestionAcceptPayloadSchema = z.object({
+  intentId: z.string().uuid().nullable().optional(),
+  title: z.string().min(1).optional(),
+  mainQuestion: z.string().min(1).optional(),
+  alternativeQuestions: z.array(z.string()).optional(),
+  shortAnswer: z.string().min(1).optional(),
+  detailedAnswer: z.string().optional(),
+  commercialAnswer: z.string().optional(),
+  reassuranceAnswer: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  status: z.enum(['draft', 'needs_review']).default('draft')
+});
+
 const flowPayloadSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -1524,9 +1537,10 @@ export function registerAdminManagementRoutes(
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'sites:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = suggestionAcceptPayloadSchema.parse(request.body ?? {});
     const organizationId = resolveOrganizationFilter(context.user);
 
-    return knowledgeEngine.acceptSuggestion(params.id, organizationId, context.user.id);
+    return knowledgeEngine.acceptSuggestion(params.id, organizationId, context.user.id, body);
   });
 
   app.post('/admin-api/knowledge-suggestions/:id/reject', async (request) => {

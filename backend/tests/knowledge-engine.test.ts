@@ -5,7 +5,9 @@ import type { Database } from '../src/database/client.js';
 import { KnowledgeEngineService } from '../src/modules/knowledge-engine/knowledge-engine-service.js';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
+const ORG_B = '00000000-0000-4000-8000-0000000000b1';
 const SITE_A = '00000000-0000-4000-8000-000000000101';
+const SITE_B = '00000000-0000-4000-8000-000000000102';
 const USER_A = '00000000-0000-4000-8000-0000000000f1';
 const INTENT_A = '00000000-0000-4000-8000-00000000i101';
 const KNOWLEDGE_A = '00000000-0000-4000-8000-00000000k101';
@@ -55,7 +57,7 @@ describe('Knowledge Engine administration', () => {
     assert.ok((answer?.confidence ?? 0) > 0.5);
   });
 
-  it('records unknown questions and accepts suggestions into knowledge items', async () => {
+  it('records unknown questions and accepts edited suggestions into draft knowledge items', async () => {
     const database = fakeKnowledgeDatabase();
     const service = new KnowledgeEngineService(database);
     await service.enhancedUnanswered({
@@ -67,11 +69,137 @@ describe('Knowledge Engine administration', () => {
       confidenceScore: 0.32
     });
     const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
-    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A);
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      title: 'Arrivées tardives',
+      mainQuestion: 'Peut-on arriver tard ?',
+      alternativeQuestions: ['Les arrivées tardives sont possibles ?'],
+      shortAnswer: 'Oui, les arrivées tardives sont possibles sur demande.',
+      detailedAnswer: 'Prévenez-nous avant votre arrivée pour organiser l’accès.',
+      commercialAnswer: 'Nous nous adaptons à votre horaire pour faciliter votre séjour.',
+      reassuranceAnswer: 'Votre arrivée reste simple même en soirée.',
+      tags: ['arrival', 'late-checkin'],
+      intentId: INTENT_A,
+      status: 'draft'
+    });
 
     assert.equal(suggestion.status, 'pending');
     assert.equal(accepted.suggestion.status, 'accepted');
-    assert.equal(accepted.knowledge.status, 'active');
+    assert.equal(accepted.knowledge.status, 'draft');
+    assert.equal(accepted.knowledge.title, 'Arrivées tardives');
+    assert.equal(accepted.knowledge.main_question, 'Peut-on arriver tard ?');
+    assert.deepEqual(accepted.knowledge.alternative_questions, [
+      'Les arrivées tardives sont possibles ?'
+    ]);
+    assert.equal(
+      accepted.knowledge.short_answer,
+      'Oui, les arrivées tardives sont possibles sur demande.'
+    );
+    assert.equal(
+      accepted.knowledge.detailed_answer,
+      'Prévenez-nous avant votre arrivée pour organiser l’accès.'
+    );
+    assert.equal(
+      accepted.knowledge.commercial_answer,
+      'Nous nous adaptons à votre horaire pour faciliter votre séjour.'
+    );
+    assert.equal(
+      accepted.knowledge.reassurance_answer,
+      'Votre arrivée reste simple même en soirée.'
+    );
+    assert.deepEqual(accepted.knowledge.tags, ['arrival', 'late-checkin']);
+    assert.equal(accepted.knowledge.intent_id, INTENT_A);
+  });
+
+  it('keeps suggestion acceptance in draft by default and publishes only through knowledge status updates', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Puis-je venir avec un chien ?',
+      detectedIntent: 'pet',
+      confidenceScore: 0.28
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A);
+    assert.equal(accepted.knowledge.status, 'draft');
+
+    const published = await service.setKnowledgeStatus(
+      String(accepted.knowledge.id),
+      ORG_A,
+      'active',
+      USER_A
+    );
+
+    assert.equal(published?.status, 'active');
+  });
+
+  it('accepts suggestions into needs_review without automatic publication', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Avez-vous une borne électrique ?',
+      confidenceScore: 0.31
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      status: 'needs_review'
+    });
+
+    assert.equal(accepted.knowledge.status, 'needs_review');
+  });
+
+  it('rejects suggestions without creating knowledge items', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Question hors périmètre',
+      confidenceScore: 0.2
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+    const rejected = await service.rejectSuggestion(String(suggestion.id), ORG_A);
+    const answer = await service.answerQuestion({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      question: 'Question hors périmètre'
+    });
+
+    assert.equal(rejected?.status, 'rejected');
+    assert.equal(answer, null);
+  });
+
+  it('keeps suggestion acceptance isolated by organization and site', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Proposez-vous le petit déjeuner ?',
+      confidenceScore: 0.33
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    await assert.rejects(
+      service.acceptSuggestion(String(suggestion.id), ORG_B, USER_A),
+      /Suggestion not found/
+    );
+    await assert.rejects(
+      service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, { expectedSiteId: SITE_B }),
+      /Suggestion not found/
+    );
+
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      expectedSiteId: SITE_A
+    });
+    assert.equal(accepted.knowledge.site_id, SITE_A);
   });
 
   it('manages personality, goals and simple conversation flows', async () => {
@@ -188,6 +316,33 @@ function fakeKnowledgeDatabase(): Database {
         return result<T>(knowledge.filter((item) => item.status === 'active'));
       }
 
+      if (sql.startsWith('update knowledge_items')) {
+        const item = knowledge.find(
+          (current) => current.id === values[0] && current.organization_id === values[1]
+        );
+        if (!item) return result<T>([]);
+        Object.assign(item, {
+          intent_id: values[2] ?? item.intent_id,
+          title: values[3] ?? item.title,
+          main_question: values[4] ?? item.main_question,
+          alternative_questions: values[5] ?? item.alternative_questions,
+          short_answer: values[6] ?? item.short_answer,
+          detailed_answer: values[7] ?? item.detailed_answer,
+          commercial_answer: values[8] ?? item.commercial_answer,
+          reassurance_answer: values[9] ?? item.reassurance_answer,
+          links: values[10] ?? item.links,
+          cta_label: values[11] ?? item.cta_label,
+          cta_url: values[12] ?? item.cta_url,
+          conditions: values[13] ?? item.conditions,
+          tags: values[14] ?? item.tags,
+          priority: values[15] ?? item.priority,
+          status: values[16] ?? item.status,
+          updated_by_user_id: values[17] ?? item.updated_by_user_id,
+          updated_at: new Date()
+        });
+        return result<T>([item]);
+      }
+
       if (sql.startsWith('insert into chatbot_unanswered_questions')) {
         const row = {
           id: UNANSWERED_A,
@@ -233,16 +388,26 @@ function fakeKnowledgeDatabase(): Database {
       }
 
       if (sql.startsWith('select * from knowledge_suggestions')) {
-        return result<T>(suggestions);
+        return result<T>(
+          suggestions.filter(
+            (suggestion) =>
+              (values[0] === undefined || suggestion.id === values[0]) &&
+              (values[1] === undefined || suggestion.organization_id === values[1])
+          )
+        );
       }
 
       if (sql.startsWith('update knowledge_suggestions')) {
+        const index = suggestions.findIndex(
+          (suggestion) => suggestion.id === values[0] && suggestion.organization_id === values[1]
+        );
+        if (index === -1) return result<T>([]);
         const updated = {
-          ...(suggestions[0] ?? {}),
+          ...suggestions[index],
           status: sql.includes('accepted') ? 'accepted' : 'rejected'
         };
-        suggestions[0] = updated;
-        return result<T>(suggestions.slice(0, 1));
+        suggestions[index] = updated;
+        return result<T>([updated]);
       }
 
       if (sql.startsWith('insert into chatbot_personality')) {

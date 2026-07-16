@@ -11,6 +11,7 @@ import type pg from 'pg';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
+const KNOWLEDGE_SUGGESTION_A = '00000000-0000-4000-8000-0000000000a5';
 
 describe('admin authentication and RBAC', () => {
   it('logs in with valid JWT credentials and reads /me', async () => {
@@ -1193,6 +1194,28 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('rejects active status when accepting a knowledge suggestion without side effects', async () => {
+    const { app, database } = await createAuthTestAppWithDatabase();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const initialSuggestion = database.__state.knowledgeSuggestions.get(KNOWLEDGE_SUGGESTION_A);
+    assert.ok(initialSuggestion);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/accept`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { status: 'active' }
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal((response.json() as { error: { code: string } }).error.code, 'VALIDATION_ERROR');
+    assert.equal(database.__state.knowledgeItems.size, 0);
+    assert.deepEqual(database.__state.knowledgeSuggestions.get(KNOWLEDGE_SUGGESTION_A), {
+      ...initialSuggestion
+    });
+    await app.close();
+  });
+
   it('calculates pipeline metrics, forecast and dashboard widgets', async () => {
     const app = await createAuthTestApp();
     const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
@@ -1384,7 +1407,14 @@ describe('admin authentication and RBAC', () => {
 });
 
 async function createAuthTestApp() {
-  return createApp({
+  const { app } = await createAuthTestAppWithDatabase();
+
+  return app;
+}
+
+async function createAuthTestAppWithDatabase() {
+  const database = await createAuthMemoryDatabase();
+  const app = await createApp({
     config: loadConfig({
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
@@ -1392,9 +1422,11 @@ async function createAuthTestApp() {
       ADMIN_SESSION_SECRET: 'test-session-secret-with-more-than-32-characters',
       ADMIN_SESSION_RENEWAL_MS: '999999999'
     }),
-    database: await createAuthMemoryDatabase(),
+    database,
     logger: createLogger()
   });
+
+  return { app, database };
 }
 
 async function login(
@@ -1447,7 +1479,16 @@ async function createTestProspect(
   return (response.json() as { prospect: { id: string } }).prospect;
 }
 
-async function createAuthMemoryDatabase(): Promise<Database> {
+type AuthMemoryState = {
+  knowledgeSuggestions: Map<string, Record<string, unknown>>;
+  knowledgeItems: Map<string, Record<string, unknown>>;
+};
+
+type AuthMemoryDatabase = Database & {
+  __state: AuthMemoryState;
+};
+
+async function createAuthMemoryDatabase(): Promise<AuthMemoryDatabase> {
   const organizations = new Map<string, Record<string, unknown>>([
     [ORG_A, organization(ORG_A, 'Org A', 'org-a')],
     [ORG_B, organization(ORG_B, 'Org B', 'org-b')]
@@ -1466,6 +1507,28 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const prospectEnrichments = new Map<string, Record<string, unknown>>();
   const prospectFieldSuggestions = new Map<string, Record<string, unknown>>();
   const crmActivityLog = new Map<string, Record<string, unknown>>();
+  const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
+    [
+      KNOWLEDGE_SUGGESTION_A,
+      {
+        id: KNOWLEDGE_SUGGESTION_A,
+        organization_id: ORG_A,
+        site_id: 'site-a',
+        source_type: 'unanswered_question',
+        source_id: 'unknown-question-a',
+        suggested_intent: 'pricing',
+        suggested_question: 'Quels sont vos tarifs ?',
+        suggested_answer: 'Nos tarifs dépendent du besoin.',
+        suggested_tags: ['pricing'],
+        confidence_score: 0.42,
+        status: 'pending',
+        created_by: 'system',
+        created_at: new Date('2026-01-01T00:00:00.000Z'),
+        updated_at: new Date('2026-01-01T00:00:00.000Z')
+      }
+    ]
+  ]);
+  const knowledgeItems = new Map<string, Record<string, unknown>>();
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -1475,6 +1538,10 @@ async function createAuthMemoryDatabase(): Promise<Database> {
     isConfigured: () => true,
     async checkConnection() {},
     async close() {},
+    __state: {
+      knowledgeSuggestions,
+      knowledgeItems
+    },
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(
       text: string,
       values: unknown[] = []

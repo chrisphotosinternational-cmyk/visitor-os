@@ -202,10 +202,10 @@ describe('createApp', () => {
     await app.close();
   });
 
-  it('exposes liveness and readiness probes', async () => {
+  it('returns ready when database initialization is ok', async () => {
     let connectionChecks = 0;
     const readiness = {
-      database: 'pending' as 'disabled' | 'pending' | 'ok' | 'error'
+      database: 'ok' as 'disabled' | 'pending' | 'ok' | 'error'
     };
     const database: Database = {
       isConfigured: mock.fn(() => true),
@@ -232,10 +232,129 @@ describe('createApp', () => {
     assert.equal(live.statusCode, 200);
     assert.equal((live.json() as { status: string }).status, 'alive');
     assert.equal(ready.statusCode, 200);
-    assert.equal((ready.json() as { status: string; database: string }).database, 'pending');
+    assert.equal((ready.json() as { status: string; database: string }).status, 'ready');
+    assert.equal((ready.json() as { status: string; database: string }).database, 'ok');
     assert.equal(connectionChecks, 0);
 
     await app.close();
+  });
+
+  it('returns unavailable readiness while database initialization is pending', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent',
+        DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
+      }),
+      database: {
+        isConfigured: mock.fn(() => true),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger(),
+      readiness: { database: 'pending' }
+    });
+
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+
+    assert.equal(ready.statusCode, 503);
+    assert.deepEqual(ready.json(), {
+      status: 'not_ready',
+      app: 'VISITOR-OS',
+      version: 'dev',
+      database: 'pending'
+    });
+
+    await app.close();
+  });
+
+  it('returns unavailable readiness when the database is disabled', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent'
+      }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger(),
+      readiness: { database: 'disabled' }
+    });
+
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+
+    assert.equal(ready.statusCode, 503);
+    assert.deepEqual(ready.json(), {
+      status: 'not_ready',
+      app: 'VISITOR-OS',
+      version: 'dev',
+      database: 'disabled'
+    });
+
+    await app.close();
+  });
+
+  it('returns unavailable readiness when database initialization failed', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent',
+        DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os'
+      }),
+      database: {
+        isConfigured: mock.fn(() => true),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger(),
+      readiness: { database: 'error' }
+    });
+
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+
+    assert.equal(ready.statusCode, 503);
+    assert.deepEqual(ready.json(), {
+      status: 'not_ready',
+      app: 'VISITOR-OS',
+      version: 'dev',
+      database: 'error'
+    });
+
+    await app.close();
+  });
+
+  it('keeps liveness healthy regardless of database readiness state', async () => {
+    for (const databaseState of ['ok', 'pending', 'disabled', 'error'] as const) {
+      const app = await createApp({
+        config: loadConfig({
+          NODE_ENV: 'test',
+          LOG_LEVEL: 'silent',
+          ...(databaseState === 'disabled'
+            ? {}
+            : { DATABASE_URL: 'postgresql://visitor_os:visitor_os@localhost:5432/visitor_os' })
+        }),
+        database: {
+          isConfigured: mock.fn(() => databaseState !== 'disabled'),
+          checkConnection: mock.fn(async () => undefined),
+          query: mock.fn(async () => ({ rows: [] }) as never),
+          close: mock.fn(async () => undefined)
+        },
+        logger: createLogger(),
+        readiness: { database: databaseState }
+      });
+
+      const live = await app.inject({ method: 'GET', url: '/live' });
+
+      assert.equal(live.statusCode, 200);
+      assert.equal((live.json() as { status: string; database?: string }).status, 'alive');
+
+      await app.close();
+    }
   });
 
   it('exposes production metrics without querying PostgreSQL', async () => {
