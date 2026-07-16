@@ -110,12 +110,19 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     environment: runtimeEnvironment()
   }));
 
-  app.get('/ready', () => {
+  app.get('/ready', (_request, reply) => {
+    const databaseState = dependencies.readiness?.database ?? 'ok';
+    const isReady = databaseState === 'ok';
+
+    if (!isReady) {
+      reply.status(503);
+    }
+
     return {
-      status: 'ready',
+      status: isReady ? 'ready' : 'not_ready',
       app: dependencies.config.app.name,
       version: runtimeVersion(),
-      database: dependencies.readiness?.database ?? 'ok'
+      database: databaseState
     };
   });
 
