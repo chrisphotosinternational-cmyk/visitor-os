@@ -1659,11 +1659,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
     [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: SITE_B }],
     [
       REVIEW_QUEUE_OTHER_SITE,
-      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
-    [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: 'site-b' }],
-    [
-      REVIEW_QUEUE_OTHER_SITE,
-      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: 'site-b' }
+    { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
     ]
   ]);
   const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
@@ -1687,7 +1683,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         id: KNOWLEDGE_SUGGESTION_B,
         organization_id: ORG_B,
         site_id: SITE_B,
-        site_id: 'site-b',
+     
         suggested_question: 'Other question?',
         suggested_answer: 'Other answer.',
         suggested_tags: [],
