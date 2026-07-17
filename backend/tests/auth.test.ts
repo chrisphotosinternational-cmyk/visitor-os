@@ -11,7 +11,8 @@ import type pg from 'pg';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
-const SITE_A = 'site-a';
+const SITE_A = '00000000-0000-4000-8000-0000000000e1';
+const SITE_B = '00000000-0000-4000-8000-0000000000e2';
 const KNOWLEDGE_SUGGESTION_A = '00000000-0000-4000-8000-0000000000c1';
 const KNOWLEDGE_SUGGESTION_B = '00000000-0000-4000-8000-0000000000c2';
 const REVIEW_QUEUE_A = '00000000-0000-4000-8000-0000000000d1';
@@ -1368,6 +1369,69 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('persists widget integration settings and exposes diagnostics through admin routes', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+
+    const saved = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/sites/${SITE_A}/widget-settings`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        allowedDomains: ['Example.COM', 'widget.example.com'],
+        primaryColor: '#123456',
+        welcomeMessage: 'Bonjour widget',
+        fallbackMessage: 'Fallback widget',
+        privacyMessage: 'Confidentialite widget',
+        leadCaptureEnabled: true,
+        leadCaptureTrigger: 'after_messages',
+        leadCaptureAfterMessages: 4,
+        leadCaptureFields: ['name', 'email'],
+        widgetEnabled: true,
+        status: 'active'
+      }
+    });
+
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(
+      (saved.json() as { widget: { settings: { allowedDomains: string[] } } }).widget.settings
+        .allowedDomains,
+      ['example.com', 'widget.example.com']
+    );
+
+    const reloaded = await app.inject({
+      method: 'GET',
+      url: `/admin-api/sites/${SITE_A}/widget`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(reloaded.statusCode, 200);
+    const widget = reloaded.json() as {
+      site: { allowed_domains: string[] };
+      widget: { settings: { allowedDomains: string[] } };
+    };
+    assert.deepEqual(widget.site.allowed_domains, ['Example.COM', 'widget.example.com']);
+    assert.deepEqual(widget.widget.settings.allowedDomains, ['example.com', 'widget.example.com']);
+
+    const diagnostics = await app.inject({
+      method: 'GET',
+      url: `/admin-api/chatbots/${SITE_A}/widget-diagnostics`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(diagnostics.statusCode, 200);
+    assert.deepEqual(
+      (diagnostics.json() as { diagnostics: { allowedDomains: string[]; apiConnection: string } })
+        .diagnostics.allowedDomains,
+      ['Example.COM', 'widget.example.com']
+    );
+    assert.equal(
+      (diagnostics.json() as { diagnostics: { apiConnection: string } }).diagnostics.apiConnection,
+      'ok'
+    );
+    await app.close();
+  });
+
   it('rejects publishing knowledge suggestions through accept endpoint', async () => {
     const app = await createAuthTestApp();
     const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
@@ -1576,8 +1640,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
     [ORG_B, organization(ORG_B, 'Org B', 'org-b')]
   ]);
   const sites = new Map<string, Record<string, unknown>>([
-    ['site-a', site('site-a', ORG_A, 'Site A', 'site-a')],
-    ['site-b', site('site-b', ORG_B, 'Site B', 'site-b')]
+    [SITE_A, site(SITE_A, ORG_A, 'Site A', 'site-a')],
+    [SITE_B, site(SITE_B, ORG_B, 'Site B', 'site-b')]
   ]);
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
@@ -1592,10 +1656,10 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const knowledge = new Map<string, Record<string, unknown>>();
   const reviewQueue = new Map<string, Record<string, unknown>>([
     [REVIEW_QUEUE_A, { id: REVIEW_QUEUE_A, organization_id: ORG_A, site_id: SITE_A }],
-    [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: 'site-b' }],
+    [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: SITE_B }],
     [
       REVIEW_QUEUE_OTHER_SITE,
-      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: 'site-b' }
+    { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
     ]
   ]);
   const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
@@ -1618,7 +1682,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       {
         id: KNOWLEDGE_SUGGESTION_B,
         organization_id: ORG_B,
-        site_id: 'site-b',
+        site_id: SITE_B,
+     
         suggested_question: 'Other question?',
         suggested_answer: 'Other answer.',
         suggested_tags: [],
@@ -1755,6 +1820,25 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('update sites') && sql.includes('allowed_domains')) {
+        const row = sites.get(String(values[11]));
+        if (!row || row.organization_id !== values[12]) return result([]);
+        Object.assign(row, {
+          allowed_domains: values[0],
+          widget_primary_color: values[1],
+          widget_welcome_message: values[2],
+          widget_fallback_message: values[3],
+          widget_privacy_message: values[4],
+          lead_capture_enabled: values[5],
+          lead_capture_trigger: values[6],
+          lead_capture_after_messages: values[7],
+          lead_capture_fields: values[8],
+          widget_enabled: values[9] ?? row.widget_enabled,
+          status: values[10] ?? row.status
+        });
+        return result([row]);
+      }
+
       if (sql.includes('from sites where id')) {
         const row = sites.get(String(values[0]));
         const organizationId = values[1] ? valueToString(values[1]) : null;
@@ -1767,6 +1851,28 @@ async function createAuthMemoryDatabase(): Promise<Database> {
 
       if (sql.includes('from sites where organization_id')) {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      }
+
+      if (sql.includes('from widget_runtime_events')) {
+        return result([]);
+      }
+
+      if (sql.includes('from chatbot_runtime_metrics')) {
+        return result([
+          {
+            samples: 0,
+            average_response_ms: 0,
+            average_knowledge_ms: 0,
+            average_reasoning_ms: 0,
+            average_db_ms: 0,
+            average_payload_bytes: 0,
+            errors: 0
+          }
+        ]);
+      }
+
+      if (sql.includes('from conversations') && sql.includes('count(*)::text as count')) {
+        return result([{ count: '0' }]);
       }
 
       if (sql.includes('select * from knowledge_suggestions where id')) {
@@ -2659,6 +2765,15 @@ function site(
     language: 'fr',
     status: 'active',
     widget_enabled: true,
+    allowed_domains: ['chambres-dhotes-albi.com'],
+    widget_primary_color: '#1f6f5b',
+    widget_welcome_message: 'Bonjour',
+    widget_fallback_message: 'Contactez-nous.',
+    widget_privacy_message: 'Confidentialite',
+    lead_capture_enabled: false,
+    lead_capture_trigger: 'after_messages',
+    lead_capture_after_messages: 3,
+    lead_capture_fields: ['name', 'email', 'phone', 'need'],
     created_at: new Date()
   };
 }

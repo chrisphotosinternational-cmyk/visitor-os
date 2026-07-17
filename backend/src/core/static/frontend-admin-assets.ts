@@ -49,6 +49,8 @@ createApp({
       selectedSite: null,
       siteWidget: null,
       siteWidgetForm: emptySiteWidgetForm(),
+      siteWidgetSaving: false,
+      siteWidgetTesting: false,
       siteQaCsv: '',
       siteQaImportResult: null,
       unansweredQuestions: [],
@@ -263,6 +265,7 @@ createApp({
           this.loadQualityReport(),
           this.loadChatSessions()
         ]);
+        await this.loadRouteContext();
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'Session invalide.';
         this.logout(false);
@@ -279,6 +282,17 @@ createApp({
       this.health = await responseJsonOrFallback(health, { status: 'unreachable' });
       this.ready = await responseJsonOrFallback(ready, { status: 'unreachable', database: 'unknown' });
       this.systemMetrics = await responseTextOrFallback(metrics, 'metrics_unavailable 1');
+    },
+    async loadRouteContext() {
+      if (this.route === 'site-widget') {
+        const siteId = routeResourceId(window.location.pathname);
+        if (!siteId) return;
+        try {
+          await this.loadSiteWidget(siteId);
+        } catch (error) {
+          this.error = error instanceof Error ? error.message : 'Configuration widget indisponible.';
+        }
+      }
     },
     async loadOnboardingStatus() {
       if (!this.token) return;
@@ -470,29 +484,61 @@ createApp({
       if (!response.ok) throw new Error('Chargement des sites impossible.');
       this.sites = (await response.json()).sites;
     },
-    async openSiteWidget(site) {
-      const response = await this.apiRequest('/admin-api/sites/' + site.id + '/widget', { authenticated: true });
+    async loadSiteWidget(siteId, options = {}) {
+      if (!siteId) {
+        this.error = 'Site widget introuvable.';
+        return;
+      }
+      const response = await this.apiRequest('/admin-api/sites/' + siteId + '/widget', { authenticated: true });
       if (!response.ok) throw new Error('Configuration widget indisponible.');
       const data = await response.json();
       this.selectedSite = data.site;
       this.siteWidget = data.widget;
       this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
-      await this.loadWidgetDiagnostics(data.site.id);
+      if (options.refreshDiagnostics !== false) await this.loadWidgetDiagnostics(data.site.id, false);
       await this.loadUnansweredQuestions();
+    },
+    async openSiteWidget(site) {
+      this.loading = true;
+      this.error = '';
+      try {
+        await this.loadSiteWidget(site.id);
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Configuration widget indisponible.';
+        return;
+      } finally {
+        this.loading = false;
+      }
       this.navigate('site-widget', site.id);
     },
-    async loadWidgetDiagnostics(siteId = this.selectedSite?.id) {
-      if (!siteId) return;
-      const response = await this.apiRequest('/admin-api/chatbots/' + siteId + '/widget-diagnostics', { authenticated: true });
-      if (response.ok) {
+    async loadWidgetDiagnostics(siteId = this.selectedSite?.id, showMessage = true) {
+      if (!siteId) {
+        this.error = 'Aucun site selectionne pour tester l API widget.';
+        return;
+      }
+      this.siteWidgetTesting = true;
+      this.error = '';
+      try {
+        const response = await this.apiRequest('/admin-api/chatbots/' + siteId + '/widget-diagnostics', { authenticated: true });
+        if (!response.ok) throw new Error(await responseErrorMessage(response, 'Diagnostic widget impossible.'));
         const data = await response.json();
         this.siteWidget = { ...(this.siteWidget || {}), diagnostics: data.diagnostics };
+        if (showMessage) this.notify('Test API widget reussi.');
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Diagnostic widget impossible.';
+      } finally {
+        this.siteWidgetTesting = false;
       }
     },
     async saveSiteWidgetSettings() {
-      if (!this.selectedSite) return;
+      if (!this.selectedSite) {
+        this.error = 'Aucun site selectionne pour sauvegarder le widget.';
+        return;
+      }
+      this.siteWidgetSaving = true;
+      this.error = '';
       const payload = {
-        allowedDomains: this.siteWidgetForm.allowedDomains.split('\\n').map((item) => item.trim()).filter(Boolean),
+        allowedDomains: parseDomainLines(this.siteWidgetForm.allowedDomains),
         primaryColor: this.siteWidgetForm.primaryColor,
         welcomeMessage: this.siteWidgetForm.welcomeMessage,
         fallbackMessage: this.siteWidgetForm.fallbackMessage,
@@ -504,18 +550,25 @@ createApp({
         widgetEnabled: this.siteWidgetForm.widgetEnabled,
         status: this.siteWidgetForm.status
       };
-      const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/widget-settings', {
-        method: 'PATCH',
-        authenticated: true,
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error('Sauvegarde widget impossible.');
-      const data = await response.json();
-      this.selectedSite = data.site;
-      this.siteWidget = data.widget;
-      this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
-      await Promise.all([this.loadSites(), this.loadChatbotMetrics(), this.loadWidgetDiagnostics(data.site.id)]);
-      this.notify('Configuration widget sauvegardee.');
+      try {
+        const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/widget-settings', {
+          method: 'PATCH',
+          authenticated: true,
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(await responseErrorMessage(response, 'Sauvegarde widget impossible.'));
+        await this.loadSiteWidget(this.selectedSite.id, { refreshDiagnostics: false });
+        const savedDomains = this.siteWidget?.settings?.allowedDomains ?? [];
+        if (parseDomainLines(savedDomains.join('\\n')).join('\\n') !== payload.allowedDomains.join('\\n')) {
+          throw new Error('Sauvegarde widget incomplete : domaines autorises non confirmes par l API.');
+        }
+        await Promise.all([this.loadSites(), this.loadChatbotMetrics(), this.loadWidgetDiagnostics(this.selectedSite.id, false)]);
+        this.notify('Configuration widget sauvegardee. Domaines autorises confirmes.');
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Sauvegarde widget impossible.';
+      } finally {
+        this.siteWidgetSaving = false;
+      }
     },
     async copyWidgetScript() {
       if (!this.siteWidget?.scriptCode) return;
@@ -1407,7 +1460,11 @@ createApp({
         void this.loadChatbotMetrics();
       }
       if (route === 'site-unanswered') void this.loadUnansweredQuestions();
-      if (route === 'site-widget') void this.loadWidgetDiagnostics(arguments[1] || this.selectedSite?.id);
+      if (route === 'site-widget') {
+        const siteId = arguments[1] || this.selectedSite?.id || routeResourceId(window.location.pathname);
+        if (siteId && this.selectedSite?.id !== siteId) void this.loadSiteWidget(siteId);
+        else void this.loadWidgetDiagnostics(siteId, false);
+      }
     },
     syncRouteFromLocation() {
       this.route = normalizeRoute(window.location.pathname);
@@ -2044,7 +2101,7 @@ createApp({
             <article class="metric"><span>Erreurs</span><strong>{{ siteWidget?.diagnostics?.metrics?.errors || 0 }}</strong><small>Runtime</small></article>
           </div>
           <section class="timeline-section">
-            <div class="panel-header"><h2>Diagnostics widget</h2><button type="button" @click="loadWidgetDiagnostics()">Tester API</button></div>
+            <div class="panel-header"><h2>Diagnostics widget</h2><button type="button" :disabled="siteWidgetTesting" @click="loadWidgetDiagnostics()">{{ siteWidgetTesting ? 'Test en cours...' : 'Tester API' }}</button></div>
             <p>Dernier chargement : {{ siteWidget?.diagnostics?.lastWidgetLoad?.created_at || '-' }}</p>
             <p>Domaines autorises : {{ (siteWidget?.diagnostics?.allowedDomains || []).join(', ') || '-' }}</p>
             <div class="activity-list">
@@ -2075,7 +2132,7 @@ createApp({
             <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.email" type="checkbox" /> email</label>
             <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.phone" type="checkbox" /> telephone</label>
             <label class="checkbox-field"><input v-model="siteWidgetForm.leadCaptureFields.need" type="checkbox" /> besoin</label>
-            <button type="submit">Sauvegarder widget</button>
+            <button type="submit" :disabled="siteWidgetSaving">{{ siteWidgetSaving ? 'Sauvegarde...' : 'Sauvegarder widget' }}</button>
           </form>
           <section class="timeline-section">
             <div class="panel-header"><h2>Import Q/A site</h2><span class="badge">CSV</span></div>
@@ -2601,6 +2658,10 @@ function normalizeRoute(pathname) {
   return 'dashboard';
 }
 
+function routeResourceId(pathname) {
+  return pathname.split('/').filter(Boolean)[1] || '';
+}
+
 function routePath(route, id) {
   if (route === 'dashboard') return '/';
   if (route === 'system') return '/system';
@@ -2700,6 +2761,13 @@ function emptySiteWidgetForm() {
     widgetEnabled: true,
     status: 'active'
   };
+}
+
+function parseDomainLines(value) {
+  return String(value || '')
+    .split(/\\r?\\n|,/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function siteWidgetToForm(site, settings) {
@@ -2943,6 +3011,16 @@ async function responseJsonOrFallback(result, fallback) {
 async function responseTextOrFallback(result, fallback) {
   if (result.status !== 'fulfilled' || !result.value.ok) return fallback;
   return result.value.text();
+}
+
+async function responseErrorMessage(response, fallback) {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const payload = await response.json();
+    return payload?.error?.message || payload?.message || fallback;
+  }
+  const text = await response.text();
+  return text || fallback;
 }
 
 function delay(ms) {
