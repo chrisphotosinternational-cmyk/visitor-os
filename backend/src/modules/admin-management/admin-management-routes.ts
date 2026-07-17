@@ -419,21 +419,6 @@ const knowledgePayloadSchema = z.object({
 });
 
 const partialKnowledgePayloadSchema = knowledgePayloadSchema.partial();
-const knowledgeSuggestionResolutionPayloadSchema = z
-  .object({
-    adminNote: z.string().optional(),
-    reviewQueueId: z.string().uuid().nullable().optional()
-  })
-  .optional();
-
-const acceptKnowledgeSuggestionPayloadSchema = knowledgePayloadSchema
-  .partial()
-  .extend({
-    status: z.enum(['draft', 'needs_review']).default('draft'),
-    adminNote: z.string().optional(),
-    reviewQueueId: z.string().uuid().nullable().optional()
-  })
-  .optional();
 
 const flowPayloadSchema = z.object({
   name: z.string().min(1),
@@ -1539,10 +1524,9 @@ export function registerAdminManagementRoutes(
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'sites:write');
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = acceptKnowledgeSuggestionPayloadSchema.parse(request.body);
     const organizationId = resolveOrganizationFilter(context.user);
 
-    return knowledgeEngine.acceptSuggestion(params.id, organizationId, context.user.id, body);
+    return knowledgeEngine.acceptSuggestion(params.id, organizationId, context.user.id);
   });
 
   app.post('/admin-api/knowledge-suggestions/:id/reject', async (request) => {
@@ -1551,16 +1535,7 @@ export function registerAdminManagementRoutes(
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const organizationId = resolveOrganizationFilter(context.user);
 
-    const body = knowledgeSuggestionResolutionPayloadSchema.parse(request.body);
-
-    return {
-      suggestion: await knowledgeEngine.rejectSuggestion(
-        params.id,
-        organizationId,
-        context.user.id,
-        body
-      )
-    };
+    return { suggestion: await knowledgeEngine.rejectSuggestion(params.id, organizationId) };
   });
 
   app.get('/admin-api/conversations/:id/context', async (request) => {
