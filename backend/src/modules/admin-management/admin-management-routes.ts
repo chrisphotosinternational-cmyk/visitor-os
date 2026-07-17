@@ -419,9 +419,20 @@ const knowledgePayloadSchema = z.object({
 });
 
 const partialKnowledgePayloadSchema = knowledgePayloadSchema.partial();
+const knowledgeSuggestionResolutionPayloadSchema = z
+  .object({
+    adminNote: z.string().optional(),
+    reviewQueueId: z.string().uuid().nullable().optional()
+  })
+  .optional();
+
 const acceptKnowledgeSuggestionPayloadSchema = knowledgePayloadSchema
   .partial()
-  .extend({ status: z.enum(['draft', 'needs_review']).default('draft') })
+  .extend({
+    status: z.enum(['draft', 'needs_review']).default('draft'),
+    adminNote: z.string().optional(),
+    reviewQueueId: z.string().uuid().nullable().optional()
+  })
   .optional();
 
 const flowPayloadSchema = z.object({
@@ -1540,7 +1551,16 @@ export function registerAdminManagementRoutes(
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const organizationId = resolveOrganizationFilter(context.user);
 
-    return { suggestion: await knowledgeEngine.rejectSuggestion(params.id, organizationId) };
+    const body = knowledgeSuggestionResolutionPayloadSchema.parse(request.body);
+
+    return {
+      suggestion: await knowledgeEngine.rejectSuggestion(
+        params.id,
+        organizationId,
+        context.user.id,
+        body
+      )
+    };
   });
 
   app.get('/admin-api/conversations/:id/context', async (request) => {
