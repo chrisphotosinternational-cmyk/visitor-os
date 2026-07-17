@@ -13,6 +13,7 @@ const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
 const SITE_A = '00000000-0000-4000-8000-0000000000e1';
 const SITE_B = '00000000-0000-4000-8000-0000000000e2';
+const SITE_A = 'site-a';
 const KNOWLEDGE_SUGGESTION_A = '00000000-0000-4000-8000-0000000000c1';
 const KNOWLEDGE_SUGGESTION_B = '00000000-0000-4000-8000-0000000000c2';
 const REVIEW_QUEUE_A = '00000000-0000-4000-8000-0000000000d1';
@@ -1660,6 +1661,10 @@ async function createAuthMemoryDatabase(): Promise<Database> {
     [
       REVIEW_QUEUE_OTHER_SITE,
       { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
+    [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: 'site-b' }],
+    [
+      REVIEW_QUEUE_OTHER_SITE,
+      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: 'site-b' }
     ]
   ]);
   const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
@@ -1683,6 +1688,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         id: KNOWLEDGE_SUGGESTION_B,
         organization_id: ORG_B,
         site_id: SITE_B,
+        site_id: 'site-b',
         suggested_question: 'Other question?',
         suggested_answer: 'Other answer.',
         suggested_tags: [],

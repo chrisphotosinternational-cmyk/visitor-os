@@ -6,12 +6,17 @@ import { KnowledgeEngineService } from '../src/modules/knowledge-engine/knowledg
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const SITE_A = '00000000-0000-4000-8000-000000000101';
+const ORG_B = '00000000-0000-4000-8000-0000000000b1';
+const SITE_B = '00000000-0000-4000-8000-000000000201';
 const USER_A = '00000000-0000-4000-8000-0000000000f1';
 const INTENT_A = '00000000-0000-4000-8000-00000000i101';
 const KNOWLEDGE_A = '00000000-0000-4000-8000-00000000k101';
 const UNANSWERED_A = '00000000-0000-4000-8000-00000000u101';
 const SUGGESTION_A = '00000000-0000-4000-8000-00000000s101';
 const FLOW_A = '00000000-0000-4000-8000-00000000f101';
+const REVIEW_A = '00000000-0000-4000-8000-00000000r101';
+const REVIEW_B = '00000000-0000-4000-8000-00000000r201';
+const REVIEW_OTHER_SITE = '00000000-0000-4000-8000-00000000r102';
 
 describe('Knowledge Engine administration', () => {
   it('creates, lists and updates chatbot intents', async () => {
@@ -71,7 +76,214 @@ describe('Knowledge Engine administration', () => {
 
     assert.equal(suggestion.status, 'pending');
     assert.equal(accepted.suggestion.status, 'accepted');
-    assert.equal(accepted.knowledge.status, 'active');
+    assert.equal(accepted.knowledge.status, 'draft');
+    assert.equal(accepted.knowledge.site_id, SITE_A);
+  });
+
+  it('accepts suggestions with edited draft content without auto-publishing', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Question originale ?',
+      detectedIntent: 'arrival'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      title: 'Titre edite',
+      mainQuestion: 'Question editee ?',
+      shortAnswer: 'Reponse editee.',
+      tags: ['edited'],
+      priority: 90,
+      status: 'draft'
+    });
+
+    assert.equal(accepted.suggestion.status, 'accepted');
+    assert.equal(accepted.knowledge.title, 'Titre edite');
+    assert.equal(accepted.knowledge.main_question, 'Question editee ?');
+    assert.equal(accepted.knowledge.short_answer, 'Reponse editee.');
+    assert.deepEqual(accepted.knowledge.tags, ['edited']);
+    assert.equal(accepted.knowledge.priority, 90);
+    assert.equal(accepted.knowledge.status, 'draft');
+  });
+
+  it('accepts suggestions as needs_review but rejects active without creating knowledge', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Besoin de validation ?',
+      detectedIntent: 'review'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    const needsReview = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      status: 'needs_review'
+    });
+    assert.equal(needsReview.knowledge.status, 'needs_review');
+
+    const before = await service.listKnowledge({ organizationId: ORG_A, siteId: SITE_A });
+    await assert.rejects(
+      service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, { status: 'active' }),
+      { name: 'AppError', statusCode: 400 }
+    );
+    const after = await service.listKnowledge({ organizationId: ORG_A, siteId: SITE_A });
+    assert.equal(after.length, before.length);
+  });
+
+  it('keeps publication separate from suggestion acceptance', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Publier separement ?',
+      detectedIntent: 'publish'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A);
+
+    assert.equal(accepted.knowledge.status, 'draft');
+    const published = await service.setKnowledgeStatus(
+      String(accepted.knowledge.id),
+      ORG_A,
+      'active',
+      USER_A
+    );
+    assert.equal(published?.status, 'active');
+  });
+
+  it('isolates suggestions by organization and keeps the suggestion site', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Site source ?',
+      detectedIntent: 'tenant'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    await assert.rejects(service.acceptSuggestion(String(suggestion.id), ORG_B, USER_A), {
+      name: 'AppError',
+      statusCode: 404
+    });
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      title: 'Ignore body site',
+      siteId: SITE_B
+    } as never);
+
+    assert.equal(accepted.knowledge.organization_id, ORG_A);
+    assert.equal(accepted.knowledge.site_id, SITE_A);
+  });
+
+  it('records complete traceability when accepting suggestions', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Trace complete ?',
+      detectedIntent: 'trace'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      adminNote: 'Validé après relecture',
+      reviewQueueId: REVIEW_A
+    });
+
+    assert.equal(accepted.suggestion.status, 'accepted');
+    assert.equal(accepted.suggestion.accepted_knowledge_item_id, accepted.knowledge.id);
+    assert.equal(accepted.suggestion.resolved_by_user_id, USER_A);
+    assert.ok(accepted.suggestion.resolved_at instanceof Date);
+    assert.equal(accepted.suggestion.admin_note, 'Validé après relecture');
+    assert.equal(accepted.suggestion.review_queue_id, REVIEW_A);
+  });
+
+  it('keeps acceptance bodies optional without note or review queue', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Body absent ?',
+      detectedIntent: 'compat'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    const accepted = await service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A);
+
+    assert.equal(accepted.knowledge.status, 'draft');
+    assert.equal(accepted.suggestion.admin_note, null);
+    assert.equal(accepted.suggestion.review_queue_id, null);
+    assert.equal(accepted.suggestion.resolved_by_user_id, USER_A);
+  });
+
+  it('records rejection traceability without creating a knowledge item', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Rejeter ?',
+      detectedIntent: 'reject'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+    const before = await service.listKnowledge({ organizationId: ORG_A, siteId: SITE_A });
+
+    const rejected = await service.rejectSuggestion(String(suggestion.id), ORG_A, USER_A, {
+      adminNote: 'Hors périmètre',
+      reviewQueueId: REVIEW_A
+    });
+    const after = await service.listKnowledge({ organizationId: ORG_A, siteId: SITE_A });
+
+    assert.equal(rejected?.status, 'rejected');
+    assert.equal(rejected?.accepted_knowledge_item_id, null);
+    assert.equal(rejected?.resolved_by_user_id, USER_A);
+    assert.ok(rejected?.resolved_at instanceof Date);
+    assert.equal(rejected?.admin_note, 'Hors périmètre');
+    assert.equal(rejected?.review_queue_id, REVIEW_A);
+    assert.equal(after.length, before.length);
+  });
+
+  it('rejects review queue links from another organization or site before mutation', async () => {
+    const database = fakeKnowledgeDatabase();
+    const service = new KnowledgeEngineService(database);
+    await service.enhancedUnanswered({
+      organizationId: ORG_A,
+      siteId: SITE_A,
+      conversationId: '00000000-0000-4000-8000-00000000c101',
+      question: 'Mauvaise review ?',
+      detectedIntent: 'review'
+    });
+    const suggestion = await service.generateSuggestion(UNANSWERED_A, ORG_A);
+
+    await assert.rejects(
+      service.acceptSuggestion(String(suggestion.id), ORG_A, USER_A, { reviewQueueId: REVIEW_B }),
+      { name: 'AppError', statusCode: 404 }
+    );
+    await assert.rejects(
+      service.rejectSuggestion(String(suggestion.id), ORG_A, USER_A, {
+        reviewQueueId: REVIEW_OTHER_SITE
+      }),
+      { name: 'AppError', statusCode: 404 }
+    );
+
+    const suggestions = await service.listSuggestions(ORG_A, SITE_A);
+    const knowledge = await service.listKnowledge({ organizationId: ORG_A, siteId: SITE_A });
+    assert.equal(suggestions[0]?.status, 'pending');
+    assert.equal(knowledge.length, 0);
   });
 
   it('manages personality, goals and simple conversation flows', async () => {
@@ -115,6 +327,11 @@ function fakeKnowledgeDatabase(): Database {
   const unanswered: Array<Record<string, unknown>> = [];
   const suggestions: Array<Record<string, unknown>> = [];
   const flows: Array<Record<string, unknown>> = [];
+  const reviewQueue: Array<Record<string, unknown>> = [
+    { id: REVIEW_A, organization_id: ORG_A, site_id: SITE_A },
+    { id: REVIEW_B, organization_id: ORG_B, site_id: SITE_B },
+    { id: REVIEW_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
+  ];
 
   return {
     isConfigured: () => true,
@@ -184,6 +401,25 @@ function fakeKnowledgeDatabase(): Database {
         return result<T>([row]);
       }
 
+      if (sql.startsWith('select * from knowledge_items')) {
+        return result<T>(
+          knowledge.filter(
+            (item) => item.organization_id === values[0] && item.site_id === values[1]
+          )
+        );
+      }
+
+      if (sql.startsWith('update knowledge_items')) {
+        const row = knowledge.find(
+          (item) => item.id === values[0] && item.organization_id === values[1]
+        );
+        if (!row) return result<T>([]);
+        row.status = values[16] ?? row.status;
+        row.updated_by_user_id = values[17] ?? row.updated_by_user_id;
+        row.updated_at = new Date();
+        return result<T>([row]);
+      }
+
       if (sql.includes('from knowledge_items k')) {
         return result<T>(knowledge.filter((item) => item.status === 'active'));
       }
@@ -232,17 +468,46 @@ function fakeKnowledgeDatabase(): Database {
         return result<T>([row]);
       }
 
+      if (sql.startsWith('select * from knowledge_suggestions where organization_id')) {
+        return result<T>(
+          suggestions.filter(
+            (row) => row.organization_id === values[0] && row.site_id === values[1]
+          )
+        );
+      }
+
       if (sql.startsWith('select * from knowledge_suggestions')) {
-        return result<T>(suggestions);
+        return result<T>(
+          suggestions.filter((row) => row.id === values[0] && row.organization_id === values[1])
+        );
+      }
+
+      if (sql.startsWith('select id from chatbot_review_queue')) {
+        return result<T>(
+          reviewQueue.filter(
+            (row) =>
+              row.id === values[0] && row.organization_id === values[1] && row.site_id === values[2]
+          )
+        );
       }
 
       if (sql.startsWith('update knowledge_suggestions')) {
+        const index = suggestions.findIndex(
+          (row) => row.id === values[0] && row.organization_id === values[1]
+        );
+        if (index === -1) return result<T>([]);
+        const accepted = sql.includes("status = 'accepted'");
         const updated = {
-          ...(suggestions[0] ?? {}),
-          status: sql.includes('accepted') ? 'accepted' : 'rejected'
+          ...suggestions[index],
+          status: accepted ? 'accepted' : 'rejected',
+          accepted_knowledge_item_id: accepted ? values[2] : null,
+          resolved_by_user_id: (accepted ? values[3] : values[2]) ?? null,
+          resolved_at: new Date(),
+          admin_note: (accepted ? values[4] : values[3]) ?? null,
+          review_queue_id: (accepted ? values[5] : values[4]) ?? null
         };
-        suggestions[0] = updated;
-        return result<T>(suggestions.slice(0, 1));
+        suggestions[index] = updated;
+        return result<T>([updated]);
       }
 
       if (sql.startsWith('insert into chatbot_personality')) {
