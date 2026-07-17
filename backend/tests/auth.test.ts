@@ -11,6 +11,12 @@ import type pg from 'pg';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
+const SITE_A = 'site-a';
+const KNOWLEDGE_SUGGESTION_A = '00000000-0000-4000-8000-0000000000c1';
+const KNOWLEDGE_SUGGESTION_B = '00000000-0000-4000-8000-0000000000c2';
+const REVIEW_QUEUE_A = '00000000-0000-4000-8000-0000000000d1';
+const REVIEW_QUEUE_B = '00000000-0000-4000-8000-0000000000d2';
+const REVIEW_QUEUE_OTHER_SITE = '00000000-0000-4000-8000-0000000000d3';
 
 describe('admin authentication and RBAC', () => {
   it('logs in with valid JWT credentials and reads /me', async () => {
@@ -1362,6 +1368,123 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('rejects publishing knowledge suggestions through accept endpoint', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin-api/knowledge-suggestions/00000000-0000-4000-8000-0000000000c1/accept',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { title: 'Published too early', status: 'active' }
+    });
+
+    assert.equal(response.statusCode, 400);
+    await app.close();
+  });
+
+  it('accepts edited knowledge suggestions as drafts and publishes separately', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/admin-api/knowledge-suggestions/00000000-0000-4000-8000-0000000000c1/accept',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        title: 'Edited title',
+        mainQuestion: 'Edited question?',
+        shortAnswer: 'Edited answer.',
+        tags: ['edited'],
+        status: 'needs_review',
+        adminNote: 'Route trace note',
+        reviewQueueId: REVIEW_QUEUE_A
+      }
+    });
+
+    assert.equal(accepted.statusCode, 200);
+    const acceptedBody = accepted.json() as {
+      knowledge: { id: string; status: string; site_id: string };
+      suggestion: {
+        accepted_knowledge_item_id: string;
+        resolved_by_user_id: string;
+        resolved_at: string;
+        admin_note: string;
+        review_queue_id: string;
+      };
+    };
+    assert.equal(acceptedBody.knowledge.status, 'needs_review');
+    assert.equal(acceptedBody.knowledge.site_id, SITE_A);
+    assert.equal(acceptedBody.suggestion.accepted_knowledge_item_id, acceptedBody.knowledge.id);
+    assert.equal(acceptedBody.suggestion.resolved_by_user_id, 'user-admin');
+    assert.ok(acceptedBody.suggestion.resolved_at);
+    assert.equal(acceptedBody.suggestion.admin_note, 'Route trace note');
+    assert.equal(acceptedBody.suggestion.review_queue_id, REVIEW_QUEUE_A);
+
+    const published = await app.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge/${acceptedBody.knowledge.id}/publish`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(published.statusCode, 200);
+    assert.equal(
+      (published.json() as { knowledge: { status: string } }).knowledge.status,
+      'active'
+    );
+    await app.close();
+  });
+
+  it('records rejection traceability and refuses cross-tenant review queue links', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const rejected = await app.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/reject`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { adminNote: 'Not relevant', reviewQueueId: REVIEW_QUEUE_A }
+    });
+
+    assert.equal(rejected.statusCode, 200);
+    const rejectedBody = rejected.json() as {
+      suggestion: {
+        status: string;
+        accepted_knowledge_item_id: string | null;
+        resolved_by_user_id: string;
+        resolved_at: string;
+        admin_note: string;
+        review_queue_id: string;
+      };
+    };
+    assert.equal(rejectedBody.suggestion.status, 'rejected');
+    assert.equal(rejectedBody.suggestion.accepted_knowledge_item_id, null);
+    assert.equal(rejectedBody.suggestion.resolved_by_user_id, 'user-admin');
+    assert.ok(rejectedBody.suggestion.resolved_at);
+    assert.equal(rejectedBody.suggestion.admin_note, 'Not relevant');
+    assert.equal(rejectedBody.suggestion.review_queue_id, REVIEW_QUEUE_A);
+    await app.close();
+
+    const otherOrgApp = await createAuthTestApp();
+    const otherOrgToken = await jwtLogin(otherOrgApp, 'admin@example.com', 'test-password-123');
+    const otherOrg = await otherOrgApp.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/accept`,
+      headers: { authorization: `Bearer ${otherOrgToken}` },
+      payload: { reviewQueueId: REVIEW_QUEUE_B }
+    });
+    assert.equal(otherOrg.statusCode, 404);
+    await otherOrgApp.close();
+
+    const otherSiteApp = await createAuthTestApp();
+    const otherSiteToken = await jwtLogin(otherSiteApp, 'admin@example.com', 'test-password-123');
+    const otherSite = await otherSiteApp.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/reject`,
+      headers: { authorization: `Bearer ${otherSiteToken}` },
+      payload: { reviewQueueId: REVIEW_QUEUE_OTHER_SITE }
+    });
+    assert.equal(otherSite.statusCode, 404);
+    await otherSiteApp.close();
+  });
+
   it('blocks Viewer from modifying sites', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'viewer@example.com', 'test-password-123');
@@ -1466,6 +1589,45 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const prospectEnrichments = new Map<string, Record<string, unknown>>();
   const prospectFieldSuggestions = new Map<string, Record<string, unknown>>();
   const crmActivityLog = new Map<string, Record<string, unknown>>();
+  const knowledge = new Map<string, Record<string, unknown>>();
+  const reviewQueue = new Map<string, Record<string, unknown>>([
+    [REVIEW_QUEUE_A, { id: REVIEW_QUEUE_A, organization_id: ORG_A, site_id: SITE_A }],
+    [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: 'site-b' }],
+    [
+      REVIEW_QUEUE_OTHER_SITE,
+      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: 'site-b' }
+    ]
+  ]);
+  const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
+    [
+      KNOWLEDGE_SUGGESTION_A,
+      {
+        id: KNOWLEDGE_SUGGESTION_A,
+        organization_id: ORG_A,
+        site_id: SITE_A,
+        suggested_question: 'Original question?',
+        suggested_answer: 'Original answer.',
+        suggested_tags: ['original'],
+        status: 'pending',
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    ],
+    [
+      KNOWLEDGE_SUGGESTION_B,
+      {
+        id: KNOWLEDGE_SUGGESTION_B,
+        organization_id: ORG_B,
+        site_id: 'site-b',
+        suggested_question: 'Other question?',
+        suggested_answer: 'Other answer.',
+        suggested_tags: [],
+        status: 'pending',
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    ]
+  ]);
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -1593,8 +1755,72 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('from sites where id')) {
+        const row = sites.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          optional(
+            row && (!organizationId || row.organization_id === organizationId) ? row : undefined
+          )
+        );
+      }
+
       if (sql.includes('from sites where organization_id')) {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      }
+
+      if (sql.includes('select * from knowledge_suggestions where id')) {
+        const row = knowledgeSuggestions.get(String(values[0]));
+        return result(optional(row && row.organization_id === values[1] ? row : undefined));
+      }
+
+      if (sql.includes('select id from chatbot_review_queue')) {
+        const row = reviewQueue.get(String(values[0]));
+        return result(
+          optional(
+            row && row.organization_id === values[1] && row.site_id === values[2] ? row : undefined
+          )
+        );
+      }
+
+      if (sql.includes('insert into knowledge_items')) {
+        const row = {
+          id: values[0],
+          organization_id: values[1],
+          site_id: values[2],
+          title: values[4],
+          main_question: values[5],
+          short_answer: values[7],
+          tags: values[15],
+          priority: values[16],
+          status: values[17],
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+        knowledge.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('update knowledge_suggestions')) {
+        const row = knowledgeSuggestions.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        const accepted = sql.includes("status = 'accepted'");
+        row.status = accepted ? 'accepted' : 'rejected';
+        row.accepted_knowledge_item_id = accepted ? values[2] : null;
+        row.resolved_by_user_id = (accepted ? values[3] : values[2]) ?? null;
+        row.resolved_at = new Date();
+        row.admin_note = (accepted ? values[4] : values[3]) ?? null;
+        row.review_queue_id = (accepted ? values[5] : values[4]) ?? null;
+        row.updated_at = new Date();
+        return result([row]);
+      }
+
+      if (sql.includes('update knowledge_items')) {
+        const row = knowledge.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row.status = values[16] ?? row.status;
+        row.updated_at = new Date();
+        return result([row]);
       }
 
       if (sql.includes('select count(*)::text as count from message_templates')) {

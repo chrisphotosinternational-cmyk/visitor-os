@@ -63,6 +63,7 @@ model User {
   auditTrail AuditTrail[]
   aiChatSessions AiChatSession[]
   aiChatMessages AiChatMessage[]
+  resolvedKnowledgeSuggestions KnowledgeSuggestion[] @relation("KnowledgeSuggestionResolvedBy")
 
   @@unique([organizationId, email])
   @@index([organizationId, role, status])
@@ -553,6 +554,7 @@ model KnowledgeItem {
   updatedAt            DateTime     @default(now()) @map("updated_at") @db.Timestamptz
   organization         Organization @relation(fields: [organizationId], references: [id])
   intent               ChatbotIntent? @relation(fields: [intentId], references: [id])
+  acceptedSuggestions  KnowledgeSuggestion[] @relation("KnowledgeSuggestionAcceptedItem")
 
   @@index([siteId, status, priority])
   @@index([organizationId, updatedAt])
@@ -641,11 +643,22 @@ model KnowledgeSuggestion {
   suggestedTags     String[]     @default([]) @map("suggested_tags")
   confidenceScore   Decimal?     @map("confidence_score")
   status            String       @default("pending")
+  acceptedKnowledgeItemId String? @map("accepted_knowledge_item_id") @db.Uuid
+  resolvedByUserId String?       @map("resolved_by_user_id") @db.Uuid
+  resolvedAt       DateTime?     @map("resolved_at") @db.Timestamptz
+  adminNote        String?       @map("admin_note")
+  reviewQueueId    String?       @map("review_queue_id") @db.Uuid
   createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime     @default(now()) @map("updated_at") @db.Timestamptz
   organization      Organization @relation(fields: [organizationId], references: [id])
+  acceptedKnowledgeItem KnowledgeItem? @relation("KnowledgeSuggestionAcceptedItem", fields: [acceptedKnowledgeItemId], references: [id], onDelete: SetNull)
+  resolvedBy       User?        @relation("KnowledgeSuggestionResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  reviewQueue      ChatbotReviewQueue? @relation(fields: [reviewQueueId], references: [id], onDelete: SetNull)
 
   @@index([siteId, status, createdAt])
+  @@index([acceptedKnowledgeItemId])
+  @@index([reviewQueueId])
+  @@index([organizationId, resolvedAt])
   @@map("knowledge_suggestions")
 }
 
@@ -841,6 +854,7 @@ model ChatbotReviewQueue {
   resolvedAt         DateTime? @map("resolved_at") @db.Timestamptz
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+  knowledgeSuggestions KnowledgeSuggestion[]
 
   @@index([siteId, status, createdAt])
   @@map("chatbot_review_queue")
