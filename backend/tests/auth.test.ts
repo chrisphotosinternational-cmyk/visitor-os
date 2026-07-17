@@ -11,6 +11,9 @@ import type pg from 'pg';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
+const SITE_A = 'site-a';
+const KNOWLEDGE_SUGGESTION_A = '00000000-0000-4000-8000-0000000000c1';
+const KNOWLEDGE_SUGGESTION_B = '00000000-0000-4000-8000-0000000000c2';
 
 describe('admin authentication and RBAC', () => {
   it('logs in with valid JWT credentials and reads /me', async () => {
@@ -1362,6 +1365,57 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('rejects publishing knowledge suggestions through accept endpoint', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin-api/knowledge-suggestions/00000000-0000-4000-8000-0000000000c1/accept',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { title: 'Published too early', status: 'active' }
+    });
+
+    assert.equal(response.statusCode, 400);
+    await app.close();
+  });
+
+  it('accepts edited knowledge suggestions as drafts and publishes separately', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/admin-api/knowledge-suggestions/00000000-0000-4000-8000-0000000000c1/accept',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        title: 'Edited title',
+        mainQuestion: 'Edited question?',
+        shortAnswer: 'Edited answer.',
+        tags: ['edited'],
+        status: 'needs_review'
+      }
+    });
+
+    assert.equal(accepted.statusCode, 200);
+    const acceptedBody = accepted.json() as {
+      knowledge: { id: string; status: string; site_id: string };
+    };
+    assert.equal(acceptedBody.knowledge.status, 'needs_review');
+    assert.equal(acceptedBody.knowledge.site_id, SITE_A);
+
+    const published = await app.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge/${acceptedBody.knowledge.id}/publish`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(published.statusCode, 200);
+    assert.equal(
+      (published.json() as { knowledge: { status: string } }).knowledge.status,
+      'active'
+    );
+    await app.close();
+  });
+
   it('blocks Viewer from modifying sites', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'viewer@example.com', 'test-password-123');
@@ -1466,6 +1520,37 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const prospectEnrichments = new Map<string, Record<string, unknown>>();
   const prospectFieldSuggestions = new Map<string, Record<string, unknown>>();
   const crmActivityLog = new Map<string, Record<string, unknown>>();
+  const knowledge = new Map<string, Record<string, unknown>>();
+  const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
+    [
+      KNOWLEDGE_SUGGESTION_A,
+      {
+        id: KNOWLEDGE_SUGGESTION_A,
+        organization_id: ORG_A,
+        site_id: SITE_A,
+        suggested_question: 'Original question?',
+        suggested_answer: 'Original answer.',
+        suggested_tags: ['original'],
+        status: 'pending',
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    ],
+    [
+      KNOWLEDGE_SUGGESTION_B,
+      {
+        id: KNOWLEDGE_SUGGESTION_B,
+        organization_id: ORG_B,
+        site_id: 'site-b',
+        suggested_question: 'Other question?',
+        suggested_answer: 'Other answer.',
+        suggested_tags: [],
+        status: 'pending',
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    ]
+  ]);
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -1593,8 +1678,57 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('from sites where id')) {
+        const row = sites.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          optional(
+            row && (!organizationId || row.organization_id === organizationId) ? row : undefined
+          )
+        );
+      }
+
       if (sql.includes('from sites where organization_id')) {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      }
+
+      if (sql.includes('select * from knowledge_suggestions where id')) {
+        const row = knowledgeSuggestions.get(String(values[0]));
+        return result(optional(row && row.organization_id === values[1] ? row : undefined));
+      }
+
+      if (sql.includes('insert into knowledge_items')) {
+        const row = {
+          id: values[0],
+          organization_id: values[1],
+          site_id: values[2],
+          title: values[4],
+          main_question: values[5],
+          short_answer: values[7],
+          tags: values[15],
+          priority: values[16],
+          status: values[17],
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+        knowledge.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('update knowledge_suggestions')) {
+        const row = knowledgeSuggestions.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row.status = sql.includes('accepted') ? 'accepted' : 'rejected';
+        row.updated_at = new Date();
+        return result([row]);
+      }
+
+      if (sql.includes('update knowledge_items')) {
+        const row = knowledge.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row.status = values[16] ?? row.status;
+        row.updated_at = new Date();
+        return result([row]);
       }
 
       if (sql.includes('select count(*)::text as count from message_templates')) {

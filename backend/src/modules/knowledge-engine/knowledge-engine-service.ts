@@ -582,19 +582,39 @@ export class KnowledgeEngineService {
   async acceptSuggestion(
     id: string,
     organizationId: string,
-    userId: string
+    userId: string,
+    input: LoosePartial<KnowledgeItemInput> = {}
   ): Promise<{ suggestion: Record<string, unknown>; knowledge: Record<string, unknown> }> {
     const suggestion = await this.database.query<Record<string, unknown>>(
       `select * from knowledge_suggestions where id = $1 and organization_id = $2`,
       [id, organizationId]
     );
     const source = requireRow(suggestion.rows[0], 'Suggestion not found');
+    const status = input.status ?? 'draft';
+    if (status !== 'draft' && status !== 'needs_review') {
+      throw new AppError('Suggestion acceptance cannot publish knowledge', {
+        statusCode: 400,
+        code: 'KNOWLEDGE_SUGGESTION_STATUS_NOT_ALLOWED'
+      });
+    }
     const knowledge = await this.createKnowledge(organizationId, String(source.site_id), {
-      title: String(source.suggested_question),
-      mainQuestion: String(source.suggested_question),
-      shortAnswer: String(source.suggested_answer),
-      tags: Array.isArray(source.suggested_tags) ? (source.suggested_tags as string[]) : [],
-      status: 'active',
+      title: input.title ?? String(source.suggested_question),
+      mainQuestion: input.mainQuestion ?? String(source.suggested_question),
+      alternativeQuestions: input.alternativeQuestions,
+      shortAnswer: input.shortAnswer ?? String(source.suggested_answer),
+      detailedAnswer: input.detailedAnswer,
+      commercialAnswer: input.commercialAnswer,
+      reassuranceAnswer: input.reassuranceAnswer,
+      links: input.links,
+      ctaLabel: input.ctaLabel,
+      ctaUrl: input.ctaUrl,
+      conditions: input.conditions,
+      tags:
+        input.tags ??
+        (Array.isArray(source.suggested_tags) ? (source.suggested_tags as string[]) : []),
+      priority: input.priority,
+      intentId: input.intentId,
+      status,
       userId
     });
     const updated = await this.database.query<Record<string, unknown>>(
