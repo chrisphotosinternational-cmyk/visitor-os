@@ -11,6 +11,13 @@ import type pg from 'pg';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
 const ORG_B = '00000000-0000-4000-8000-0000000000b1';
+const SITE_A = '00000000-0000-4000-8000-0000000000e1';
+const SITE_B = '00000000-0000-4000-8000-0000000000e2';
+const KNOWLEDGE_SUGGESTION_A = '00000000-0000-4000-8000-0000000000c1';
+const KNOWLEDGE_SUGGESTION_B = '00000000-0000-4000-8000-0000000000c2';
+const REVIEW_QUEUE_A = '00000000-0000-4000-8000-0000000000d1';
+const REVIEW_QUEUE_B = '00000000-0000-4000-8000-0000000000d2';
+const REVIEW_QUEUE_OTHER_SITE = '00000000-0000-4000-8000-0000000000d3';
 
 describe('admin authentication and RBAC', () => {
   it('logs in with valid JWT credentials and reads /me', async () => {
@@ -1362,6 +1369,186 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('persists widget integration settings and exposes diagnostics through admin routes', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+
+    const saved = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/sites/${SITE_A}/widget-settings`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        allowedDomains: ['Example.COM', 'widget.example.com'],
+        primaryColor: '#123456',
+        welcomeMessage: 'Bonjour widget',
+        fallbackMessage: 'Fallback widget',
+        privacyMessage: 'Confidentialite widget',
+        leadCaptureEnabled: true,
+        leadCaptureTrigger: 'after_messages',
+        leadCaptureAfterMessages: 4,
+        leadCaptureFields: ['name', 'email'],
+        widgetEnabled: true,
+        status: 'active'
+      }
+    });
+
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(
+      (saved.json() as { widget: { settings: { allowedDomains: string[] } } }).widget.settings
+        .allowedDomains,
+      ['example.com', 'widget.example.com']
+    );
+
+    const reloaded = await app.inject({
+      method: 'GET',
+      url: `/admin-api/sites/${SITE_A}/widget`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(reloaded.statusCode, 200);
+    const widget = reloaded.json() as {
+      site: { allowed_domains: string[] };
+      widget: { settings: { allowedDomains: string[] } };
+    };
+    assert.deepEqual(widget.site.allowed_domains, ['Example.COM', 'widget.example.com']);
+    assert.deepEqual(widget.widget.settings.allowedDomains, ['example.com', 'widget.example.com']);
+
+    const diagnostics = await app.inject({
+      method: 'GET',
+      url: `/admin-api/chatbots/${SITE_A}/widget-diagnostics`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(diagnostics.statusCode, 200);
+    assert.deepEqual(
+      (diagnostics.json() as { diagnostics: { allowedDomains: string[]; apiConnection: string } })
+        .diagnostics.allowedDomains,
+      ['Example.COM', 'widget.example.com']
+    );
+    assert.equal(
+      (diagnostics.json() as { diagnostics: { apiConnection: string } }).diagnostics.apiConnection,
+      'ok'
+    );
+    await app.close();
+  });
+
+  it('rejects publishing knowledge suggestions through accept endpoint', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin-api/knowledge-suggestions/00000000-0000-4000-8000-0000000000c1/accept',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { title: 'Published too early', status: 'active' }
+    });
+
+    assert.equal(response.statusCode, 400);
+    await app.close();
+  });
+
+  it('accepts edited knowledge suggestions as drafts and publishes separately', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/admin-api/knowledge-suggestions/00000000-0000-4000-8000-0000000000c1/accept',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        title: 'Edited title',
+        mainQuestion: 'Edited question?',
+        shortAnswer: 'Edited answer.',
+        tags: ['edited'],
+        status: 'needs_review',
+        adminNote: 'Route trace note',
+        reviewQueueId: REVIEW_QUEUE_A
+      }
+    });
+
+    assert.equal(accepted.statusCode, 200);
+    const acceptedBody = accepted.json() as {
+      knowledge: { id: string; status: string; site_id: string };
+      suggestion: {
+        accepted_knowledge_item_id: string;
+        resolved_by_user_id: string;
+        resolved_at: string;
+        admin_note: string;
+        review_queue_id: string;
+      };
+    };
+    assert.equal(acceptedBody.knowledge.status, 'needs_review');
+    assert.equal(acceptedBody.knowledge.site_id, SITE_A);
+    assert.equal(acceptedBody.suggestion.accepted_knowledge_item_id, acceptedBody.knowledge.id);
+    assert.equal(acceptedBody.suggestion.resolved_by_user_id, 'user-admin');
+    assert.ok(acceptedBody.suggestion.resolved_at);
+    assert.equal(acceptedBody.suggestion.admin_note, 'Route trace note');
+    assert.equal(acceptedBody.suggestion.review_queue_id, REVIEW_QUEUE_A);
+
+    const published = await app.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge/${acceptedBody.knowledge.id}/publish`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(published.statusCode, 200);
+    assert.equal(
+      (published.json() as { knowledge: { status: string } }).knowledge.status,
+      'active'
+    );
+    await app.close();
+  });
+
+  it('records rejection traceability and refuses cross-tenant review queue links', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+    const rejected = await app.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/reject`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { adminNote: 'Not relevant', reviewQueueId: REVIEW_QUEUE_A }
+    });
+
+    assert.equal(rejected.statusCode, 200);
+    const rejectedBody = rejected.json() as {
+      suggestion: {
+        status: string;
+        accepted_knowledge_item_id: string | null;
+        resolved_by_user_id: string;
+        resolved_at: string;
+        admin_note: string;
+        review_queue_id: string;
+      };
+    };
+    assert.equal(rejectedBody.suggestion.status, 'rejected');
+    assert.equal(rejectedBody.suggestion.accepted_knowledge_item_id, null);
+    assert.equal(rejectedBody.suggestion.resolved_by_user_id, 'user-admin');
+    assert.ok(rejectedBody.suggestion.resolved_at);
+    assert.equal(rejectedBody.suggestion.admin_note, 'Not relevant');
+    assert.equal(rejectedBody.suggestion.review_queue_id, REVIEW_QUEUE_A);
+    await app.close();
+
+    const otherOrgApp = await createAuthTestApp();
+    const otherOrgToken = await jwtLogin(otherOrgApp, 'admin@example.com', 'test-password-123');
+    const otherOrg = await otherOrgApp.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/accept`,
+      headers: { authorization: `Bearer ${otherOrgToken}` },
+      payload: { reviewQueueId: REVIEW_QUEUE_B }
+    });
+    assert.equal(otherOrg.statusCode, 404);
+    await otherOrgApp.close();
+
+    const otherSiteApp = await createAuthTestApp();
+    const otherSiteToken = await jwtLogin(otherSiteApp, 'admin@example.com', 'test-password-123');
+    const otherSite = await otherSiteApp.inject({
+      method: 'POST',
+      url: `/admin-api/knowledge-suggestions/${KNOWLEDGE_SUGGESTION_A}/reject`,
+      headers: { authorization: `Bearer ${otherSiteToken}` },
+      payload: { reviewQueueId: REVIEW_QUEUE_OTHER_SITE }
+    });
+    assert.equal(otherSite.statusCode, 404);
+    await otherSiteApp.close();
+  });
+
   it('blocks Viewer from modifying sites', async () => {
     const app = await createAuthTestApp();
     const cookie = await login(app, 'viewer@example.com', 'test-password-123');
@@ -1453,8 +1640,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
     [ORG_B, organization(ORG_B, 'Org B', 'org-b')]
   ]);
   const sites = new Map<string, Record<string, unknown>>([
-    ['site-a', site('site-a', ORG_A, 'Site A', 'site-a')],
-    ['site-b', site('site-b', ORG_B, 'Site B', 'site-b')]
+    [SITE_A, site(SITE_A, ORG_A, 'Site A', 'site-a')],
+    [SITE_B, site(SITE_B, ORG_B, 'Site B', 'site-b')]
   ]);
   const users = new Map<string, Record<string, unknown>>();
   const sessions = new Map<string, Record<string, unknown>>();
@@ -1466,6 +1653,45 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const prospectEnrichments = new Map<string, Record<string, unknown>>();
   const prospectFieldSuggestions = new Map<string, Record<string, unknown>>();
   const crmActivityLog = new Map<string, Record<string, unknown>>();
+  const knowledge = new Map<string, Record<string, unknown>>();
+  const reviewQueue = new Map<string, Record<string, unknown>>([
+    [REVIEW_QUEUE_A, { id: REVIEW_QUEUE_A, organization_id: ORG_A, site_id: SITE_A }],
+    [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: SITE_B }],
+    [
+      REVIEW_QUEUE_OTHER_SITE,
+      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
+    ]
+  ]);
+  const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
+    [
+      KNOWLEDGE_SUGGESTION_A,
+      {
+        id: KNOWLEDGE_SUGGESTION_A,
+        organization_id: ORG_A,
+        site_id: SITE_A,
+        suggested_question: 'Original question?',
+        suggested_answer: 'Original answer.',
+        suggested_tags: ['original'],
+        status: 'pending',
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    ],
+    [
+      KNOWLEDGE_SUGGESTION_B,
+      {
+        id: KNOWLEDGE_SUGGESTION_B,
+        organization_id: ORG_B,
+        site_id: SITE_B,
+        suggested_question: 'Other question?',
+        suggested_answer: 'Other answer.',
+        suggested_tags: [],
+        status: 'pending',
+        created_at: new Date(),
+        updated_at: new Date()
+      }
+    ]
+  ]);
 
   await addUser(users, 'user-admin', ORG_A, 'admin@example.com', 'Admin');
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
@@ -1593,8 +1819,113 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('update sites') && sql.includes('allowed_domains')) {
+        const row = sites.get(String(values[11]));
+        if (!row || row.organization_id !== values[12]) return result([]);
+        Object.assign(row, {
+          allowed_domains: values[0],
+          widget_primary_color: values[1],
+          widget_welcome_message: values[2],
+          widget_fallback_message: values[3],
+          widget_privacy_message: values[4],
+          lead_capture_enabled: values[5],
+          lead_capture_trigger: values[6],
+          lead_capture_after_messages: values[7],
+          lead_capture_fields: values[8],
+          widget_enabled: values[9] ?? row.widget_enabled,
+          status: values[10] ?? row.status
+        });
+        return result([row]);
+      }
+
+      if (sql.includes('from sites where id')) {
+        const row = sites.get(String(values[0]));
+        const organizationId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          optional(
+            row && (!organizationId || row.organization_id === organizationId) ? row : undefined
+          )
+        );
+      }
+
       if (sql.includes('from sites where organization_id')) {
         return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      }
+
+      if (sql.includes('from widget_runtime_events')) {
+        return result([]);
+      }
+
+      if (sql.includes('from chatbot_runtime_metrics')) {
+        return result([
+          {
+            samples: 0,
+            average_response_ms: 0,
+            average_knowledge_ms: 0,
+            average_reasoning_ms: 0,
+            average_db_ms: 0,
+            average_payload_bytes: 0,
+            errors: 0
+          }
+        ]);
+      }
+
+      if (sql.includes('from conversations') && sql.includes('count(*)::text as count')) {
+        return result([{ count: '0' }]);
+      }
+
+      if (sql.includes('select * from knowledge_suggestions where id')) {
+        const row = knowledgeSuggestions.get(String(values[0]));
+        return result(optional(row && row.organization_id === values[1] ? row : undefined));
+      }
+
+      if (sql.includes('select id from chatbot_review_queue')) {
+        const row = reviewQueue.get(String(values[0]));
+        return result(
+          optional(
+            row && row.organization_id === values[1] && row.site_id === values[2] ? row : undefined
+          )
+        );
+      }
+
+      if (sql.includes('insert into knowledge_items')) {
+        const row = {
+          id: values[0],
+          organization_id: values[1],
+          site_id: values[2],
+          title: values[4],
+          main_question: values[5],
+          short_answer: values[7],
+          tags: values[15],
+          priority: values[16],
+          status: values[17],
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+        knowledge.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('update knowledge_suggestions')) {
+        const row = knowledgeSuggestions.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        const accepted = sql.includes("status = 'accepted'");
+        row.status = accepted ? 'accepted' : 'rejected';
+        row.accepted_knowledge_item_id = accepted ? values[2] : null;
+        row.resolved_by_user_id = (accepted ? values[3] : values[2]) ?? null;
+        row.resolved_at = new Date();
+        row.admin_note = (accepted ? values[4] : values[3]) ?? null;
+        row.review_queue_id = (accepted ? values[5] : values[4]) ?? null;
+        row.updated_at = new Date();
+        return result([row]);
+      }
+
+      if (sql.includes('update knowledge_items')) {
+        const row = knowledge.get(String(values[0]));
+        if (!row || row.organization_id !== values[1]) return result([]);
+        row.status = values[16] ?? row.status;
+        row.updated_at = new Date();
+        return result([row]);
       }
 
       if (sql.includes('select count(*)::text as count from message_templates')) {
@@ -2433,6 +2764,15 @@ function site(
     language: 'fr',
     status: 'active',
     widget_enabled: true,
+    allowed_domains: ['chambres-dhotes-albi.com'],
+    widget_primary_color: '#1f6f5b',
+    widget_welcome_message: 'Bonjour',
+    widget_fallback_message: 'Contactez-nous.',
+    widget_privacy_message: 'Confidentialite',
+    lead_capture_enabled: false,
+    lead_capture_trigger: 'after_messages',
+    lead_capture_after_messages: 3,
+    lead_capture_fields: ['name', 'email', 'phone', 'need'],
     created_at: new Date()
   };
 }

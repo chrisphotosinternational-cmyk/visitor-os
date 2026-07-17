@@ -41,6 +41,14 @@ export type KnowledgeIntentInput = {
   isActive?: boolean | undefined;
 };
 
+export type KnowledgeSuggestionResolutionInput = {
+  adminNote?: string | undefined;
+  reviewQueueId?: string | null | undefined;
+};
+
+export type KnowledgeSuggestionAcceptInput = KnowledgeSuggestionResolutionInput &
+  LoosePartial<KnowledgeItemInput>;
+
 export type KnowledgeItemInput = {
   intentId?: string | null | undefined;
   title: string;
@@ -582,24 +590,67 @@ export class KnowledgeEngineService {
   async acceptSuggestion(
     id: string,
     organizationId: string,
-    userId: string
+    userId: string,
+    input: KnowledgeSuggestionAcceptInput = {}
   ): Promise<{ suggestion: Record<string, unknown>; knowledge: Record<string, unknown> }> {
     const suggestion = await this.database.query<Record<string, unknown>>(
       `select * from knowledge_suggestions where id = $1 and organization_id = $2`,
       [id, organizationId]
     );
     const source = requireRow(suggestion.rows[0], 'Suggestion not found');
+    await this.requireReviewQueueAccess(
+      input.reviewQueueId,
+      organizationId,
+      String(source.site_id)
+    );
+    const status = input.status ?? 'draft';
+    if (status !== 'draft' && status !== 'needs_review') {
+      throw new AppError('Suggestion acceptance cannot publish knowledge', {
+        statusCode: 400,
+        code: 'KNOWLEDGE_SUGGESTION_STATUS_NOT_ALLOWED'
+      });
+    }
     const knowledge = await this.createKnowledge(organizationId, String(source.site_id), {
-      title: String(source.suggested_question),
-      mainQuestion: String(source.suggested_question),
-      shortAnswer: String(source.suggested_answer),
-      tags: Array.isArray(source.suggested_tags) ? (source.suggested_tags as string[]) : [],
-      status: 'active',
+      title: input.title ?? String(source.suggested_question),
+      mainQuestion: input.mainQuestion ?? String(source.suggested_question),
+      alternativeQuestions: input.alternativeQuestions,
+      shortAnswer: input.shortAnswer ?? String(source.suggested_answer),
+      detailedAnswer: input.detailedAnswer,
+      commercialAnswer: input.commercialAnswer,
+      reassuranceAnswer: input.reassuranceAnswer,
+      links: input.links,
+      ctaLabel: input.ctaLabel,
+      ctaUrl: input.ctaUrl,
+      conditions: input.conditions,
+      tags:
+        input.tags ??
+        (Array.isArray(source.suggested_tags) ? (source.suggested_tags as string[]) : []),
+      priority: input.priority,
+      intentId: input.intentId,
+      status,
       userId
     });
     const updated = await this.database.query<Record<string, unknown>>(
-      `update knowledge_suggestions set status = 'accepted', updated_at = now() where id = $1 and organization_id = $2 returning *`,
-      [id, organizationId]
+      `
+      update knowledge_suggestions
+      set status = 'accepted',
+          accepted_knowledge_item_id = $3,
+          resolved_by_user_id = $4,
+          resolved_at = now(),
+          admin_note = $5,
+          review_queue_id = $6,
+          updated_at = now()
+      where id = $1 and organization_id = $2
+      returning *
+      `,
+      [
+        id,
+        organizationId,
+        knowledge.id,
+        userId,
+        input.adminNote ?? null,
+        input.reviewQueueId ?? null
+      ]
     );
 
     return { suggestion: requireRow(updated.rows[0], 'Suggestion was not accepted'), knowledge };
@@ -607,14 +658,53 @@ export class KnowledgeEngineService {
 
   async rejectSuggestion(
     id: string,
-    organizationId: string
+    organizationId: string,
+    userId = '',
+    input: KnowledgeSuggestionResolutionInput = {}
   ): Promise<Record<string, unknown> | null> {
-    const result = await this.database.query<Record<string, unknown>>(
-      `update knowledge_suggestions set status = 'rejected', updated_at = now() where id = $1 and organization_id = $2 returning *`,
+    const suggestion = await this.database.query<Record<string, unknown>>(
+      `select * from knowledge_suggestions where id = $1 and organization_id = $2`,
       [id, organizationId]
+    );
+    const source = suggestion.rows[0];
+    if (!source) return null;
+    await this.requireReviewQueueAccess(
+      input.reviewQueueId,
+      organizationId,
+      String(source.site_id)
+    );
+
+    const result = await this.database.query<Record<string, unknown>>(
+      `
+      update knowledge_suggestions
+      set status = 'rejected',
+          accepted_knowledge_item_id = null,
+          resolved_by_user_id = $3,
+          resolved_at = now(),
+          admin_note = $4,
+          review_queue_id = $5,
+          updated_at = now()
+      where id = $1 and organization_id = $2
+      returning *
+      `,
+      [id, organizationId, userId || null, input.adminNote ?? null, input.reviewQueueId ?? null]
     );
 
     return result.rows[0] ?? null;
+  }
+
+  private async requireReviewQueueAccess(
+    reviewQueueId: string | null | undefined,
+    organizationId: string,
+    siteId: string
+  ): Promise<void> {
+    if (!reviewQueueId) return;
+
+    const result = await this.database.query<Record<string, unknown>>(
+      `select id from chatbot_review_queue where id = $1 and organization_id = $2 and site_id = $3`,
+      [reviewQueueId, organizationId, siteId]
+    );
+    requireRow(result.rows[0], 'Review queue item not found');
   }
 
   async listFlows(organizationId: string, siteId: string): Promise<Array<Record<string, unknown>>> {

@@ -251,9 +251,20 @@ export async function initializeSchema(database: Database): Promise<void> {
       suggested_tags text[] not null default '{}',
       confidence_score numeric,
       status text not null default 'pending',
+      accepted_knowledge_item_id uuid references knowledge_items(id) on delete set null,
+      resolved_by_user_id uuid references users(id) on delete set null,
+      resolved_at timestamptz,
+      admin_note text,
+      review_queue_id uuid,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    alter table knowledge_suggestions add column if not exists accepted_knowledge_item_id uuid references knowledge_items(id) on delete set null;
+    alter table knowledge_suggestions add column if not exists resolved_by_user_id uuid references users(id) on delete set null;
+    alter table knowledge_suggestions add column if not exists resolved_at timestamptz;
+    alter table knowledge_suggestions add column if not exists admin_note text;
+    alter table knowledge_suggestions add column if not exists review_queue_id uuid;
 
     create table if not exists chatbot_studios (
       id uuid primary key,
@@ -934,6 +945,15 @@ export async function initializeSchema(database: Database): Promise<void> {
       on chatbot_goals(site_id, is_active, priority desc);
     create index if not exists idx_knowledge_suggestions_site_status
       on knowledge_suggestions(site_id, status, created_at desc);
+    create index if not exists idx_knowledge_suggestions_accepted_item
+      on knowledge_suggestions(accepted_knowledge_item_id)
+      where accepted_knowledge_item_id is not null;
+    create index if not exists idx_knowledge_suggestions_review_queue
+      on knowledge_suggestions(review_queue_id)
+      where review_queue_id is not null;
+    create index if not exists idx_knowledge_suggestions_resolved_at
+      on knowledge_suggestions(organization_id, resolved_at desc)
+      where resolved_at is not null;
     create index if not exists idx_decision_events_conversation_created
       on decision_events(conversation_id, created_at);
     create index if not exists idx_ai_events_organization_created
