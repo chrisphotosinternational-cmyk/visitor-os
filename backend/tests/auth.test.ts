@@ -1432,6 +1432,117 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('creates sites with unique normalized domains and keeps widget public keys on update', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/admin-api/sites',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        name: 'Nouveau Site',
+        domain: 'https://WWW.Example-Site.test/path',
+        status: 'active',
+        widgetEnabled: true
+      }
+    });
+
+    assert.equal(created.statusCode, 200);
+    const createdBody = created.json() as {
+      site: { id: string; domain: string; widget_public_key: string; widget_enabled: boolean };
+    };
+    assert.equal(createdBody.site.domain, 'example-site.test');
+    assert.match(createdBody.site.widget_public_key, /^site_[a-f0-9]{32}$/);
+    assert.equal(createdBody.site.widget_enabled, true);
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/admin-api/sites',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        organizationId: ORG_A,
+        name: 'Doublon',
+        domain: 'example-site.test',
+        status: 'active',
+        widgetEnabled: true
+      }
+    });
+
+    assert.equal(duplicate.statusCode, 409);
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/sites/${createdBody.site.id}/widget-settings`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Site Renomme',
+        domain: 'renomme.example.test',
+        allowedDomains: ['renomme.example.test'],
+        widgetEnabled: false,
+        status: 'inactive'
+      }
+    });
+
+    assert.equal(updated.statusCode, 200);
+    const updatedBody = updated.json() as {
+      site: {
+        name: string;
+        domain: string;
+        widget_public_key: string;
+        widget_enabled: boolean;
+        status: string;
+      };
+      widget: { publicKey: string; active: boolean };
+    };
+    assert.equal(updatedBody.site.name, 'Site Renomme');
+    assert.equal(updatedBody.site.domain, 'renomme.example.test');
+    assert.equal(updatedBody.site.widget_public_key, createdBody.site.widget_public_key);
+    assert.equal(updatedBody.widget.publicKey, createdBody.site.widget_public_key);
+    assert.equal(updatedBody.site.widget_enabled, false);
+    assert.equal(updatedBody.site.status, 'inactive');
+    assert.equal(updatedBody.widget.active, false);
+
+    const renamedOnly = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/sites/${createdBody.site.id}/widget-settings`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Site Renomme Encore' }
+    });
+
+    assert.equal(renamedOnly.statusCode, 200);
+    const renamedOnlyBody = renamedOnly.json() as {
+      site: {
+        name: string;
+        allowed_domains: string[];
+        widget_public_key: string;
+        widget_enabled: boolean;
+      };
+    };
+    assert.equal(renamedOnlyBody.site.name, 'Site Renomme Encore');
+    assert.deepEqual(renamedOnlyBody.site.allowed_domains, ['renomme.example.test']);
+    assert.equal(renamedOnlyBody.site.widget_enabled, false);
+    assert.equal(renamedOnlyBody.site.widget_public_key, createdBody.site.widget_public_key);
+
+    const widget = await app.inject({
+      method: 'GET',
+      url: `/admin-api/sites/${createdBody.site.id}/widget`,
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(widget.statusCode, 200);
+    assert.match(
+      (widget.json() as { widget: { scriptCode: string } }).widget.scriptCode,
+      new RegExp(`${createdBody.site.widget_public_key}\\.js`)
+    );
+    assert.doesNotMatch(
+      (widget.json() as { widget: { scriptCode: string } }).widget.scriptCode,
+      /demo-site-key/
+    );
+    await app.close();
+  });
+
   it('rejects publishing knowledge suggestions through accept endpoint', async () => {
     const app = await createAuthTestApp();
     const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
@@ -1659,7 +1770,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
     [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: SITE_B }],
     [
       REVIEW_QUEUE_OTHER_SITE,
-    { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
+      { id: REVIEW_QUEUE_OTHER_SITE, organization_id: ORG_A, site_id: SITE_B }
     ]
   ]);
   const knowledgeSuggestions = new Map<string, Record<string, unknown>>([
@@ -1683,7 +1794,7 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         id: KNOWLEDGE_SUGGESTION_B,
         organization_id: ORG_B,
         site_id: SITE_B,
-     
+
         suggested_question: 'Other question?',
         suggested_answer: 'Other answer.',
         suggested_tags: [],
@@ -1820,19 +1931,59 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([]);
       }
 
+      if (sql.includes('select id from sites where lower(domain)')) {
+        const domain = valueToString(values[0]);
+        const excludeSiteId = values[1] ? valueToString(values[1]) : null;
+        return result(
+          [...sites.values()].filter(
+            (row) => valueToString(row.domain).toLowerCase() === domain && row.id !== excludeSiteId
+          )
+        );
+      }
+
+      if (sql.includes('insert into sites')) {
+        const row = {
+          id: values[0],
+          organization_id: values[1],
+          name: values[2],
+          slug: values[3],
+          domain: values[4],
+          widget_public_key: values[5],
+          activity: 'default',
+          business_config_id: 'default',
+          language: 'fr',
+          status: values[6],
+          widget_enabled: values[7],
+          allowed_domains: values[8],
+          widget_primary_color: null,
+          widget_welcome_message: null,
+          widget_fallback_message: null,
+          widget_privacy_message: null,
+          lead_capture_enabled: false,
+          lead_capture_trigger: 'after_messages',
+          lead_capture_after_messages: 3,
+          lead_capture_fields: ['name', 'email', 'phone', 'need'],
+          created_at: new Date()
+        };
+        sites.set(String(row.id), row);
+        return result([row]);
+      }
+
       if (sql.includes('update sites') && sql.includes('allowed_domains')) {
         const row = sites.get(String(values[11]));
         if (!row || row.organization_id !== values[12]) return result([]);
         Object.assign(row, {
-          allowed_domains: values[0],
-          widget_primary_color: values[1],
-          widget_welcome_message: values[2],
-          widget_fallback_message: values[3],
-          widget_privacy_message: values[4],
-          lead_capture_enabled: values[5],
-          lead_capture_trigger: values[6],
-          lead_capture_after_messages: values[7],
-          lead_capture_fields: values[8],
+          name: values[13] ?? row.name,
+          domain: values[14] ?? row.domain,
+          allowed_domains: values[0] ?? row.allowed_domains,
+          widget_primary_color: values[1] ?? row.widget_primary_color,
+          widget_welcome_message: values[2] ?? row.widget_welcome_message,
+          widget_fallback_message: values[3] ?? row.widget_fallback_message,
+          widget_privacy_message: values[4] ?? row.widget_privacy_message,
+          lead_capture_enabled: values[5] ?? row.lead_capture_enabled,
+          lead_capture_trigger: values[6] ?? row.lead_capture_trigger,
+          lead_capture_after_messages: values[7] ?? row.lead_capture_after_messages,
+          lead_capture_fields: values[8] ?? row.lead_capture_fields,
           widget_enabled: values[9] ?? row.widget_enabled,
           status: values[10] ?? row.status
         });
@@ -1849,8 +2000,13 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         );
       }
 
-      if (sql.includes('from sites where organization_id')) {
-        return result([...sites.values()].filter((row) => row.organization_id === values[0]));
+      if (sql.includes('from sites') && sql.includes('organization_id')) {
+        const organizationId = values[0] ? valueToString(values[0]) : null;
+        return result(
+          [...sites.values()].filter(
+            (row) => !organizationId || row.organization_id === organizationId
+          )
+        );
       }
 
       if (sql.includes('from widget_runtime_events')) {

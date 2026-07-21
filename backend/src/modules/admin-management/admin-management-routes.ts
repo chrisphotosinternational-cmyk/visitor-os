@@ -56,7 +56,8 @@ import { ProductionValidationService } from '../production-validation/production
 import { AIChatService } from '../ai-chat/ai-chat-service.js';
 import {
   ChatbotProductionService,
-  leadCaptureTriggers
+  leadCaptureTriggers,
+  normalizeDomain
 } from '../chatbot-production/chatbot-production-service.js';
 import {
   flowActionTypes,
@@ -326,24 +327,26 @@ const optionalOrganizationQuerySchema = z.object({
   organizationId: z.string().uuid().optional()
 });
 
+const sitePayloadSchema = z.object({
+  organizationId: z.string().uuid(),
+  name: z.string().min(1),
+  domain: z.string().min(1),
+  status: z.enum(['active', 'inactive']).default('active'),
+  widgetEnabled: z.boolean().default(true)
+});
+
 const siteWidgetSettingsPayloadSchema = z.object({
-  allowedDomains: z.array(z.string().min(1)).default([]),
-  primaryColor: z.string().min(1).default('#1f6f5b'),
-  welcomeMessage: z.string().min(1).default('Bonjour, je peux vous aider.'),
-  fallbackMessage: z
-    .string()
-    .min(1)
-    .default("Je n'ai pas encore cette information. Contactez-nous pour une reponse precise."),
-  privacyMessage: z
-    .string()
-    .min(1)
-    .default('Vos informations sont utilisees uniquement pour repondre a votre demande.'),
-  leadCaptureEnabled: z.boolean().default(false),
-  leadCaptureTrigger: z.enum(leadCaptureTriggers).default('after_messages'),
-  leadCaptureAfterMessages: z.number().int().positive().max(20).default(3),
-  leadCaptureFields: z
-    .array(z.enum(['name', 'email', 'phone', 'need']))
-    .default(['name', 'email', 'phone', 'need']),
+  name: z.string().min(1).optional(),
+  domain: z.string().min(1).optional(),
+  allowedDomains: z.array(z.string().min(1)).optional(),
+  primaryColor: z.string().min(1).optional(),
+  welcomeMessage: z.string().min(1).optional(),
+  fallbackMessage: z.string().min(1).optional(),
+  privacyMessage: z.string().min(1).optional(),
+  leadCaptureEnabled: z.boolean().optional(),
+  leadCaptureTrigger: z.enum(leadCaptureTriggers).optional(),
+  leadCaptureAfterMessages: z.number().int().positive().max(20).optional(),
+  leadCaptureFields: z.array(z.enum(['name', 'email', 'phone', 'need'])).optional(),
   widgetEnabled: z.boolean().optional(),
   status: z.enum(['active', 'inactive']).optional()
 });
@@ -975,6 +978,25 @@ export function registerAdminManagementRoutes(
     };
   });
 
+  app.post('/admin-api/sites', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const body = sitePayloadSchema.parse(request.body);
+    const organizationId = resolveOrganizationScope(context.user, body.organizationId);
+    if (!organizationId) throw notFound('Organization not found', 'ORGANIZATION_NOT_FOUND');
+    requireOrganizationAccess(context.user, organizationId);
+    const site = await chatbotProduction.createSite({
+      organizationId,
+      name: body.name,
+      domain: body.domain,
+      status: body.status,
+      widgetEnabled: body.widgetEnabled
+    });
+    chatbotRuntimeCache.invalidate(['site-settings', 'widget-config']);
+
+    return { site };
+  });
+
   app.get('/admin-api/sites/:siteId/widget', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'sites:read');
@@ -1027,6 +1049,9 @@ export function registerAdminManagementRoutes(
     if (!existing) throw notFound('Site not found', 'SITE_NOT_FOUND');
     requireOrganizationAccess(context.user, existing.organization_id);
     const body = siteWidgetSettingsPayloadSchema.parse(request.body);
+    if (body.domain !== undefined) {
+      await chatbotProduction.assertDomainUnique(normalizeDomain(body.domain), params.siteId);
+    }
     const site = await chatbotProduction.updateWidgetSettings(
       params.siteId,
       existing.organization_id,
