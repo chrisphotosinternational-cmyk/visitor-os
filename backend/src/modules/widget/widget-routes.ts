@@ -85,7 +85,7 @@ export function registerWidgetRoutes(
   app.get('/widget/:siteKey.js', (request, reply) => {
     z.object({ siteKey: z.string().min(1) }).parse(request.params);
     reply.type('application/javascript; charset=utf-8');
-    return publicWidgetJs;
+    return publicWidgetJs.replaceAll('\\`', '`');
   });
 
   app.get('/api/widget/config', async (request) => {
