@@ -61,12 +61,18 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   registerTraceContext(app);
   await app.register(cors, {
     credentials: true,
-    origin:
-      dependencies.config.security.allowedOrigins.length > 0
-        ? dependencies.config.security.allowedOrigins
-        : dependencies.config.app.environment === 'production'
-          ? false
-          : true
+    delegator: async (request, callback) => {
+      const origin = headerValue(request.headers.origin);
+      const corsOptions = {
+        credentials: true,
+        origin: await resolveCorsOrigin(request, dependencies, origin),
+        ...(isWidgetApiPath(request.url)
+          ? { methods: ['GET', 'HEAD', 'POST'], allowedHeaders: ['Content-Type'] }
+          : {})
+      };
+
+      callback(null, corsOptions);
+    }
   });
 
   registerSecurityHeaders(app);
@@ -182,6 +188,64 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   );
 
   return app;
+}
+
+async function resolveCorsOrigin(
+  request: FastifyRequest,
+  dependencies: AppDependencies,
+  origin: string | undefined
+): Promise<boolean | string | string[]> {
+  if (isWidgetApiPath(request.url)) {
+    return (await isAllowedWidgetOrigin(dependencies.database, origin)) ? (origin ?? false) : false;
+  }
+
+  if (dependencies.config.security.allowedOrigins.length > 0) {
+    return dependencies.config.security.allowedOrigins;
+  }
+
+  return dependencies.config.app.environment === 'production' ? false : true;
+}
+
+function isWidgetApiPath(url: string): boolean {
+  const pathname = url.split('?', 1)[0] ?? '';
+  return pathname === '/api/widget/config' || pathname.startsWith('/api/widget/');
+}
+
+async function isAllowedWidgetOrigin(
+  database: Database,
+  origin: string | undefined
+): Promise<boolean> {
+  if (!origin || !database.isConfigured()) return false;
+  const hostname = hostnameFromOrigin(origin);
+  if (!hostname) return false;
+
+  const result = await database.query<{ allowed_domains: string[] | null }>(
+    `select allowed_domains from sites where status = 'active' and widget_enabled = true and allowed_domains is not null`
+  );
+
+  return result.rows.some((site) =>
+    normalizeDomains(site.allowed_domains ?? []).some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+    )
+  );
+}
+
+function hostnameFromOrigin(origin: string): string | null {
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDomains(domains: string[]): string[] {
+  return domains
+    .map((domain) => hostnameFromOrigin(domain.includes('://') ? domain : `https://${domain}`))
+    .filter((domain): domain is string => Boolean(domain));
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function registerFileLogging(app: FastifyInstance, config: AppConfig): void {
