@@ -46,6 +46,8 @@ createApp({
       userSearch: '',
       userForm: emptyUserForm(),
       sites: [],
+      siteForm: emptySiteForm(),
+      siteCreating: false,
       selectedSite: null,
       siteWidget: null,
       siteWidgetForm: emptySiteWidgetForm(),
@@ -484,6 +486,34 @@ createApp({
       if (!response.ok) throw new Error('Chargement des sites impossible.');
       this.sites = (await response.json()).sites;
     },
+    async createSite() {
+      this.siteCreating = true;
+      this.error = '';
+      const payload = {
+        name: this.siteForm.name,
+        domain: this.siteForm.domain,
+        organizationId: this.siteForm.organizationId || this.user?.organizationId,
+        status: this.siteForm.status,
+        widgetEnabled: this.siteForm.widgetEnabled
+      };
+      try {
+        const response = await this.apiRequest('/admin-api/sites', {
+          method: 'POST',
+          authenticated: true,
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(await responseErrorMessage(response, 'Creation site impossible.'));
+        const data = await response.json();
+        this.siteForm = emptySiteForm();
+        await this.loadSites();
+        this.notify('Site cree. Configuration widget ouverte.');
+        await this.openSiteWidget(data.site);
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : 'Creation site impossible.';
+      } finally {
+        this.siteCreating = false;
+      }
+    },
     async loadSiteWidget(siteId, options = {}) {
       if (!siteId) {
         this.error = 'Site widget introuvable.';
@@ -548,7 +578,9 @@ createApp({
         leadCaptureAfterMessages: Number(this.siteWidgetForm.leadCaptureAfterMessages || 3),
         leadCaptureFields: Object.entries(this.siteWidgetForm.leadCaptureFields).filter((entry) => entry[1]).map((entry) => entry[0]),
         widgetEnabled: this.siteWidgetForm.widgetEnabled,
-        status: this.siteWidgetForm.status
+        status: this.siteWidgetForm.status,
+        name: this.siteWidgetForm.name,
+        domain: this.siteWidgetForm.domain
       };
       try {
         const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/widget-settings', {
@@ -2049,8 +2081,20 @@ createApp({
             <div class="inline-actions">
               <button type="button" @click="loadSites">Rafraichir</button>
               <button type="button" @click="loadChatbotMetrics">Metriques</button>
+              <button type="button" @click="createSite" :disabled="siteCreating">{{ siteCreating ? 'Creation...' : 'Ajouter un site' }}</button>
             </div>
           </div>
+
+          <form class="admin-form prospect-form" @submit.prevent="createSite">
+            <input v-model="siteForm.name" required placeholder="Nom du site" />
+            <input v-model="siteForm.domain" required placeholder="domaine.example" />
+            <select v-model="siteForm.organizationId" required>
+              <option disabled value="">Organisation</option>
+              <option v-for="organization in organizations" :key="organization.id" :value="organization.id">{{ organization.name }}</option>
+            </select>
+            <select v-model="siteForm.status"><option value="active">active</option><option value="inactive">inactive</option></select>
+            <label class="checkbox-field"><input v-model="siteForm.widgetEnabled" type="checkbox" /> Widget actif</label>
+          </form>
           <div class="dashboard-grid">
             <article class="metric"><span>Questions sans reponse</span><strong>{{ chatbotMetrics?.unansweredQuestions ?? 0 }}</strong><small>Pending</small></article>
             <article class="metric"><span>Leads captures</span><strong>{{ chatbotMetrics?.leadsCaptured ?? 0 }}</strong><small>Chatbot</small></article>
@@ -2113,6 +2157,8 @@ createApp({
             </div>
           </section>
           <form class="admin-form prospect-form" @submit.prevent="saveSiteWidgetSettings">
+            <input v-model="siteWidgetForm.name" required placeholder="Nom du site" />
+            <input v-model="siteWidgetForm.domain" required placeholder="Domaine" />
             <label class="checkbox-field"><input v-model="siteWidgetForm.widgetEnabled" type="checkbox" /> Widget actif</label>
             <select v-model="siteWidgetForm.status"><option value="active">active</option><option value="inactive">inactive</option></select>
             <input v-model="siteWidgetForm.primaryColor" placeholder="#1f6f5b" />
@@ -2747,8 +2793,14 @@ function emptyUserForm(organizationId = '') {
   return { id: '', organizationId, firstName: '', lastName: '', email: '', password: '', role: 'Viewer', status: 'active' };
 }
 
+function emptySiteForm() {
+  return { name: '', domain: '', organizationId: '', status: 'active', widgetEnabled: true };
+}
+
 function emptySiteWidgetForm() {
   return {
+    name: '',
+    domain: '',
     allowedDomains: ['chambres-dhotes-albi.com', 'photographe-boudoir-albi.ovh', 'photographe-boudoir-lyon.ovh', 'decoration-murale-photo.com'].join('\\n'),
     primaryColor: '#1f6f5b',
     welcomeMessage: 'Bonjour, je peux vous aider.',
@@ -2775,6 +2827,8 @@ function siteWidgetToForm(site, settings) {
   const fields = new Set(settings?.leadCaptureFields ?? ['name', 'email', 'phone', 'need']);
 
   return {
+    name: site?.name ?? '',
+    domain: site?.domain ?? '',
     allowedDomains: (settings?.allowedDomains ?? site?.allowed_domains ?? []).join('\\n'),
     primaryColor: settings?.primaryColor ?? defaults.primaryColor,
     welcomeMessage: settings?.welcomeMessage ?? defaults.welcomeMessage,

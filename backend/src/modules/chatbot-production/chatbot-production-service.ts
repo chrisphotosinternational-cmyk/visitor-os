@@ -48,7 +48,17 @@ type WidgetSettingsSource = {
   lead_capture_fields?: string[] | null;
 };
 
+export type SiteCreateInput = {
+  organizationId: string;
+  name: string;
+  domain: string;
+  status: 'active' | 'inactive';
+  widgetEnabled: boolean;
+};
+
 type WidgetSettingsUpdate = {
+  name?: string | undefined;
+  domain?: string | undefined;
   allowedDomains?: string[] | undefined;
   primaryColor?: string | undefined;
   welcomeMessage?: string | undefined;
@@ -135,6 +145,61 @@ export class ChatbotProductionService {
     return result.rows;
   }
 
+  async createSite(input: SiteCreateInput): Promise<SiteWidgetAdmin> {
+    const domain = normalizeDomain(input.domain);
+    await this.assertDomainUnique(domain);
+    const siteId = randomUUID();
+    const publicKey = `site_${siteId.replaceAll('-', '')}`;
+    const result = await this.database.query<SiteWidgetAdmin>(
+      `
+      insert into sites (
+        id,
+        organization_id,
+        name,
+        slug,
+        domain,
+        widget_public_key,
+        activity,
+        business_config_id,
+        language,
+        status,
+        widget_enabled,
+        allowed_domains
+      )
+      values ($1, $2, $3, $4, $5, $6, 'default', 'default', 'fr', $7, $8, $9)
+      returning *
+      `,
+      [
+        siteId,
+        input.organizationId,
+        input.name.trim(),
+        slugify(input.name),
+        domain,
+        publicKey,
+        input.status,
+        input.widgetEnabled,
+        domain ? [domain] : []
+      ]
+    );
+
+    return requireRow(result.rows[0], 'Site was not created');
+  }
+
+  async assertDomainUnique(domain: string, excludeSiteId?: string): Promise<void> {
+    if (!domain) return;
+    const result = await this.database.query<{ id: string }>(
+      `select id from sites where lower(domain) = $1 and ($2::uuid is null or id <> $2) limit 1`,
+      [domain, excludeSiteId ?? null]
+    );
+
+    if (result.rows[0]) {
+      throw new AppError('Site domain already exists', {
+        statusCode: 409,
+        code: 'SITE_DOMAIN_ALREADY_EXISTS'
+      });
+    }
+  }
+
   async updateWidgetSettings(
     siteId: string,
     organizationId: string,
@@ -144,6 +209,8 @@ export class ChatbotProductionService {
       `
       update sites
       set
+        name = coalesce($14, name),
+        domain = coalesce($15, domain),
         allowed_domains = $1,
         widget_primary_color = $2,
         widget_welcome_message = $3,
@@ -171,7 +238,9 @@ export class ChatbotProductionService {
         settings.widgetEnabled ?? null,
         settings.status ?? null,
         siteId,
-        organizationId
+        organizationId,
+        settings.name?.trim() || null,
+        settings.domain === undefined ? null : normalizeDomain(settings.domain)
       ]
     );
 
@@ -692,6 +761,18 @@ export class ChatbotProductionService {
   }
 }
 
+function slugify(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'site'
+  );
+}
+
 function parseCsv(csv: string): Array<Record<string, string>> {
   const lines = csv
     .split(/\r?\n/)
@@ -767,13 +848,22 @@ function parseLeadCaptureTrigger(value?: string | null): LeadCaptureTrigger {
     : 'after_messages';
 }
 
-function normalizeDomain(domain: string): string {
-  const host = domain
-    .replace(/^https?:\/\//i, '')
-    .replace(/^www\./i, '')
-    .split('/')[0];
+export function normalizeDomain(domain?: string | null): string {
+  const raw = (domain ?? '').trim().toLowerCase();
+  if (!raw) return '';
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
 
-  return (host ?? '').trim().toLowerCase();
+  try {
+    return new URL(withProtocol).hostname.replace(/^www\./, '');
+  } catch {
+    return (
+      raw
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .split('/')[0]
+        ?.split(':')[0] ?? raw
+    );
+  }
 }
 
 function emptyToNull(value?: string | null): string | null {
