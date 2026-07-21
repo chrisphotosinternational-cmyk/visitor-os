@@ -338,23 +338,15 @@ const sitePayloadSchema = z.object({
 const siteWidgetSettingsPayloadSchema = z.object({
   name: z.string().min(1).optional(),
   domain: z.string().min(1).optional(),
-  allowedDomains: z.array(z.string().min(1)).default([]),
-  primaryColor: z.string().min(1).default('#1f6f5b'),
-  welcomeMessage: z.string().min(1).default('Bonjour, je peux vous aider.'),
-  fallbackMessage: z
-    .string()
-    .min(1)
-    .default("Je n'ai pas encore cette information. Contactez-nous pour une reponse precise."),
-  privacyMessage: z
-    .string()
-    .min(1)
-    .default('Vos informations sont utilisees uniquement pour repondre a votre demande.'),
-  leadCaptureEnabled: z.boolean().default(false),
-  leadCaptureTrigger: z.enum(leadCaptureTriggers).default('after_messages'),
-  leadCaptureAfterMessages: z.number().int().positive().max(20).default(3),
-  leadCaptureFields: z
-    .array(z.enum(['name', 'email', 'phone', 'need']))
-    .default(['name', 'email', 'phone', 'need']),
+  allowedDomains: z.array(z.string().min(1)).optional(),
+  primaryColor: z.string().min(1).optional(),
+  welcomeMessage: z.string().min(1).optional(),
+  fallbackMessage: z.string().min(1).optional(),
+  privacyMessage: z.string().min(1).optional(),
+  leadCaptureEnabled: z.boolean().optional(),
+  leadCaptureTrigger: z.enum(leadCaptureTriggers).optional(),
+  leadCaptureAfterMessages: z.number().int().positive().max(20).optional(),
+  leadCaptureFields: z.array(z.enum(['name', 'email', 'phone', 'need'])).optional(),
   widgetEnabled: z.boolean().optional(),
   status: z.enum(['active', 'inactive']).optional()
 });

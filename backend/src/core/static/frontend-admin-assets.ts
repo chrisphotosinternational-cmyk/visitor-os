@@ -181,6 +181,9 @@ createApp({
     },
     canWriteProspects() {
       return ['SuperAdmin', 'Admin', 'Manager', 'Agent'].includes(this.user?.role);
+    },
+    canWriteSites() {
+      return ['SuperAdmin', 'Admin', 'Manager'].includes(this.user?.role);
     }
   },
   async mounted() {
@@ -487,6 +490,7 @@ createApp({
       this.sites = (await response.json()).sites;
     },
     async createSite() {
+      if (!this.canWriteSites) return;
       this.siteCreating = true;
       this.error = '';
       const payload = {
@@ -2081,11 +2085,11 @@ createApp({
             <div class="inline-actions">
               <button type="button" @click="loadSites">Rafraichir</button>
               <button type="button" @click="loadChatbotMetrics">Metriques</button>
-              <button type="button" @click="createSite" :disabled="siteCreating">{{ siteCreating ? 'Creation...' : 'Ajouter un site' }}</button>
+              <button v-if="canWriteSites" form="site-create-form" type="submit" :disabled="siteCreating">{{ siteCreating ? 'Creation...' : 'Ajouter un site' }}</button>
             </div>
           </div>
 
-          <form class="admin-form prospect-form" @submit.prevent="createSite">
+          <form v-if="canWriteSites" id="site-create-form" class="admin-form prospect-form" @submit.prevent="createSite">
             <input v-model="siteForm.name" required placeholder="Nom du site" />
             <input v-model="siteForm.domain" required placeholder="domaine.example" />
             <select v-model="siteForm.organizationId" required>

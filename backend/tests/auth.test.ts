@@ -1504,6 +1504,27 @@ describe('admin authentication and RBAC', () => {
     assert.equal(updatedBody.site.status, 'inactive');
     assert.equal(updatedBody.widget.active, false);
 
+    const renamedOnly = await app.inject({
+      method: 'PATCH',
+      url: `/admin-api/sites/${createdBody.site.id}/widget-settings`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Site Renomme Encore' }
+    });
+
+    assert.equal(renamedOnly.statusCode, 200);
+    const renamedOnlyBody = renamedOnly.json() as {
+      site: {
+        name: string;
+        allowed_domains: string[];
+        widget_public_key: string;
+        widget_enabled: boolean;
+      };
+    };
+    assert.equal(renamedOnlyBody.site.name, 'Site Renomme Encore');
+    assert.deepEqual(renamedOnlyBody.site.allowed_domains, ['renomme.example.test']);
+    assert.equal(renamedOnlyBody.site.widget_enabled, false);
+    assert.equal(renamedOnlyBody.site.widget_public_key, createdBody.site.widget_public_key);
+
     const widget = await app.inject({
       method: 'GET',
       url: `/admin-api/sites/${createdBody.site.id}/widget`,
@@ -1954,15 +1975,15 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         Object.assign(row, {
           name: values[13] ?? row.name,
           domain: values[14] ?? row.domain,
-          allowed_domains: values[0],
-          widget_primary_color: values[1],
-          widget_welcome_message: values[2],
-          widget_fallback_message: values[3],
-          widget_privacy_message: values[4],
-          lead_capture_enabled: values[5],
-          lead_capture_trigger: values[6],
-          lead_capture_after_messages: values[7],
-          lead_capture_fields: values[8],
+          allowed_domains: values[0] ?? row.allowed_domains,
+          widget_primary_color: values[1] ?? row.widget_primary_color,
+          widget_welcome_message: values[2] ?? row.widget_welcome_message,
+          widget_fallback_message: values[3] ?? row.widget_fallback_message,
+          widget_privacy_message: values[4] ?? row.widget_privacy_message,
+          lead_capture_enabled: values[5] ?? row.lead_capture_enabled,
+          lead_capture_trigger: values[6] ?? row.lead_capture_trigger,
+          lead_capture_after_messages: values[7] ?? row.lead_capture_after_messages,
+          lead_capture_fields: values[8] ?? row.lead_capture_fields,
           widget_enabled: values[9] ?? row.widget_enabled,
           status: values[10] ?? row.status
         });
