@@ -40,12 +40,13 @@ jobs:
               raise SystemExit('Expected ORDER BY clause not found')
           path.write_text(text.replace(old, new, 1))
           PY
-      - name: Remove temporary workflow and commit
+      - name: Remove temporary files and commit
         shell: bash
         run: |
           rm .github/workflows/apply-knowledge-score-fix.yml
+          rm -f .github/trigger-knowledge-score-fix
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/src/modules/kms/knowledge-repository.ts .github/workflows/apply-knowledge-score-fix.yml
+          git add -A
           git commit -m "Fix knowledge search score ordering"
           git push origin HEAD:fix/knowledge-search-score-ordering-v2
