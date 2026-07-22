@@ -9,7 +9,12 @@ import { KnowledgeIndexingQueue } from '../src/modules/kms/indexing-queue.js';
 import { KnowledgeImporter } from '../src/modules/kms/knowledge-importer.js';
 import { KnowledgeIndexer, chunkKnowledgeText } from '../src/modules/kms/knowledge-indexer.js';
 import { KnowledgeRepository } from '../src/modules/kms/knowledge-repository.js';
-import type { KnowledgeDocument, KnowledgeVersion } from '../src/modules/kms/knowledge-types.js';
+import { SiteCrawlerService } from '../src/modules/kms/site-crawler.js';
+import type {
+  KnowledgeDocument,
+  KnowledgeImportInput,
+  KnowledgeVersion
+} from '../src/modules/kms/knowledge-types.js';
 import { KnowledgeValidator } from '../src/modules/kms/knowledge-validator.js';
 import type { BusinessConfig } from '../src/modules/business-config/business-config-schema.js';
 import type {
@@ -357,12 +362,185 @@ describe('Knowledge Management System', () => {
     assert.equal(result.reply, 'Le spa est accessible sur reservation.');
     assert.equal(aiCalls, 0);
   });
+
+  it('refuses to crawl a start URL outside the registered site domain', async () => {
+    const crawler = new SiteCrawlerService(createRecordingImporter().importer);
+
+    await assert.rejects(
+      () =>
+        crawler.crawl({
+          organizationId,
+          siteId,
+          siteDomain: 'photographe-boudoir-albi.ovh',
+          startUrl: 'https://example.com',
+          delayMs: 0
+        }),
+      /domain/i
+    );
+  });
+
+  it('crawls only internal pages, deduplicates URLs, respects robots and imports into KMS by site', async () => {
+    const imported = createRecordingImporter();
+    const fetched: string[] = [];
+    const responses = new Map<string, string>([
+      ['https://photographe-boudoir-albi.ovh/robots.txt', `User-agent: *\nDisallow: /private`],
+      [
+        'https://photographe-boudoir-albi.ovh/',
+        `
+        <html>
+          <head>
+            <title>Photographe boudoir Albi</title>
+            <meta name="description" content="Séance photo boudoir à Albi">
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": [{
+                  "@type": "Question",
+                  "name": "Quels sont les tarifs ?",
+                  "acceptedAnswer": { "@type": "Answer", "text": "Les forfaits commencent à 190 euros." }
+                }]
+              }
+            </script>
+          </head>
+          <body>
+            <nav>Menu répété</nav>
+            <h1>Studio boudoir à Albi</h1>
+            <p>Prestations photo boudoir pour Albi et le Tarn.</p>
+            <details><summary>Déroulement</summary><p>La séance dure environ deux heures.</p></details>
+            <ul><li>Prise de contact</li><li>Guide de préparation</li></ul>
+            <table><tr><td>Formule découverte</td><td>190€</td></tr></table>
+            <a href="/about#team">À propos</a>
+            <a href="/about">Doublon À propos</a>
+            <a href="/private">Privé</a>
+            <a href="https://example.com/offre">Externe</a>
+            <a href="https://blog.photographe-boudoir-albi.ovh/">Sous-domaine</a>
+            <a href="mailto:contact@example.com">Email</a>
+            <a href="javascript:void(0)">JS</a>
+          </body>
+        </html>
+        `
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/about',
+        `
+        <html>
+          <head><title>À propos du studio</title></head>
+          <body>
+            <h1>Photographe à Albi</h1>
+            <h2>Zones géographiques</h2>
+            <p>Le studio accompagne les clientes à Albi, Gaillac et Castres.</p>
+            <a href="/tarifs">Tarifs</a>
+          </body>
+        </html>
+        `
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/private',
+        '<html><body><p>Cette page ne doit pas être téléchargée.</p></body></html>'
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/tarifs',
+        '<html><body><p>Cette page dépasse la limite.</p></body></html>'
+      ]
+    ]);
+    const crawler = new SiteCrawlerService(imported.importer, async (url) => {
+      fetched.push(url);
+      const body = responses.get(url);
+      return createCrawlResponse(body ?? '', body !== undefined ? 200 : 404);
+    });
+
+    const summary = await crawler.crawl({
+      organizationId,
+      siteId,
+      siteDomain: 'https://photographe-boudoir-albi.ovh',
+      startUrl: 'https://photographe-boudoir-albi.ovh/#accueil',
+      maxPages: 3,
+      delayMs: 0,
+      now: new Date('2026-07-22T00:00:00.000Z')
+    });
+
+    assert.equal(summary.pagesImported, 2);
+    assert.equal(summary.pagesSkipped, 1);
+    assert.equal(summary.documentsCreated, 2);
+    assert.ok(summary.chunksCreated >= 2);
+    assert.deepEqual(
+      imported.inputs.map((input) => input.siteId),
+      [siteId, siteId]
+    );
+    assert.equal(imported.inputs.some((input) => input.siteId === null), false);
+    assert.deepEqual(
+      imported.inputs.map((input) => input.source),
+      ['https://photographe-boudoir-albi.ovh/', 'https://photographe-boudoir-albi.ovh/about']
+    );
+    assert.match(imported.inputs[0]?.content ?? '', /FAQ Question: Quels sont les tarifs/);
+    assert.match(imported.inputs[0]?.content ?? '', /FAQ Answer: Les forfaits commencent à 190 euros/);
+    assert.match(imported.inputs[0]?.content ?? '', /Formule découverte 190€/);
+    assert.equal(fetched.includes('https://example.com/offre'), false);
+    assert.equal(fetched.includes('https://blog.photographe-boudoir-albi.ovh/'), false);
+    assert.equal(fetched.includes('https://photographe-boudoir-albi.ovh/tarifs'), false);
+    assert.equal(summary.skipped[0]?.reason, 'robots.txt');
+  });
 });
 
 const organizationId = '00000000-0000-4000-8000-000000000001';
 const siteId = '00000000-0000-4000-8000-000000000101';
 const otherSiteId = '00000000-0000-4000-8000-000000000102';
 const documentId = '00000000-0000-4000-8000-000000000301';
+
+function createRecordingImporter(): {
+  importer: KnowledgeImporter;
+  inputs: KnowledgeImportInput[];
+} {
+  const inputs: KnowledgeImportInput[] = [];
+  const importer = {
+    async import(input: KnowledgeImportInput): Promise<KnowledgeDocument> {
+      inputs.push(input);
+      return {
+        id: `document-${inputs.length}`,
+        organization_id: input.organizationId,
+        site_id: input.siteId,
+        title: input.title,
+        description: input.description ?? null,
+        category: input.category,
+        type: input.type,
+        language: input.language ?? 'fr',
+        version: 1,
+        size_bytes: Buffer.byteLength(input.content, 'utf8'),
+        hash: `hash-${inputs.length}`,
+        status: 'active',
+        tags: input.tags ?? [],
+        author: input.author ?? null,
+        source: input.source ?? 'manual',
+        usage_count: 0,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+    }
+  } as KnowledgeImporter;
+
+  return { importer, inputs };
+}
+
+function createCrawlResponse(body: string, status = 200): {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  headers: { get(name: string): string | null };
+} {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async text() {
+      return body;
+    },
+    headers: {
+      get(name: string) {
+        return name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null;
+      }
+    }
+  };
+}
 
 function createKnowledgeDatabase(): Database {
   const documents = new Map<string, KnowledgeDocument>();
