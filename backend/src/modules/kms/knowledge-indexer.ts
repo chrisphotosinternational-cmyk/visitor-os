@@ -15,7 +15,7 @@ export class KnowledgeIndexer {
   createChunks(input: {
     documentId: string;
     organizationId: string;
-    siteId?: string;
+    siteId: string;
     content: string;
     config?: KnowledgeChunkingInput;
   }): KnowledgeChunk[] {
@@ -26,7 +26,7 @@ export class KnowledgeIndexer {
       id: createHash('sha256').update(`${input.documentId}:${index}:${content}`).digest('hex'),
       documentId: input.documentId,
       organizationId: input.organizationId,
-      ...(input.siteId ? { siteId: input.siteId } : {}),
+      siteId: input.siteId,
       content,
       position: index,
       tokens: tokenize(content),

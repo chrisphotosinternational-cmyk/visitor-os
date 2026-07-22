@@ -22,6 +22,7 @@ describe('Knowledge Management System', () => {
     const validator = new KnowledgeValidator();
     const valid = validator.validateImport({
       organizationId,
+      siteId,
       title: 'Guide parking',
       category: 'access',
       type: 'markdown',
@@ -29,6 +30,17 @@ describe('Knowledge Management System', () => {
     });
 
     assert.equal(valid.language, 'fr');
+    assert.throws(
+      () =>
+        validator.validateImport({
+          organizationId,
+          title: 'Guide sans site',
+          category: 'access',
+          type: 'markdown',
+          content: 'Le parking est ouvert 24h/24.'
+        }),
+      /siteId/
+    );
     assert.throws(() => validator.validateImport({ title: '' }), /organizationId/);
   });
 
@@ -36,6 +48,7 @@ describe('Knowledge Management System', () => {
     const chunks = new KnowledgeIndexer().createChunks({
       documentId,
       organizationId,
+      siteId,
       content: 'Premier paragraphe.\n\nParking disponible proche.'
     });
 
@@ -127,6 +140,23 @@ describe('Knowledge Management System', () => {
     assert.equal(versions.length, 1);
   });
 
+  it('refuses chatbot knowledge imports without a site id', async () => {
+    const repository = new KnowledgeRepository(createKnowledgeDatabase());
+    const importer = new KnowledgeImporter(repository);
+
+    await assert.rejects(
+      () =>
+        importer.import({
+          organizationId,
+          title: 'Guide global refuse',
+          category: 'access',
+          type: 'txt',
+          content: 'Ce document global ne doit pas alimenter un widget.'
+        } as never),
+      /siteId/
+    );
+  });
+
   it('imports files through the indexing queue and versions same file replacements', async () => {
     const database = createKnowledgeDatabase();
     const repository = new KnowledgeRepository(database);
@@ -171,11 +201,97 @@ describe('Knowledge Management System', () => {
 
     const forbidden = await repository.search({
       organizationId: '00000000-0000-4000-8000-000000000999',
+      siteId,
       query: 'parking',
       limit: 5
     });
 
     assert.equal(forbidden.length, 0);
+  });
+
+  it('keeps KMS document searches strictly isolated by site and ignores legacy global documents', async () => {
+    const database = createKnowledgeDatabase();
+    const repository = new KnowledgeRepository(database);
+    const importer = new KnowledgeImporter(repository);
+    const siteDocument = await importer.import({
+      organizationId,
+      siteId,
+      title: 'Guide Albi',
+      category: 'access',
+      type: 'txt',
+      content: 'Parking prive pour le studio Albi.',
+      tags: ['parking']
+    });
+    await importer.import({
+      organizationId,
+      siteId: otherSiteId,
+      title: 'Guide Toulouse',
+      category: 'access',
+      type: 'txt',
+      content: 'Parking reserve au studio Toulouse.',
+      tags: ['parking']
+    });
+    const legacyGlobal = await repository.upsertDocument({
+      organizationId,
+      siteId: null,
+      title: 'Guide global historique',
+      category: 'access',
+      type: 'txt',
+      content: 'Parking global historique a ne pas utiliser.',
+      tags: ['parking']
+    } as never);
+    await database.query(
+      `
+      insert into knowledge_chunks (
+        id,
+        document_id,
+        organization_id,
+        site_id,
+        content,
+        position,
+        tokens,
+        metadata
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+      `,
+      [
+        'legacy-global-chunk',
+        legacyGlobal.id,
+        organizationId,
+        null,
+        'Parking global historique a ne pas utiliser.',
+        0,
+        ['parking', 'global', 'historique'],
+        '{}'
+      ]
+    );
+
+    const siteResults = await repository.search({
+      organizationId,
+      siteId,
+      query: 'parking',
+      limit: 10
+    });
+    const otherSiteResults = await repository.search({
+      organizationId,
+      siteId: otherSiteId,
+      query: 'parking',
+      limit: 10
+    });
+    const wrongSiteResults = await repository.search({
+      organizationId,
+      siteId: '00000000-0000-4000-8000-000000000202',
+      query: 'parking',
+      limit: 10
+    });
+
+    assert.deepEqual(
+      siteResults.map((result) => result.documentId),
+      [siteDocument.id]
+    );
+    assert.equal(otherSiteResults.length, 1);
+    assert.notEqual(otherSiteResults[0]?.documentId, siteDocument.id);
+    assert.equal(wrongSiteResults.length, 0);
   });
 
   it('lists, archives, deletes and exposes statistics', async () => {
@@ -184,16 +300,17 @@ describe('Knowledge Management System', () => {
     const importer = new KnowledgeImporter(repository);
     const document = await importer.import({
       organizationId,
+      siteId,
       title: 'FAQ petit dejeuner',
       category: 'services',
       type: 'txt',
       content: 'Le petit dejeuner est servi de 7h a 10h.'
     });
 
-    assert.equal((await repository.list({ organizationId })).length, 1);
+    assert.equal((await repository.list({ organizationId, siteId })).length, 1);
     assert.equal((await repository.archive(document.id, organizationId))?.status, 'archived');
     assert.equal(await repository.delete(document.id, organizationId), true);
-    assert.equal((await repository.statistics(organizationId)).documents, 1);
+    assert.equal((await repository.statistics(organizationId, siteId)).documents, 1);
   });
 
   it('lets the Decision Engine answer from Knowledge Search before AI', async () => {
@@ -244,6 +361,7 @@ describe('Knowledge Management System', () => {
 
 const organizationId = '00000000-0000-4000-8000-000000000001';
 const siteId = '00000000-0000-4000-8000-000000000101';
+const otherSiteId = '00000000-0000-4000-8000-000000000102';
 const documentId = '00000000-0000-4000-8000-000000000301';
 
 function createKnowledgeDatabase(): Database {
@@ -274,7 +392,7 @@ function createKnowledgeDatabase(): Database {
         const found = [...documents.values()].find(
           (document) =>
             document.organization_id === values[0] &&
-            (!values[1] || document.site_id === values[1]) &&
+            document.site_id === values[1] &&
             (document.hash === values[2] ||
               (typeof values[3] === 'string' &&
                 values[3].startsWith('file:') &&
@@ -349,14 +467,18 @@ function createKnowledgeDatabase(): Database {
       }
 
       if (sql.includes('from knowledge_documents d') && sql.includes('order by d.updated_at')) {
-        return result([...documents.values()].filter((document) => document.status !== 'deleted'));
+        return result(
+          [...documents.values()].filter(
+            (document) => document.status !== 'deleted' && document.site_id === values[1]
+          )
+        );
       }
 
       if (sql.includes('from knowledge_chunks c')) {
         const queryTokens = values[2] as string[];
         const found = chunks
           .filter((chunk) => chunk.organization_id === values[0])
-          .filter((chunk) => !values[1] || chunk.site_id === values[1])
+          .filter((chunk) => chunk.site_id === values[1])
           .filter((chunk) => chunk.tokens.some((token) => queryTokens.includes(token)))
           .map((chunk) => {
             const document = documents.get(chunk.document_id);

@@ -5,10 +5,14 @@ import type {
   KnowledgeFileImportInput
 } from './knowledge-types.js';
 
+type KnowledgeFileExtractionInput = Omit<KnowledgeFileImportInput, 'siteId'> & {
+  siteId?: string;
+};
+
 const textTypes = ['txt', 'markdown'] as const;
 
 export class KnowledgeDocumentExtractor {
-  extract(input: KnowledgeFileImportInput): KnowledgeExtractionResult {
+  extract(input: KnowledgeFileExtractionInput): KnowledgeExtractionResult {
     const detectedType = input.type ?? detectDocumentType(input.fileName, input.mimeType);
     const rawText = input.data.toString('utf8');
     const warnings: string[] = [];
