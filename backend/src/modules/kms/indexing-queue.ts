@@ -20,7 +20,7 @@ export class KnowledgeIndexingQueue {
       status: 'queued',
       fileName: input.fileName,
       organizationId: input.organizationId,
-      ...(input.siteId ? { siteId: input.siteId } : {}),
+      siteId: input.siteId,
       createdAt: new Date()
     };
     this.jobs.set(job.id, job);

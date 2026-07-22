@@ -3,7 +3,7 @@ import { knowledgeDocumentTypes } from './knowledge-types.js';
 
 export const knowledgeImportSchema = z.object({
   organizationId: z.string().uuid(),
-  siteId: z.string().uuid().optional(),
+  siteId: z.string().uuid(),
   title: z.string().min(1).max(240),
   description: z.string().max(1000).optional(),
   category: z.string().min(1).max(120),
