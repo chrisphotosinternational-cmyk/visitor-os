@@ -260,7 +260,15 @@ export class KnowledgeRepository {
           or d.title ilike '%' || $4 || '%'
           or $4 = any(d.tags)
         )
-      order by score::numeric desc, d.updated_at desc
+      order by (
+        (
+          select count(*)
+          from unnest(c.tokens) token
+          where token = any($3::text[])
+        ) * 0.22
+        + case when d.title ilike '%' || $4 || '%' then 0.35 else 0 end
+        + case when $4 = any(d.tags) then 0.25 else 0 end
+      ) desc, d.updated_at desc
       limit $6
       `,
       [
@@ -418,7 +426,7 @@ export class KnowledgeRepository {
       order by updated_at desc
       limit 1
       `,
-      [organizationId, siteId ?? null, hash, source ?? null]
+      [documentId, input.organizationId, input.siteId ?? null, input.query, result.rows.length]
     );
 
     return result.rows[0] ?? null;
