@@ -21,7 +21,7 @@ export class KnowledgeImporter {
     const valid = this.validator.validateImport(input);
     const document = await this.repository.upsertDocument({
       organizationId: valid.organizationId,
-      ...(valid.siteId ? { siteId: valid.siteId } : {}),
+      siteId: valid.siteId,
       title: valid.title,
       ...(valid.description ? { description: valid.description } : {}),
       category: valid.category,
@@ -35,7 +35,7 @@ export class KnowledgeImporter {
     const chunks = this.indexer.createChunks({
       documentId: document.id,
       organizationId: document.organization_id,
-      ...(document.site_id ? { siteId: document.site_id } : {}),
+      siteId: valid.siteId,
       content: valid.content
     });
 
@@ -49,7 +49,7 @@ export class KnowledgeImporter {
     const extracted = this.extractor.extract(input);
     const document = await this.repository.upsertDocument({
       organizationId: input.organizationId,
-      ...(input.siteId ? { siteId: input.siteId } : {}),
+      siteId: input.siteId,
       title: input.title ?? extracted.metadata.title ?? input.fileName,
       ...(input.description ? { description: input.description } : {}),
       category: input.category ?? 'general',
@@ -65,7 +65,7 @@ export class KnowledgeImporter {
     const chunks = this.indexer.createChunks({
       documentId: document.id,
       organizationId: document.organization_id,
-      ...(document.site_id ? { siteId: document.site_id } : {}),
+      siteId: input.siteId,
       content: extracted.text,
       ...(input.chunking ? { config: input.chunking } : {})
     });

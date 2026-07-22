@@ -53,7 +53,7 @@ export type KnowledgeChunk = {
   id: string;
   documentId: string;
   organizationId: string;
-  siteId?: string;
+  siteId: string;
   content: string;
   position: number;
   tokens: string[];
@@ -85,7 +85,7 @@ export type KnowledgeSearchResult = {
 
 export type KnowledgeImportInput = {
   organizationId: string;
-  siteId?: string;
+  siteId: string;
   title: string;
   description?: string;
   category: string;
@@ -99,7 +99,7 @@ export type KnowledgeImportInput = {
 
 export type KnowledgeFileImportInput = {
   organizationId: string;
-  siteId?: string;
+  siteId: string;
   title?: string;
   description?: string;
   category?: string;
@@ -146,7 +146,7 @@ export type KnowledgeIndexingJob = {
   documentId?: string;
   fileName: string;
   organizationId: string;
-  siteId?: string;
+  siteId: string;
   error?: string;
   startedAt?: Date;
   completedAt?: Date;
@@ -155,7 +155,7 @@ export type KnowledgeIndexingJob = {
 
 export type KnowledgeSearchInput = {
   organizationId: string;
-  siteId?: string;
+  siteId: string;
   query: string;
   category?: string;
   tags?: string[];

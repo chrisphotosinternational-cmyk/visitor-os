@@ -13,7 +13,7 @@ import { tokenizeKnowledge } from './knowledge-indexer.js';
 
 export type KnowledgeListFilters = {
   organizationId: string;
-  siteId?: string;
+  siteId: string;
   search?: string;
   category?: string;
   status?: string;
@@ -73,7 +73,7 @@ export class KnowledgeRepository {
       [
         documentId,
         input.organizationId,
-        input.siteId ?? null,
+        input.siteId,
         input.title,
         input.description ?? null,
         input.category,
@@ -124,7 +124,7 @@ export class KnowledgeRepository {
           chunk.id,
           chunk.documentId,
           chunk.organizationId,
-          chunk.siteId ?? null,
+          chunk.siteId,
           chunk.content,
           chunk.position,
           chunk.tokens,
@@ -140,7 +140,7 @@ export class KnowledgeRepository {
       select *
       from knowledge_documents d
       where d.organization_id = $1
-        and ($2::uuid is null or d.site_id = $2 or d.site_id is null)
+        and d.site_id = $2
         and ($3::text is null or d.status = $3)
         and ($4::text is null or d.category = $4)
         and (
@@ -157,7 +157,7 @@ export class KnowledgeRepository {
       `,
       [
         filters.organizationId,
-        filters.siteId ?? null,
+        filters.siteId,
         filters.status ?? null,
         filters.category ?? null,
         filters.search ?? null
@@ -250,7 +250,7 @@ export class KnowledgeRepository {
       from knowledge_chunks c
       join knowledge_documents d on d.id = c.document_id
       where d.organization_id = $1
-        and ($2::uuid is null or d.site_id = $2 or d.site_id is null)
+        and d.site_id = $2
         and d.status = 'active'
         and ($5::text is null or d.language = $5)
         and ($7::text is null or d.category = $7)
@@ -273,7 +273,7 @@ export class KnowledgeRepository {
       `,
       [
         input.organizationId,
-        input.siteId ?? null,
+        input.siteId,
         tokens,
         input.query,
         input.language ?? null,
@@ -295,7 +295,7 @@ export class KnowledgeRepository {
       )
       values ($1, $2, $3, $4, $5)
       `,
-      [searchId, input.organizationId, input.siteId ?? null, input.query, result.rows.length]
+      [searchId, input.organizationId, input.siteId, input.query, result.rows.length]
     );
 
     if (result.rows[0]) {
@@ -321,7 +321,7 @@ export class KnowledgeRepository {
     });
   }
 
-  async statistics(organizationId: string, siteId?: string): Promise<KnowledgeStatistics> {
+  async statistics(organizationId: string, siteId: string): Promise<KnowledgeStatistics> {
     const result = await this.database.query<{
       documents: string;
       total_size_bytes: string;
@@ -338,22 +338,22 @@ export class KnowledgeRepository {
         count(*) filter (where usage_count = 0)::text as never_used_documents
       from knowledge_documents d
       where d.organization_id = $1
-        and ($2::uuid is null or d.site_id = $2 or d.site_id is null)
+        and d.site_id = $2
         and d.status <> 'deleted'
       `,
-      [organizationId, siteId ?? null]
+      [organizationId, siteId]
     );
     const categoryResult = await this.database.query<{ category: string; count: string }>(
       `
       select category, count(*)::text as count
       from knowledge_documents
       where organization_id = $1
-        and ($2::uuid is null or site_id = $2 or site_id is null)
+        and site_id = $2
         and status <> 'deleted'
       group by category
       order by count(*) desc, category asc
       `,
-      [organizationId, siteId ?? null]
+      [organizationId, siteId]
     );
     const row = result.rows[0];
 
@@ -408,7 +408,7 @@ export class KnowledgeRepository {
 
   private async findExistingDocument(
     organizationId: string,
-    siteId: string | undefined,
+    siteId: string,
     hash: string,
     source?: string
   ): Promise<KnowledgeDocument | null> {
@@ -417,7 +417,7 @@ export class KnowledgeRepository {
       select *
       from knowledge_documents
       where organization_id = $1
-        and ($2::uuid is null or site_id = $2)
+        and site_id = $2
         and (
           hash = $3
           or ($4::text like 'file:%' and source = $4)
@@ -426,7 +426,7 @@ export class KnowledgeRepository {
       order by updated_at desc
       limit 1
       `,
-      [organizationId, siteId ?? null, hash, source ?? null]
+      [organizationId, siteId, hash, source ?? null]
     );
 
     return result.rows[0] ?? null;

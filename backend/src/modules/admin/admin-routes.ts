@@ -132,7 +132,7 @@ const analyticsSnapshotSchema = analyticsQuerySchema.extend({
 
 const knowledgeImportBodySchema = z.object({
   organizationId: z.string().uuid().optional(),
-  siteId: z.string().uuid().optional(),
+  siteId: z.string().uuid(),
   title: z.string().min(1),
   description: z.string().optional(),
   category: z.string().min(1).default('general'),
@@ -146,7 +146,7 @@ const knowledgeImportBodySchema = z.object({
 
 const knowledgeFileImportBodySchema = z.object({
   organizationId: z.string().uuid().optional(),
-  siteId: z.string().uuid().optional(),
+  siteId: z.string().uuid(),
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   category: z.string().min(1).default('general'),
@@ -168,7 +168,7 @@ const knowledgeFileImportBodySchema = z.object({
 
 const knowledgeQuerySchema = z.object({
   organizationId: z.string().uuid().optional(),
-  siteId: z.string().uuid().optional(),
+  siteId: z.string().uuid(),
   search: z.string().optional(),
   category: z.string().optional(),
   status: z.enum(knowledgeStatuses).optional()
@@ -498,7 +498,7 @@ export function registerAdminRoutes(
     return {
       documents: await knowledge.list({
         organizationId,
-        ...(query.siteId ? { siteId: query.siteId } : {}),
+        siteId: query.siteId,
         ...(query.search ? { search: query.search } : {}),
         ...(query.category ? { category: query.category } : {}),
         ...(query.status ? { status: query.status } : {})
@@ -527,7 +527,7 @@ export function registerAdminRoutes(
     return {
       document: await knowledgeImporter.import({
         organizationId,
-        ...(body.siteId ? { siteId: body.siteId } : {}),
+        siteId: body.siteId,
         title: body.title,
         ...(body.description ? { description: body.description } : {}),
         category: body.category,
@@ -565,7 +565,7 @@ export function registerAdminRoutes(
 
     return knowledgeQueue.enqueueFileImport({
       organizationId,
-      ...(body.siteId ? { siteId: body.siteId } : {}),
+      siteId: body.siteId,
       ...(body.title ? { title: body.title } : {}),
       ...(body.description ? { description: body.description } : {}),
       category: body.category,
@@ -586,7 +586,7 @@ export function registerAdminRoutes(
     const query = z
       .object({
         organizationId: z.string().uuid().optional(),
-        siteId: z.string().uuid().optional(),
+        siteId: z.string().uuid(),
         q: z.string().min(1),
         category: z.string().optional(),
         tags: z.string().optional(),
@@ -600,7 +600,7 @@ export function registerAdminRoutes(
       results:
         (await knowledgeSearch?.search({
           organizationId,
-          ...(query.siteId ? { siteId: query.siteId } : {}),
+          siteId: query.siteId,
           query: query.q,
           ...(query.category ? { category: query.category } : {}),
           ...(query.tags
