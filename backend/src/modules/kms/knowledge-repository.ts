@@ -426,7 +426,7 @@ export class KnowledgeRepository {
       order by updated_at desc
       limit 1
       `,
-      [documentId, input.organizationId, input.siteId ?? null, input.query, result.rows.length]
+      [organizationId, siteId ?? null, hash, source ?? null]
     );
 
     return result.rows[0] ?? null;
