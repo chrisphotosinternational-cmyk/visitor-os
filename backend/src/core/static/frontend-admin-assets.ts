@@ -645,7 +645,7 @@ createApp({
       this.siteCrawlerResult = null;
       const startedAt = performance.now();
       try {
-        const response = await this.apiRequest('/api/admin/sites/' + this.selectedSite.id + '/crawl', {
+        const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/crawl', {
           method: 'POST',
           authenticated: true,
           body: JSON.stringify({

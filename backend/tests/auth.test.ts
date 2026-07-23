@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/core/config/env.js';
 import { createLogger } from '../src/core/logger/logger.js';
@@ -1543,6 +1543,85 @@ describe('admin authentication and RBAC', () => {
     await app.close();
   });
 
+  it('requires JWT auth before crawling a site from admin API', async () => {
+    const app = await createAuthTestApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin-api/sites/${SITE_A}/crawl`,
+      payload: { startUrl: 'https://site-a.example.com/', maxPages: 1, delayMs: 0 }
+    });
+
+    assert.equal(response.statusCode, 401);
+    assert.equal((response.json() as { error: { code: string } }).error.code, 'JWT_REQUIRED');
+    await app.close();
+  });
+
+  it('lets an authenticated admin crawl its own site through the JWT admin API', async () => {
+    const fetchMock = mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+      const href = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+      const body = href.endsWith('/robots.txt')
+        ? ''
+        : '<html><head><title>Site A</title></head><body><h1>Site A</h1><p>Contenu public du site A.</p></body></html>';
+
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return body;
+        },
+        headers: {
+          get(name: string) {
+            if (name.toLowerCase() === 'content-type') {
+              return href.endsWith('/robots.txt') ? 'text/plain' : 'text/html';
+            }
+            return null;
+          }
+        }
+      } as Response;
+    });
+
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/admin-api/sites/${SITE_A}/crawl`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { startUrl: 'https://site-a.example.com/', maxPages: 1, delayMs: 0 }
+      });
+
+      assert.equal(response.statusCode, 200);
+      const body = response.json() as {
+        crawl: { pagesImported: number; chunksCreated: number };
+      };
+      assert.equal(body.crawl.pagesImported, 1);
+      assert.ok(body.crawl.chunksCreated >= 1);
+    } finally {
+      fetchMock.mock.restore();
+      await app.close();
+    }
+  });
+
+  it('refuses crawler access to a site from another organization', async () => {
+    const app = await createAuthTestApp();
+    const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin-api/sites/${SITE_B}/crawl`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { startUrl: 'https://site-b.example.com/', maxPages: 1, delayMs: 0 }
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.equal(
+      (response.json() as { error: { code: string } }).error.code,
+      'ORGANIZATION_ACCESS_DENIED'
+    );
+    await app.close();
+  });
+
   it('rejects publishing knowledge suggestions through accept endpoint', async () => {
     const app = await createAuthTestApp();
     const token = await jwtLogin(app, 'admin@example.com', 'test-password-123');
@@ -1765,6 +1844,10 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   const prospectFieldSuggestions = new Map<string, Record<string, unknown>>();
   const crmActivityLog = new Map<string, Record<string, unknown>>();
   const knowledge = new Map<string, Record<string, unknown>>();
+  const knowledgeDocuments = new Map<string, Record<string, unknown>>();
+  const knowledgeVersions: Array<Record<string, unknown>> = [];
+  const knowledgeChunks: Array<Record<string, unknown>> = [];
+
   const reviewQueue = new Map<string, Record<string, unknown>>([
     [REVIEW_QUEUE_A, { id: REVIEW_QUEUE_A, organization_id: ORG_A, site_id: SITE_A }],
     [REVIEW_QUEUE_B, { id: REVIEW_QUEUE_B, organization_id: ORG_B, site_id: SITE_B }],
@@ -1967,6 +2050,82 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         };
         sites.set(String(row.id), row);
         return result([row]);
+      }
+
+      if (sql.includes('from knowledge_documents') && sql.includes('hash = $3')) {
+        return result(
+          [...knowledgeDocuments.values()].filter(
+            (row) =>
+              row.organization_id === values[0] &&
+              row.site_id === values[1] &&
+              row.hash === values[2] &&
+              row.status !== 'deleted'
+          )
+        );
+      }
+
+      if (sql.includes('insert into knowledge_documents')) {
+        const row = {
+          id: values[0],
+          organization_id: values[1],
+          site_id: values[2],
+          title: values[3],
+          description: values[4],
+          category: values[5],
+          type: values[6],
+          language: values[7],
+          version: values[8],
+          size_bytes: values[9],
+          hash: values[10],
+          status: 'active',
+          tags: values[11],
+          author: values[12],
+          source: values[13],
+          usage_count: 0,
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+        knowledgeDocuments.set(String(row.id), row);
+        return result([row]);
+      }
+
+      if (sql.includes('insert into knowledge_versions')) {
+        knowledgeVersions.push({
+          id: values[0],
+          document_id: values[1],
+          organization_id: values[2],
+          version: values[3],
+          title: values[4],
+          content: values[5],
+          hash: values[6],
+          author: values[7],
+          created_at: new Date()
+        });
+        return result([]);
+      }
+
+      if (sql.includes('delete from knowledge_chunks')) {
+        for (let index = knowledgeChunks.length - 1; index >= 0; index -= 1) {
+          if (knowledgeChunks[index]?.document_id === values[0]) {
+            knowledgeChunks.splice(index, 1);
+          }
+        }
+        return result([]);
+      }
+
+      if (sql.includes('insert into knowledge_chunks')) {
+        knowledgeChunks.push({
+          id: values[0],
+          document_id: values[1],
+          organization_id: values[2],
+          site_id: values[3],
+          content: values[4],
+          position: values[5],
+          tokens: values[6],
+          metadata:
+            typeof values[7] === 'string' ? JSON.parse(values[7]) : (values[7] ?? {})
+        });
+        return result([]);
       }
 
       if (sql.includes('update sites') && sql.includes('allowed_domains')) {
@@ -2914,7 +3073,7 @@ function site(
     organization_id: organizationId,
     name,
     slug,
-    domain: null,
+    domain: `${slug}.example.com`,
     widget_public_key: `${slug}-key`,
     activity: 'default',
     business_config_id: 'default',
