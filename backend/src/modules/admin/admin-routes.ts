@@ -38,6 +38,7 @@ import { KnowledgeIndexingQueue } from '../kms/indexing-queue.js';
 import { RepositoryKnowledgeSearch } from '../kms/knowledge-search.js';
 import { KnowledgeStatisticsService } from '../kms/knowledge-statistics.js';
 import { knowledgeDocumentTypes, knowledgeStatuses } from '../kms/knowledge-types.js';
+import { SiteCrawlerService } from '../kms/site-crawler.js';
 
 const organizationInputSchema = z.object({
   name: z.string().min(1),
@@ -174,6 +175,12 @@ const knowledgeQuerySchema = z.object({
   status: z.enum(knowledgeStatuses).optional()
 });
 
+const siteCrawlBodySchema = z.object({
+  startUrl: z.string().url().optional(),
+  maxPages: z.number().int().min(1).max(250).optional(),
+  delayMs: z.number().int().min(0).max(60_000).optional()
+});
+
 export function registerAdminRoutes(
   app: FastifyInstance,
   database: Database,
@@ -196,6 +203,7 @@ export function registerAdminRoutes(
   const knowledgeQueue = knowledgeImporter ? new KnowledgeIndexingQueue(knowledgeImporter) : null;
   const knowledgeSearch = knowledge ? new RepositoryKnowledgeSearch(knowledge) : null;
   const knowledgeStatistics = knowledge ? new KnowledgeStatisticsService(knowledge) : null;
+  const siteCrawler = knowledgeImporter ? new SiteCrawlerService(knowledgeImporter) : null;
   const authContexts = new WeakMap<object, AuthContext>();
 
   app.post('/api/admin/auth/login', async (request, reply) => {
@@ -922,6 +930,45 @@ export function registerAdminRoutes(
     auth.requireOrganizationAccess(context, site.organization_id);
 
     return { deleted: await sites.delete(params.siteId) };
+  });
+
+  app.post('/api/admin/sites/:siteId/crawl', async (request) => {
+    const context = getAuthContext(authContexts, request);
+    auth.requirePermission(context, 'settings:access');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = siteCrawlBodySchema.parse(request.body ?? {});
+    const site = await sites.find(params.siteId);
+
+    if (!site) {
+      throw new AppError('Site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
+    }
+    auth.requireOrganizationAccess(context, site.organization_id);
+
+    if (!site.domain) {
+      throw new AppError('Site domain is required before crawling', {
+        statusCode: 400,
+        code: 'SITE_DOMAIN_REQUIRED'
+      });
+    }
+    if (!siteCrawler) {
+      throw new AppError('Knowledge crawler is not available', {
+        statusCode: 503,
+        code: 'KNOWLEDGE_CRAWLER_UNAVAILABLE'
+      });
+    }
+
+    const startUrl = body.startUrl ?? site.domain;
+
+    return {
+      crawl: await siteCrawler.crawl({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        siteDomain: site.domain,
+        startUrl: /^https?:\/\//i.test(startUrl) ? startUrl : `https://${startUrl}`,
+        ...(body.maxPages ? { maxPages: body.maxPages } : {}),
+        ...(body.delayMs !== undefined ? { delayMs: body.delayMs } : {})
+      })
+    };
   });
 
   app.get('/api/admin/crm/tags', async (request) => {
