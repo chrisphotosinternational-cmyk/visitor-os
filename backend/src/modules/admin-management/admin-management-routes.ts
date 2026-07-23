@@ -71,6 +71,9 @@ import {
   studioGoals
 } from '../chatbot-studio/chatbot-studio-service.js';
 import { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
+import { KnowledgeRepository } from '../kms/knowledge-repository.js';
+import { KnowledgeImporter } from '../kms/knowledge-importer.js';
+import { SiteCrawlerService } from '../kms/site-crawler.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
 import {
   assertReviewStatus,
@@ -368,6 +371,12 @@ const qaImportPayloadSchema = z.object({
   csv: z.string().min(1)
 });
 
+const siteCrawlPayloadSchema = z.object({
+  startUrl: z.string().url().optional(),
+  maxPages: z.number().int().min(1).max(250).optional(),
+  delayMs: z.number().int().min(0).max(60_000).optional()
+});
+
 const unansweredConvertPayloadSchema = z.object({
   answer: z.string().min(1),
   category: z.string().optional(),
@@ -539,6 +548,9 @@ export function registerAdminManagementRoutes(
   const settings = new SettingsService(database);
   const aiChat = new AIChatService(database);
   const chatbotProduction = new ChatbotProductionService(database);
+  const knowledgeRepository = new KnowledgeRepository(database);
+  const knowledgeImporter = new KnowledgeImporter(knowledgeRepository);
+  const siteCrawler = new SiteCrawlerService(knowledgeImporter);
   const knowledgeEngine = new KnowledgeEngineService(database);
   const chatbotStudio = new ChatbotStudioService(database, knowledgeEngine);
   const reasoningEngine = new ReasoningEngineService(database, knowledgeEngine);
@@ -1086,6 +1098,35 @@ export function registerAdminManagementRoutes(
         siteId: site.id,
         siteDomain: site.domain,
         csv: body.csv
+      })
+    };
+  });
+
+
+  app.post('/admin-api/sites/:siteId/crawl', async (request) => {
+    const context = await resolveContext(request, config, users);
+    requirePermission(context.user, 'sites:write');
+    const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
+    const body = siteCrawlPayloadSchema.parse(request.body ?? {});
+    const site = await chatbotProduction.getSiteWidget(params.siteId);
+    if (!site) throw notFound('Site not found', 'SITE_NOT_FOUND');
+    requireOrganizationAccess(context.user, site.organization_id);
+    if (!site.domain) {
+      throw new AppError('Site domain is required before crawling', {
+        statusCode: 400,
+        code: 'SITE_DOMAIN_REQUIRED'
+      });
+    }
+    const startUrl = body.startUrl ?? site.domain;
+
+    return {
+      crawl: await siteCrawler.crawl({
+        organizationId: site.organization_id,
+        siteId: site.id,
+        siteDomain: site.domain,
+        startUrl: /^https?:\/\//i.test(startUrl) ? startUrl : `https://${startUrl}`,
+        ...(body.maxPages ? { maxPages: body.maxPages } : {}),
+        ...(body.delayMs !== undefined ? { delayMs: body.delayMs } : {})
       })
     };
   });
