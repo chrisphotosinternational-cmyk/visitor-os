@@ -53,6 +53,10 @@ createApp({
       siteWidgetForm: emptySiteWidgetForm(),
       siteWidgetSaving: false,
       siteWidgetTesting: false,
+      siteCrawlerForm: emptySiteCrawlerForm(),
+      siteCrawlerLoading: false,
+      siteCrawlerResult: null,
+      siteCrawlerError: '',
       siteQaCsv: '',
       siteQaImportResult: null,
       unansweredQuestions: [],
@@ -529,6 +533,9 @@ createApp({
       this.selectedSite = data.site;
       this.siteWidget = data.widget;
       this.siteWidgetForm = siteWidgetToForm(data.site, data.widget.settings);
+      this.siteCrawlerForm = emptySiteCrawlerForm(data.site.domain);
+      this.siteCrawlerResult = null;
+      this.siteCrawlerError = '';
       if (options.refreshDiagnostics !== false) await this.loadWidgetDiagnostics(data.site.id, false);
       await this.loadUnansweredQuestions();
     },
@@ -615,6 +622,51 @@ createApp({
       if (!this.siteWidget?.debugScriptCode) return;
       await navigator.clipboard.writeText(this.siteWidget.debugScriptCode);
       this.notify('Code widget debug copie.');
+    },
+    async crawlSelectedSite() {
+      if (!this.selectedSite) {
+        this.siteCrawlerError = 'Aucun site selectionne pour lancer le crawler.';
+        return;
+      }
+      const maxPages = Number(this.siteCrawlerForm.maxPages || 50);
+      if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 250) {
+        this.siteCrawlerError = 'Le nombre maximum de pages doit etre compris entre 1 et 250.';
+        return;
+      }
+      const siteHost = hostFromUrlOrDomain(this.selectedSite.domain);
+      const startHost = hostFromUrlOrDomain(this.siteCrawlerForm.startUrl);
+      if (!siteHost || !startHost || startHost !== siteHost) {
+        this.siteCrawlerError = 'L URL de depart doit rester sur le domaine du site courant.';
+        return;
+      }
+
+      this.siteCrawlerLoading = true;
+      this.siteCrawlerError = '';
+      this.siteCrawlerResult = null;
+      const startedAt = performance.now();
+      try {
+        const response = await this.apiRequest('/api/admin/sites/' + this.selectedSite.id + '/crawl', {
+          method: 'POST',
+          authenticated: true,
+          body: JSON.stringify({
+            startUrl: normalizeCrawlerStartUrl(this.siteCrawlerForm.startUrl),
+            maxPages
+          })
+        });
+        if (!response.ok) throw new Error(await responseErrorMessage(response, 'Crawl du site impossible.'));
+        const data = await response.json();
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        this.siteCrawlerResult = {
+          ...(data.crawl ?? {}),
+          durationMs: data.crawl?.durationMs ?? data.crawl?.duration_ms ?? elapsedMs
+        };
+        this.notify('Import automatique du site termine.');
+        await this.loadChatbotMetrics();
+      } catch (error) {
+        this.siteCrawlerError = error instanceof Error ? error.message : 'Crawl du site impossible.';
+      } finally {
+        this.siteCrawlerLoading = false;
+      }
     },
     async importSiteQa() {
       if (!this.selectedSite || !this.siteQaCsv.trim()) return;
@@ -2185,6 +2237,30 @@ createApp({
             <button type="submit" :disabled="siteWidgetSaving">{{ siteWidgetSaving ? 'Sauvegarde...' : 'Sauvegarder widget' }}</button>
           </form>
           <section class="timeline-section">
+            <div class="panel-header"><h2>Import automatique du site</h2><span class="badge">Crawler KMS</span></div>
+            <form class="import-form" @submit.prevent="crawlSelectedSite">
+              <label>
+                <span>URL de depart</span>
+                <input v-model.trim="siteCrawlerForm.startUrl" type="url" :placeholder="selectedSite?.domain || 'https://example.com'" required />
+              </label>
+              <label>
+                <span>Nombre maximum de pages</span>
+                <input v-model.number="siteCrawlerForm.maxPages" type="number" min="1" max="250" required />
+              </label>
+              <button type="submit" :disabled="siteCrawlerLoading">
+                {{ siteCrawlerLoading ? 'Crawl en cours...' : 'Crawler le site' }}
+              </button>
+            </form>
+            <p class="muted">Le crawler reste limite au domaine courant : {{ selectedSite?.domain || '-' }}.</p>
+            <p v-if="siteCrawlerError" class="error-message">{{ siteCrawlerError }}</p>
+            <div v-if="siteCrawlerResult" class="dashboard-grid compact-grid">
+              <article class="metric"><span>Pages explorees</span><strong>{{ siteCrawlerResult.pagesDiscovered ?? 0 }}</strong><small>URLs internes</small></article>
+              <article class="metric"><span>Pages importees</span><strong>{{ siteCrawlerResult.pagesImported ?? 0 }}</strong><small>KMS site</small></article>
+              <article class="metric"><span>Chunks crees</span><strong>{{ siteCrawlerResult.chunksCreated ?? siteCrawlerResult.documentsCreated ?? 0 }}</strong><small>Connaissances indexees</small></article>
+              <article class="metric"><span>Duree</span><strong>{{ siteCrawlerResult.durationMs ?? '-' }} ms</strong><small>Crawl</small></article>
+            </div>
+          </section>
+          <section class="timeline-section">
             <div class="panel-header"><h2>Import Q/A site</h2><span class="badge">CSV</span></div>
             <form class="import-form" @submit.prevent="importSiteQa">
               <textarea v-model="siteQaCsv" placeholder="site_domain,category,question,answer,tags,priority,is_active"></textarea>
@@ -2799,6 +2875,30 @@ function emptyUserForm(organizationId = '') {
 
 function emptySiteForm() {
   return { name: '', domain: '', organizationId: '', status: 'active', widgetEnabled: true };
+}
+
+function emptySiteCrawlerForm(domain = '') {
+  return { startUrl: normalizeCrawlerStartUrl(domain), maxPages: 50 };
+}
+
+function normalizeCrawlerStartUrl(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  return hasHttpProtocol(trimmed) ? trimmed : 'https://' + trimmed;
+}
+
+function hasHttpProtocol(value) {
+  const lower = String(value || '').toLowerCase();
+  return lower.startsWith('http://') || lower.startsWith('https://');
+}
+
+function hostFromUrlOrDomain(value) {
+  try {
+    const hostname = new URL(normalizeCrawlerStartUrl(value)).hostname.toLowerCase();
+    return hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
+  } catch {
+    return '';
+  }
 }
 
 function emptySiteWidgetForm() {
