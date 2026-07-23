@@ -110,14 +110,14 @@ export function createDecisionEngine(options: {
         siteId: input.siteId,
         query: input.message,
         ...(input.language ? { language: input.language } : {}),
-        limit: 1
+        limit: 5
       });
-      const documentMatch = documentMatches?.[0];
+      const documentMatch = selectBestKnowledgePassage(documentMatches ?? [], input.message);
 
       if (documentMatch && documentMatch.score >= KNOWLEDGE_SEARCH_MIN_CONFIDENCE) {
         return withProcessingTime(
           {
-            reply: documentMatch.content,
+            reply: documentMatch.reply,
             source: 'knowledge_search',
             confidence: clampConfidence(documentMatch.score),
             shouldEscalate: false,
@@ -194,6 +194,137 @@ export function createDecisionEngine(options: {
       );
     }
   };
+}
+
+
+function selectBestKnowledgePassage(
+  matches: Array<{
+    documentId: string;
+    title: string;
+    content: string;
+    score: number;
+  }>,
+  question: string
+): { documentId: string; title: string; reply: string; score: number } | null {
+  const queryTokens = [...tokenize(question)];
+  const scored = matches
+    .map((match) => {
+      const passage = extractRelevantPassage(match.content, queryTokens);
+      if (!passage) return null;
+
+      return {
+        documentId: match.documentId,
+        title: match.title,
+        reply: passage.answer,
+        score: Math.min(0.99, match.score + passage.score / 20)
+      };
+    })
+    .filter((match): match is { documentId: string; title: string; reply: string; score: number } =>
+      Boolean(match)
+    )
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0] ?? null;
+}
+
+function extractRelevantPassage(
+  content: string,
+  queryTokens: string[]
+): { answer: string; score: number } | null {
+  const faqEntries = extractFaqEntries(content);
+  const sections = faqEntries.length > 0 ? faqEntries : splitKnowledgeSections(content);
+  const scored = sections
+    .map((section) => ({ section, score: scoreKnowledgeSection(section.searchable, queryTokens) }))
+    .sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score < 1.6) return null;
+
+  return {
+    answer: limitFactAnswer(best.section.answer || best.section.searchable, queryTokens),
+    score: best.score
+  };
+}
+
+function extractFaqEntries(content: string): Array<{ searchable: string; answer: string }> {
+  const entries: Array<{ searchable: string; answer: string }> = [];
+  const pattern = /FAQ Question:\s*([\s\S]*?)\nFAQ Answer:\s*([\s\S]*?)(?=\n\s*FAQ Question:|$)/gi;
+  for (const match of content.matchAll(pattern)) {
+    const question = cleanKnowledgeText(match[1] ?? '');
+    const answer = cleanKnowledgeText(match[2] ?? '');
+    if (!question && !answer) continue;
+    entries.push({ searchable: `${question} ${answer}`, answer });
+  }
+
+  return entries;
+}
+
+function splitKnowledgeSections(content: string): Array<{ searchable: string; answer: string }> {
+  return content
+    .split(/\n{2,}/)
+    .map(cleanKnowledgeText)
+    .filter(Boolean)
+    .map((section) => ({ searchable: section, answer: section }));
+}
+
+function scoreKnowledgeSection(section: string, queryTokens: string[]): number {
+  const normalized = normalizeText(section);
+  const sectionTokens = tokenize(section);
+  let score = 0;
+  for (const token of queryTokens) {
+    if (!sectionTokens.has(token)) continue;
+    score += tokenWeight(token);
+  }
+  for (const phrase of relevantPhrases(queryTokens)) {
+    if (normalized.includes(phrase)) score += 2.4;
+  }
+
+  return score;
+}
+
+function relevantPhrases(queryTokens: string[]): string[] {
+  const joined = queryTokens.join(' ');
+  const phrases = ['combien photos', 'photos livrees', 'livraison photos', 'nombre photos'];
+  return phrases.filter((phrase) => joined.includes(phrase) || phrase.includes('photos'));
+}
+
+function tokenWeight(token: string): number {
+  if (['photo', 'photos', 'livree', 'livrees', 'livraison', 'nombre', 'combien'].includes(token)) {
+    return 2.2;
+  }
+  if (['seance', 'apres', 'avant', 'avec', 'dans', 'pour', 'les', 'des', 'une', 'votre'].includes(token)) {
+    return 0.25;
+  }
+
+  return 1;
+}
+
+function limitFactAnswer(answer: string, queryTokens: string[]): string {
+  const cleaned = cleanKnowledgeText(answer);
+  const sentences = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  if (sentences.length <= 3) return cleaned;
+  const ranked = sentences
+    .map((sentence, index) => ({
+      sentence,
+      index,
+      score: scoreKnowledgeSection(sentence, queryTokens)
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 3)
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.sentence);
+
+  return ranked.length > 0 ? ranked.join(' ') : sentences.slice(0, 3).join(' ');
+}
+
+function cleanKnowledgeText(value: string): string {
+  return value
+    .replace(/^[-*]\s*/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function resolveAIConfiguration(config: BusinessConfig): AIProviderConfiguration {

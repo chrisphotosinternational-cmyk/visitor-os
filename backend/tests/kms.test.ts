@@ -379,6 +379,29 @@ describe('Knowledge Management System', () => {
     );
   });
 
+
+  it('keeps crawled JSON-LD FAQ entries in separate chunks', async () => {
+    const indexer = new KnowledgeIndexer();
+    const content = [
+      'FAQ Question: Puis-je dormir à l hôtel après la séance ?\nFAQ Answer: Les hôtels partenaires sont listés dans le guide d accueil.',
+      'FAQ Question: Combien de photos sont livrées après une séance ?\nFAQ Answer: Après la séance, 12 photos retouchées sont livrées sous 3 semaines.',
+      'FAQ Question: Est-ce que les fichiers originaux sont remis ?\nFAQ Answer: Les fichiers originaux ne sont pas remis.'
+    ].join('\n\n');
+
+    const chunks = indexer.createChunks({
+      documentId,
+      organizationId,
+      siteId,
+      content
+    });
+
+    assert.equal(chunks.length, 3);
+    assert.match(chunks[1]?.content ?? '', /Combien de photos/);
+    assert.match(chunks[1]?.content ?? '', /12 photos retouchées/);
+    assert.doesNotMatch(chunks[1]?.content ?? '', /hôtels partenaires/);
+    assert.doesNotMatch(chunks[1]?.content ?? '', /originaux/);
+  });
+
   it('crawls only internal pages, deduplicates URLs, respects robots and imports into KMS by site', async () => {
     const imported = createRecordingImporter();
     const fetched: string[] = [];

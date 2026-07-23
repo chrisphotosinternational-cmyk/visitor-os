@@ -252,7 +252,7 @@ function extractPage(html: string, url: string, crawledAt: Date): ExtractedPage 
   return {
     title: compactWhitespace(title).slice(0, 240),
     ...(description ? { description: compactWhitespace(description).slice(0, 1000) } : {}),
-    content: dedupeLines(sections).join('\n'),
+    content: dedupeLines(sections).join('\n\n'),
     links
   };
 }
@@ -311,7 +311,7 @@ function faqLines(item: Record<string, unknown>): string[] {
       : '';
     if (!question && !answer) return [];
 
-    return [`FAQ Question: ${question}`, `FAQ Answer: ${answer}`];
+    return [`FAQ Question: ${question}\nFAQ Answer: ${answer}`];
   });
 }
 
@@ -372,11 +372,19 @@ function compactWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function compactKnowledgeBlock(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map(compactWhitespace)
+    .filter(Boolean)
+    .join('\n');
+}
+
 function dedupeLines(lines: string[]): string[] {
   const seen = new Set<string>();
   const deduped: string[] = [];
-  for (const line of lines.map(compactWhitespace).filter(Boolean)) {
-    const key = line.toLowerCase();
+  for (const line of lines.map(compactKnowledgeBlock).filter(Boolean)) {
+    const key = compactWhitespace(line).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(line);
