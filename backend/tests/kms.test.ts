@@ -402,6 +402,95 @@ describe('Knowledge Management System', () => {
     assert.doesNotMatch(chunks[1]?.content ?? '', /originaux/);
   });
 
+
+  it('combines robots and sitemap discovery with normalized URL reporting and strict site imports', async () => {
+    const imported = createRecordingImporter();
+    const fetched: string[] = [];
+    const responses = new Map<string, { body: string; status?: number; url?: string }>([
+      [
+        'https://photographe-boudoir-albi.ovh/robots.txt',
+        { body: `User-agent: *\nDisallow: /private\nSitemap: https://www.photographe-boudoir-albi.ovh/sitemap_index.xml` }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/sitemap_index.xml',
+        {
+          body: `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://photographe-boudoir-albi.ovh/sitemap-pages.xml</loc></sitemap><sitemap><loc>https://photographe-boudoir-albi.ovh/sitemap-extra.xml</loc></sitemap></sitemapindex>`
+        }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/sitemap.xml',
+        {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://photographe-boudoir-albi.ovh/faq?utm_source=google#photos</loc></url><url><loc>https://example.com/externe</loc></url></urlset>`
+        }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/sitemap-pages.xml',
+        {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://photographe-boudoir-albi.ovh/faq?utm_campaign=x#top</loc></url><url><loc>https://photographe-boudoir-albi.ovh/studio/</loc></url></urlset>`
+        }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/sitemap-extra.xml',
+        {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://photographe-boudoir-albi.ovh/missing</loc></url><url><loc>https://blog.photographe-boudoir-albi.ovh/satellite</loc></url></urlset>`
+        }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/faq',
+        { body: '<html><head><title>FAQ photos</title><link rel="canonical" href="https://www.photographe-boudoir-albi.ovh/faq/" /></head><body><h1>FAQ</h1><p>Combien de photos sont livrées ? 12 photos retouchées.</p></body></html>' }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/studio',
+        { body: '<html><head><title>Studio Albi</title></head><body><p>Le studio accueille les shootings boudoir.</p></body></html>' }
+      ],
+      ['https://photographe-boudoir-albi.ovh/missing', { body: 'not found', status: 404 }],
+      [
+        'https://photographe-boudoir-albi.ovh/',
+        { body: '<html><head><title>Accueil</title></head><body><a href="/retouches?utm_medium=email&utm_source=newsletter#details">Retouches</a><a href="https://example.com/offre">Externe</a></body></html>' }
+      ],
+      [
+        'https://photographe-boudoir-albi.ovh/retouches',
+        {
+          body: '<html><head><title>Retouches</title></head><body><p>Les retouches sont incluses.</p></body></html>',
+          url: 'https://www.photographe-boudoir-albi.ovh/retouches/?utm_source=redirect'
+        }
+      ]
+    ]);
+    const crawler = new SiteCrawlerService(imported.importer, async (url) => {
+      fetched.push(url);
+      const response = responses.get(url);
+      return createCrawlResponse(response?.body ?? '', response?.status ?? (response ? 200 : 404), response?.url);
+    });
+
+    const summary = await crawler.crawl({
+      organizationId,
+      siteId,
+      siteDomain: 'photographe-boudoir-albi.ovh',
+      startUrl: 'https://www.photographe-boudoir-albi.ovh/?utm_source=admin#start',
+      maxPages: 6,
+      delayMs: 0,
+      now: new Date('2026-07-23T00:00:00.000Z')
+    });
+
+    assert.equal(summary.sitemapUrlCount, 3);
+    assert.equal(summary.discoveredUrlCount, 5);
+    assert.equal(summary.crawledUrlCount, 5);
+    assert.equal(summary.importedUrlCount, 4);
+    assert.equal(summary.skippedUrlCount, 1);
+    assert.equal(summary.errorUrlCount, 0);
+    assert.equal(summary.sitemapCoveragePercent, 100);
+    assert.equal(fetched.includes('https://example.com/offre'), false);
+    assert.equal(fetched.some((url) => url.includes('utm_')), false);
+    assert.equal(fetched.includes('https://blog.photographe-boudoir-albi.ovh/satellite'), false);
+    assert.ok(summary.urls.some((url) => url.initialUrl.endsWith('/missing') && url.reason === 'http 404'));
+    assert.ok(summary.urls.some((url) => url.finalUrl === 'https://photographe-boudoir-albi.ovh/retouches'));
+    assert.deepEqual(imported.inputs.map((input) => input.organizationId), [organizationId, organizationId, organizationId, organizationId]);
+    assert.deepEqual(imported.inputs.map((input) => input.siteId), [siteId, siteId, siteId, siteId]);
+    assert.equal(imported.inputs.some((input) => input.source?.includes('example.com')), false);
+    assert.ok(imported.inputs.some((input) => input.source === 'https://photographe-boudoir-albi.ovh/faq'));
+    assert.ok(imported.inputs.some((input) => input.source === 'https://photographe-boudoir-albi.ovh/retouches'));
+  });
+
   it('crawls only internal pages, deduplicates URLs, respects robots and imports into KMS by site', async () => {
     const imported = createRecordingImporter();
     const fetched: string[] = [];
@@ -545,15 +634,17 @@ function createRecordingImporter(): {
   return { importer, inputs };
 }
 
-function createCrawlResponse(body: string, status = 200): {
+function createCrawlResponse(body: string, status = 200, url?: string): {
   ok: boolean;
   status: number;
+  url?: string;
   text(): Promise<string>;
   headers: { get(name: string): string | null };
 } {
   return {
     ok: status >= 200 && status < 300,
     status,
+    ...(url ? { url } : {}),
     async text() {
       return body;
     },
