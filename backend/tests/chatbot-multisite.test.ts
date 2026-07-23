@@ -2,14 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ConversationRepository } from '../src/modules/conversations/conversation-repository.js';
 import type { CrmRepository } from '../src/modules/crm/crm-repository.js';
-import type { DecisionEngine } from '../src/modules/decision-engine/decision-engine.js';
+import type { DecisionEngine, DecisionEngineResult } from '../src/modules/decision-engine/decision-engine.js';
 import type { NotificationEngine } from '../src/modules/notifications/notification-engine.js';
 import type { ProspectRepository } from '../src/modules/prospects/prospect-repository.js';
 import { MultiSiteChatbotService } from '../src/modules/chatbot-multisite/chatbot-multisite-service.js';
 
 const ORG_A = '00000000-0000-4000-8000-0000000000a1';
+const ORG_B = '00000000-0000-4000-8000-0000000000b1';
 const SITE_A = '00000000-0000-4000-8000-000000000101';
+const SITE_B = '00000000-0000-4000-8000-000000000102';
 const CONVERSATION_A = '00000000-0000-4000-8000-00000000c101';
+const CONVERSATION_B = '00000000-0000-4000-8000-00000000c102';
 const VISITOR_A = '00000000-0000-4000-8000-00000000v101';
 const PROSPECT_A = '00000000-0000-4000-8000-00000000p101';
 
@@ -67,6 +70,99 @@ describe('Multi-site chatbot service', () => {
     );
   });
 
+
+  it('uses crawled KMS knowledge for the current public widget site when reasoning is enabled', async () => {
+    const fixture = createChatbotFixture({
+      decisionResult: {
+        reply: 'Après une séance, 25 photos retouchées en haute définition sont livrées.',
+        source: 'knowledge_search',
+        confidence: 0.82,
+        shouldEscalate: false,
+        processingTimeMs: 4,
+        matchedItemId: 'kms-document-site-a',
+        reason: 'knowledge_document:Séance boudoir Albi'
+      },
+      withReasoning: true
+    });
+
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Combien de photos sont livrées après une séance ?'
+    });
+
+    assert.equal(response.source, 'knowledge_engine');
+    assert.match(response.reply, /25 photos retouchées/);
+    assert.equal(response.matchedItemId, 'kms-document-site-a');
+    assert.deepEqual(fixture.calls.decisionScopes, [{ organizationId: ORG_A, siteId: SITE_A }]);
+  });
+
+  it('does not use site A crawled knowledge for site B', async () => {
+    const fixture = createChatbotFixture({
+      site: { id: SITE_B, organization_id: ORG_A, slug: 'site-b', widget_public_key: 'site-b-key' },
+      conversation: { id: CONVERSATION_B, organization_id: ORG_A, site_id: SITE_B },
+      decisionResult: {
+        reply: 'Je transmets votre demande.',
+        source: 'fallback',
+        confidence: 0.25,
+        shouldEscalate: true,
+        processingTimeMs: 3,
+        reason: 'low_confidence_fallback'
+      }
+    });
+
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_B,
+      content: 'Combien de photos sont livrées après une séance ?'
+    });
+
+    assert.equal(response.source, 'fallback');
+    assert.equal(response.reply, 'Je transmets votre demande.');
+    assert.deepEqual(fixture.calls.decisionScopes, [{ organizationId: ORG_A, siteId: SITE_B }]);
+  });
+
+  it('keeps KMS lookup scoped to the conversation organization', async () => {
+    const fixture = createChatbotFixture({
+      site: { id: SITE_B, organization_id: ORG_B, slug: 'site-b', widget_public_key: 'site-b-key' },
+      conversation: { id: CONVERSATION_B, organization_id: ORG_B, site_id: SITE_B },
+      decisionResult: {
+        reply: 'Je transmets votre demande.',
+        source: 'fallback',
+        confidence: 0.25,
+        shouldEscalate: true,
+        processingTimeMs: 3,
+        reason: 'low_confidence_fallback'
+      }
+    });
+
+    await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_B,
+      content: 'Combien de photos sont livrées après une séance ?'
+    });
+
+    assert.deepEqual(fixture.calls.decisionScopes, [{ organizationId: ORG_B, siteId: SITE_B }]);
+  });
+
+  it('keeps the fallback when no KMS document matches the public widget question', async () => {
+    const fixture = createChatbotFixture({
+      decisionResult: {
+        reply: 'Je transmets votre demande.',
+        source: 'fallback',
+        confidence: 0.25,
+        shouldEscalate: true,
+        processingTimeMs: 3,
+        reason: 'low_confidence_fallback'
+      }
+    });
+
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Question absente du contenu importé'
+    });
+
+    assert.equal(response.source, 'fallback');
+    assert.equal(response.reply, 'Je transmets votre demande.');
+  });
+
   it('rejects inactive or unknown public sites', async () => {
     const fixture = createChatbotFixture({ siteEnabled: false });
 
@@ -77,29 +173,52 @@ describe('Multi-site chatbot service', () => {
   });
 });
 
-function createChatbotFixture(options?: { siteEnabled?: boolean }) {
+type DecisionResultFixture = Omit<DecisionEngineResult, 'source'> & {
+  source: DecisionEngineResult['source'];
+};
+
+const defaultSite = {
+  id: SITE_A,
+  organization_id: ORG_A,
+  name: 'Demo Site',
+  slug: 'demo-site',
+  widget_public_key: 'demo-site-key',
+  activity: 'demo',
+  business_config_id: 'config-site-a',
+  status: 'active',
+  widget_enabled: true
+};
+
+const defaultConversation = {
+  id: CONVERSATION_A,
+  organization_id: ORG_A,
+  site_id: SITE_A,
+  visitor_id: VISITOR_A,
+  prospect_id: null,
+  status: 'open',
+  page_url: 'https://example.com/demo',
+  referrer: null,
+  created_at: new Date('2026-07-06T08:00:00Z'),
+  updated_at: new Date('2026-07-06T08:00:00Z')
+};
+
+function createChatbotFixture(options?: {
+  siteEnabled?: boolean;
+  site?: Partial<typeof defaultSite>;
+  conversation?: Partial<typeof defaultConversation>;
+  decisionResult?: DecisionResultFixture;
+  withReasoning?: boolean;
+}) {
   const site = {
-    id: SITE_A,
-    organization_id: ORG_A,
-    name: 'Demo Site',
-    slug: 'demo-site',
-    widget_public_key: 'demo-site-key',
-    activity: 'demo',
-    business_config_id: 'config-site-a',
-    status: 'active',
-    widget_enabled: options?.siteEnabled ?? true
+    ...defaultSite,
+    ...(options?.site ?? {}),
+    widget_enabled: options?.siteEnabled ?? options?.site?.widget_enabled ?? defaultSite.widget_enabled
   };
   const conversation = {
-    id: CONVERSATION_A,
-    organization_id: ORG_A,
-    site_id: SITE_A,
-    visitor_id: VISITOR_A,
-    prospect_id: null,
-    status: 'open',
-    page_url: 'https://example.com/demo',
-    referrer: null,
-    created_at: new Date('2026-07-06T08:00:00Z'),
-    updated_at: new Date('2026-07-06T08:00:00Z')
+    ...defaultConversation,
+    organization_id: site.organization_id,
+    site_id: site.id,
+    ...(options?.conversation ?? {})
   };
   const calls = {
     businessConfigIds: [] as string[],
@@ -107,13 +226,14 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
     messages: [] as Array<{ senderType: string; content: string }>,
     notifications: [] as Array<{ type: string }>,
     decisions: [] as Array<{ message: string; activity: string }>,
+    decisionScopes: [] as Array<{ organizationId: string; siteId: string }>,
     decisionEvents: [] as Array<{ source: string }>,
     crmProspects: [] as string[],
     linkedProspectId: null as string | null
   };
 
   const conversations = {
-    findSite: async (id: string) => (id === SITE_A ? site : null),
+    findSite: async (id: string) => (id === site.id ? site : null),
     findSiteBySlug: async (slug: string) =>
       slug === site.slug && site.widget_enabled ? site : null,
     findSiteByWidgetKey: async (key: string) =>
@@ -127,8 +247,8 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
       calls.messages.push(input);
       return {
         id: `00000000-0000-4000-8000-00000000m10${calls.messages.length}`,
-        organization_id: ORG_A,
-        conversation_id: CONVERSATION_A,
+        organization_id: conversation.organization_id,
+        conversation_id: conversation.id,
         sender_type: input.senderType,
         content: input.content,
         response_source: null,
@@ -140,15 +260,15 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
         created_at: new Date('2026-07-06T08:01:00Z')
       };
     },
-    findConversation: async (id: string) => (id === CONVERSATION_A ? conversation : null),
+    findConversation: async (id: string) => (id === conversation.id ? conversation : null),
     linkProspect: async (_conversationId: string, prospectId: string) => {
       calls.linkedProspectId = prospectId;
     },
     listMessages: async () => [
       {
         id: '00000000-0000-4000-8000-00000000m001',
-        organization_id: ORG_A,
-        conversation_id: CONVERSATION_A,
+        organization_id: conversation.organization_id,
+        conversation_id: conversation.id,
         sender_type: 'visitor',
         content: 'Bonjour',
         response_source: null,
@@ -169,8 +289,8 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
   const prospects = {
     createFromConversation: async () => ({
       id: PROSPECT_A,
-      organization_id: ORG_A,
-      site_id: SITE_A,
+      organization_id: conversation.organization_id,
+      site_id: conversation.site_id,
       visitor_id: VISITOR_A,
       first_name: null,
       last_name: null,
@@ -208,8 +328,8 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
       return [
         {
           id: '00000000-0000-4000-8000-00000000t001',
-          organization_id: ORG_A,
-          site_id: SITE_A,
+          organization_id: conversation.organization_id,
+          site_id: conversation.site_id,
           label: 'Reservation',
           slug: 'reservation',
           color: null,
@@ -243,17 +363,20 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
         escalation: { enabled: true, triggers: [] }
       };
     },
-    decide: async (input: { message: string; activity: string }) => {
+    decide: async (input: { message: string; activity: string; organizationId: string; siteId: string }) => {
       calls.decisions.push(input);
-      return {
-        reply: 'Oui, nous avons des disponibilites cette semaine.',
-        source: 'faq',
-        confidence: 0.91,
-        shouldEscalate: false,
-        processingTimeMs: 12,
-        matchedItemId: 'faq-1',
-        reason: 'faq_keyword_match'
-      };
+      calls.decisionScopes.push({ organizationId: input.organizationId, siteId: input.siteId });
+      return (
+        options?.decisionResult ?? {
+          reply: 'Oui, nous avons des disponibilites cette semaine.',
+          source: 'faq',
+          confidence: 0.91,
+          shouldEscalate: false,
+          processingTimeMs: 12,
+          matchedItemId: 'faq-1',
+          reason: 'faq_keyword_match'
+        }
+      );
     }
   } as unknown as DecisionEngine;
 
@@ -264,6 +387,42 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
     }
   } as unknown as NotificationEngine;
 
+  const reasoningEngine = options?.withReasoning
+    ? {
+        reason: async (input: {
+          knowledgeAnswer?: {
+            reply: string;
+            source: string;
+            confidence: number;
+            matchedItemId?: string;
+            reason: string;
+          } | null;
+        }) => ({
+          detected_intent: input.knowledgeAnswer?.reason ?? 'unknown',
+          intent_confidence: 0.8,
+          selected_knowledge_item_id: input.knowledgeAnswer?.matchedItemId ?? null,
+          response_text:
+            input.knowledgeAnswer?.reply ??
+            "Je n'ai pas encore cette information precise. Je peux vous aider a reformuler ou transmettre la demande.",
+          response_type: input.knowledgeAnswer?.source ?? 'fallback',
+          next_best_action: 'answer_only',
+          lead_capture_recommended: false,
+          suggested_follow_up_question: null,
+          reasoning_trace: {},
+          confidence_score: input.knowledgeAnswer?.confidence ?? 0.28,
+          lead_readiness_score: 0,
+          applied_goal: null,
+          applied_personality: null,
+          quality_scores: {
+            knowledge_match_score: input.knowledgeAnswer ? 1 : 0,
+            goal_alignment_score: 0,
+            lead_action_score: 0,
+            response_quality_score: input.knowledgeAnswer ? 0.9 : 0.2
+          }
+        })
+      }
+    : undefined;
+
   return {
     calls,
     chatbot: new MultiSiteChatbotService({
@@ -271,7 +430,8 @@ function createChatbotFixture(options?: { siteEnabled?: boolean }) {
       prospects,
       crm,
       decisionEngine,
-      notificationEngine
+      notificationEngine,
+      ...(reasoningEngine ? { reasoningEngine: reasoningEngine as never } : {})
     })
   };
 }
