@@ -277,17 +277,7 @@ export class MultiSiteChatbotService {
             content: message.content
           })),
           detectedIntent: baseDecision.reason,
-          knowledgeAnswer:
-            baseDecision.source === 'knowledge_base' || baseDecision.source === 'faq'
-              ? {
-                  reply: baseDecision.reply,
-                  source: baseDecision.source === 'knowledge_base' ? 'knowledge_engine' : 'site_qa',
-                  confidence: baseDecision.confidence,
-                  matchedItemId: baseDecision.matchedItemId,
-                  detectedIntent: baseDecision.reason,
-                  reason: baseDecision.reason ?? baseDecision.source
-                }
-              : null
+          knowledgeAnswer: knowledgeAnswerFromDecision(baseDecision)
         })
       : null;
     const reasoningTimeMs = Date.now() - reasoningStartedAt;
@@ -656,6 +646,20 @@ export class MultiSiteChatbotService {
 
     throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
   }
+}
+
+
+function knowledgeAnswerFromDecision(decision: DecisionEngineResult) {
+  if (!['knowledge_base', 'knowledge_search', 'faq'].includes(decision.source)) return null;
+
+  return {
+    reply: decision.reply,
+    source: decision.source === 'faq' ? ('site_qa' as const) : ('knowledge_engine' as const),
+    confidence: decision.confidence,
+    matchedItemId: decision.matchedItemId,
+    detectedIntent: decision.reason,
+    reason: decision.reason ?? decision.source
+  };
 }
 
 function byteLength(value: string): number {
