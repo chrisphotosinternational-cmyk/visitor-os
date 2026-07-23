@@ -67,6 +67,62 @@ describe('decision engine', () => {
     assert.equal(result.matchedItemId, 'availability');
   });
 
+
+  it('extracts only the relevant answer from a crawled multi-FAQ KMS chunk', async () => {
+    let aiCalls = 0;
+    const engine = createDecisionEngine({
+      businessConfigEngine: createMemoryBusinessConfigEngine(testConfig),
+      knowledgeSearch: {
+        async search(input) {
+          assert.equal(input.organizationId, '00000000-0000-4000-8000-000000000001');
+          assert.equal(input.siteId, '00000000-0000-4000-8000-000000000101');
+          assert.equal(input.limit, 5);
+          return [
+            {
+              documentId: 'kms-albi-faq',
+              title: 'FAQ séance boudoir Albi',
+              content: `FAQ Question: Puis-je dormir à l'hôtel après la séance ?
+FAQ Answer: Les hôtels partenaires sont listés dans le guide d'accueil.
+FAQ Question: Combien de photos sont livrées après une séance ?
+FAQ Answer: Après la séance, 12 photos retouchées en haute définition sont livrées dans une galerie privée sous 3 semaines.
+FAQ Question: Est-ce que les vidéos sont incluses ?
+FAQ Answer: Les vidéos ne sont pas incluses dans la formule photo.
+FAQ Question: Est-ce que les fichiers originaux sont remis ?
+FAQ Answer: Les fichiers originaux ne sont pas remis.`,
+              category: 'website',
+              language: 'fr',
+              score: 0.72,
+              relevance: 'high',
+              source: 'https://photographe-boudoir-albi.ovh/faq'
+            }
+          ];
+        }
+      },
+      aiProvider: {
+        providerName: 'mock',
+        async generateReply() {
+          aiCalls += 1;
+          throw new Error('AI should not be called when a relevant KMS FAQ answer exists');
+        },
+        estimateCost() {
+          return 0;
+        }
+      }
+    });
+
+    const result = await engine.decide(
+      baseInput('Combien de photos sont livrées après une séance ?')
+    );
+
+    assert.equal(result.source, 'knowledge_search');
+    assert.match(result.reply, /12 photos retouchées/);
+    assert.match(result.reply, /galerie privée/);
+    assert.doesNotMatch(result.reply, /hôtel/i);
+    assert.doesNotMatch(result.reply, /vidéos/i);
+    assert.doesNotMatch(result.reply, /originaux/i);
+    assert.equal(aiCalls, 0);
+  });
+
   it('uses the mock provider for an unknown safe question', async () => {
     const result = await createTestDecisionEngine().decide(baseInput('Question inconnue simple'));
 
