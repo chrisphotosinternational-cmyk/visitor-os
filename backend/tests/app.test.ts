@@ -62,10 +62,13 @@ describe('createApp', () => {
     assert.match(script.body, /\/admin-api\/sites\/['"] \+ this\.selectedSite\.id \+ ['"]\/crawl/);
     assert.match(script.body, /siteCrawlerLoading \? 'Crawl en cours\.\.\.' : 'Crawler le site'/);
     assert.match(script.body, /authenticated: true/);
-    assert.match(script.body, /siteCrawlerResult\.pagesDiscovered/);
+    assert.match(script.body, /siteCrawlerResult\.discoveredUrlCount/);
+    assert.match(script.body, /siteCrawlerStatusFilter/);
+    assert.match(script.body, /Telecharger le rapport CSV/);
+    assert.match(script.body, /filteredCrawlerUrls/);
     assert.match(script.body, /siteCrawlerError/);
     assert.match(script.body, /maxPages < 1 \|\| maxPages > 250/);
-    assert.match(script.body, /startHost !== siteHost/);
+    assert.match(script.body, /!hostsEquivalent\(startHost, siteHost\)/);
     assert.match(script.body, /Import Q\/A site/);
     assert.equal(spaRoute.statusCode, 200);
     assert.match(spaRoute.body, /Connexion admin VISITOR-OS/);

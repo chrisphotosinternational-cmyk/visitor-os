@@ -57,6 +57,7 @@ createApp({
       siteCrawlerLoading: false,
       siteCrawlerResult: null,
       siteCrawlerError: '',
+      siteCrawlerStatusFilter: 'all',
       siteQaCsv: '',
       siteQaImportResult: null,
       unansweredQuestions: [],
@@ -188,6 +189,11 @@ createApp({
     },
     canWriteSites() {
       return ['SuperAdmin', 'Admin', 'Manager'].includes(this.user?.role);
+    },
+    filteredCrawlerUrls() {
+      const urls = this.siteCrawlerResult?.urls ?? [];
+      if (this.siteCrawlerStatusFilter === 'all') return urls;
+      return urls.filter((url) => url.crawlStatus === this.siteCrawlerStatusFilter);
     }
   },
   async mounted() {
@@ -536,6 +542,7 @@ createApp({
       this.siteCrawlerForm = emptySiteCrawlerForm(data.site.domain);
       this.siteCrawlerResult = null;
       this.siteCrawlerError = '';
+      this.siteCrawlerStatusFilter = 'all';
       if (options.refreshDiagnostics !== false) await this.loadWidgetDiagnostics(data.site.id, false);
       await this.loadUnansweredQuestions();
     },
@@ -635,7 +642,7 @@ createApp({
       }
       const siteHost = hostFromUrlOrDomain(this.selectedSite.domain);
       const startHost = hostFromUrlOrDomain(this.siteCrawlerForm.startUrl);
-      if (!siteHost || !startHost || startHost !== siteHost) {
+      if (!siteHost || !startHost || !hostsEquivalent(startHost, siteHost)) {
         this.siteCrawlerError = 'L URL de depart doit rester sur le domaine du site courant.';
         return;
       }
@@ -643,6 +650,7 @@ createApp({
       this.siteCrawlerLoading = true;
       this.siteCrawlerError = '';
       this.siteCrawlerResult = null;
+      this.siteCrawlerStatusFilter = 'all';
       const startedAt = performance.now();
       try {
         const response = await this.apiRequest('/admin-api/sites/' + this.selectedSite.id + '/crawl', {
@@ -667,6 +675,20 @@ createApp({
       } finally {
         this.siteCrawlerLoading = false;
       }
+    },
+
+    downloadCrawlerReportCsv() {
+      const rows = this.siteCrawlerResult?.urls ?? [];
+      if (!rows.length) return;
+      const headers = ['initialUrl', 'finalUrl', 'status', 'crawlStatus', 'reason', 'chunks', 'title', 'canonical', 'crawledAt'];
+      const csv = [headers.join(','), ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'kms-crawler-report-' + (this.selectedSite?.id || 'site') + '.csv';
+      link.click();
+      URL.revokeObjectURL(url);
     },
     async importSiteQa() {
       if (!this.selectedSite || !this.siteQaCsv.trim()) return;
@@ -2254,10 +2276,41 @@ createApp({
             <p class="muted">Le crawler reste limite au domaine courant : {{ selectedSite?.domain || '-' }}.</p>
             <p v-if="siteCrawlerError" class="error-message">{{ siteCrawlerError }}</p>
             <div v-if="siteCrawlerResult" class="dashboard-grid compact-grid">
-              <article class="metric"><span>Pages explorees</span><strong>{{ siteCrawlerResult.pagesDiscovered ?? 0 }}</strong><small>URLs internes</small></article>
-              <article class="metric"><span>Pages importees</span><strong>{{ siteCrawlerResult.pagesImported ?? 0 }}</strong><small>KMS site</small></article>
+              <article class="metric"><span>URLs decouvertes</span><strong>{{ siteCrawlerResult.discoveredUrlCount ?? siteCrawlerResult.pagesDiscovered ?? 0 }}</strong><small>Liens + sitemaps</small></article>
+              <article class="metric"><span>URLs crawlees</span><strong>{{ siteCrawlerResult.crawledUrlCount ?? 0 }}</strong><small>Pages mesurees</small></article>
+              <article class="metric"><span>Pages importees</span><strong>{{ siteCrawlerResult.importedUrlCount ?? siteCrawlerResult.pagesImported ?? 0 }}</strong><small>KMS site</small></article>
               <article class="metric"><span>Chunks crees</span><strong>{{ siteCrawlerResult.chunksCreated ?? siteCrawlerResult.documentsCreated ?? 0 }}</strong><small>Connaissances indexees</small></article>
+              <article class="metric"><span>Couverture sitemap</span><strong>{{ siteCrawlerResult.sitemapCoveragePercent ?? '-' }}%</strong><small>{{ siteCrawlerResult.sitemapUrlCount ?? 0 }} URLs sitemap</small></article>
               <article class="metric"><span>Duree</span><strong>{{ siteCrawlerResult.durationMs ?? '-' }} ms</strong><small>Crawl</small></article>
+            </div>
+            <div v-if="siteCrawlerResult?.urls?.length" class="table-actions">
+              <label>Filtrer
+                <select v-model="siteCrawlerStatusFilter">
+                  <option value="all">Toutes</option>
+                  <option value="imported">Imported</option>
+                  <option value="skipped">Skipped</option>
+                  <option value="error">Error</option>
+                </select>
+              </label>
+              <button type="button" @click="downloadCrawlerReportCsv">Telecharger le rapport CSV</button>
+            </div>
+            <div v-if="siteCrawlerResult?.urls?.length" class="table-wrapper">
+              <table>
+                <thead><tr><th>Statut</th><th>URL initiale</th><th>URL finale</th><th>HTTP</th><th>Motif</th><th>Chunks</th><th>Titre</th><th>Canonical</th><th>Date</th></tr></thead>
+                <tbody>
+                  <tr v-for="url in filteredCrawlerUrls" :key="url.initialUrl + url.finalUrl">
+                    <td><span class="badge">{{ url.crawlStatus }}</span></td>
+                    <td>{{ url.initialUrl }}</td>
+                    <td>{{ url.finalUrl }}</td>
+                    <td>{{ url.status ?? '-' }}</td>
+                    <td>{{ url.reason }}</td>
+                    <td>{{ url.chunks }}</td>
+                    <td>{{ url.title || '-' }}</td>
+                    <td>{{ url.canonical || '-' }}</td>
+                    <td>{{ url.crawledAt }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </section>
           <section class="timeline-section">
@@ -2901,6 +2954,11 @@ function hostFromUrlOrDomain(value) {
   }
 }
 
+function hostsEquivalent(a, b) {
+  const normalize = (value) => String(value || '').toLowerCase().replace(/^www\\./, '');
+  return normalize(a) === normalize(b);
+}
+
 function emptySiteWidgetForm() {
   return {
     name: '',
@@ -3169,6 +3227,11 @@ async function responseJsonOrFallback(result, fallback) {
 async function responseTextOrFallback(result, fallback) {
   if (result.status !== 'fulfilled' || !result.value.ok) return fallback;
   return result.value.text();
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return '"' + text.replace(/"/g, '""') + '"';
 }
 
 async function responseErrorMessage(response, fallback) {
