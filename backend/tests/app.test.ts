@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { describe, it, mock } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/core/config/env.js';
 import { createLogger } from '../src/core/logger/logger.js';
 import type { Database } from '../src/database/client.js';
+
+const require = createRequire(import.meta.url);
+const externalJavaScriptCdnPattern = /unpkg\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com/;
 
 describe('createApp', () => {
   it('serves the admin login page from the root route', async () => {
@@ -73,6 +78,44 @@ describe('createApp', () => {
     assert.equal(spaRoute.statusCode, 200);
     assert.match(spaRoute.body, /Connexion admin VISITOR-OS/);
     assert.equal(apiRoute.statusCode, 404);
+
+    await app.close();
+  });
+
+  it('serves the installed Vue runtime locally without external JavaScript CDNs', async () => {
+    const app = await createApp({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'silent'
+      }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+
+    const runtime = await app.inject({
+      method: 'GET',
+      url: '/vendor/vue.esm-browser.prod.js'
+    });
+    const appScript = await app.inject({ method: 'GET', url: '/app.js' });
+    const configScript = await app.inject({ method: 'GET', url: '/config.js' });
+    const installedRuntime = readFileSync(
+      require.resolve('vue/dist/vue.esm-browser.prod.js'),
+      'utf8'
+    );
+
+    assert.equal(runtime.statusCode, 200);
+    assert.match(runtime.headers['content-type'] ?? '', /application\/javascript/);
+    assert.equal(runtime.body, installedRuntime);
+    assert.match(appScript.body, /from '\/vendor\/vue\.esm-browser\.prod\.js'/);
+    assert.doesNotMatch(appScript.body, /unpkg\.com/);
+    for (const asset of [appScript.body, configScript.body, runtime.body]) {
+      assert.doesNotMatch(asset, externalJavaScriptCdnPattern);
+    }
 
     await app.close();
   });

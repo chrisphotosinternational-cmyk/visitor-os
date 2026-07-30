@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   adminAppJs,
@@ -6,9 +8,19 @@ import {
   adminStylesCss
 } from './frontend-admin-assets.js';
 
+const require = createRequire(import.meta.url);
+const vueRuntime = readFileSync(
+  require.resolve('vue/dist/vue.esm-browser.prod.js'),
+  'utf8'
+);
+
 const staticFiles = new Map([
   ['/app.js', { body: adminAppJs, contentType: 'application/javascript; charset=utf-8' }],
   ['/config.js', { body: adminConfigJs, contentType: 'application/javascript; charset=utf-8' }],
+  [
+    '/vendor/vue.esm-browser.prod.js',
+    { body: vueRuntime, contentType: 'application/javascript; charset=utf-8' }
+  ],
   ['/styles.css', { body: adminStylesCss, contentType: 'text/css; charset=utf-8' }]
 ]);
 

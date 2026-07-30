@@ -18,7 +18,7 @@ export const adminIndexHtml = `<!doctype html>
 export const adminConfigJs = `window.VISITOR_OS_API_URL = window.VISITOR_OS_API_URL ?? window.location.origin;
 `;
 
-export const adminAppJs = `import { createApp } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js';
+export const adminAppJs = `import { createApp } from '/vendor/vue.esm-browser.prod.js';
 
 const API_BASE_URL = window.VISITOR_OS_API_URL ?? window.location.origin;
 const TOKEN_STORAGE_KEY = 'visitor_os_admin_jwt';
