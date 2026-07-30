@@ -908,6 +908,12 @@ export async function initializeSchema(database: Database): Promise<void> {
       on knowledge_documents(organization_id, status, updated_at desc);
     create index if not exists idx_knowledge_documents_site
       on knowledge_documents(site_id, status, updated_at desc);
+    create unique index if not exists idx_knowledge_documents_active_site_source
+      on knowledge_documents(organization_id, site_id, source)
+      where status = 'active' and site_id is not null;
+    create unique index if not exists idx_knowledge_documents_active_global_source
+      on knowledge_documents(organization_id, source)
+      where status = 'active' and site_id is null;
     create index if not exists idx_knowledge_chunks_document
       on knowledge_chunks(document_id, position);
     create index if not exists idx_knowledge_chunks_tokens

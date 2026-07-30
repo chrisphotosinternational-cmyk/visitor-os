@@ -1,7 +1,5 @@
 import { AppError } from '../../core/errors/app-error.js';
 import type { KnowledgeImporter } from './knowledge-importer.js';
-import { KnowledgeIndexer } from './knowledge-indexer.js';
-import type { KnowledgeDocument } from './knowledge-types.js';
 
 export type SiteCrawlerInput = {
   organizationId: string;
@@ -72,8 +70,7 @@ const ignoredProtocols = new Set(['mailto:', 'tel:', 'javascript:', 'data:', 'ft
 export class SiteCrawlerService {
   constructor(
     private readonly importer: KnowledgeImporter,
-    private readonly fetcher: CrawlFetch = globalThis.fetch,
-    private readonly indexer = new KnowledgeIndexer()
+    private readonly fetcher: CrawlFetch = globalThis.fetch
   ) {}
 
   async crawl(input: SiteCrawlerInput): Promise<SiteCrawlerSummary> {
@@ -152,7 +149,7 @@ export class SiteCrawlerService {
         }
 
         const html = await response.text();
-        const page = extractPage(html, finalUrl, input.now ?? new Date());
+        const page = extractPage(html, finalUrl);
         const canonical = normalizeCanonicalUrl(page.canonical, finalUrl, siteHost, allowedHosts) ?? finalUrl;
         for (const link of page.links) {
           const normalized = normalizeDiscoveredUrl(link, finalUrl, siteHost, allowedHosts);
@@ -165,13 +162,7 @@ export class SiteCrawlerService {
           continue;
         }
 
-        const chunks = this.indexer.createChunks({
-          documentId: finalUrl,
-          organizationId: input.organizationId,
-          siteId: input.siteId,
-          content: page.content
-        });
-        const document: KnowledgeDocument = await this.importer.import({
+        const importedDocument = await this.importer.import({
           organizationId: input.organizationId,
           siteId: input.siteId,
           title: page.title,
@@ -183,9 +174,13 @@ export class SiteCrawlerService {
           source: canonical
         });
 
-        chunksCreated += chunks.length;
-        imported.push({ url: finalUrl, documentId: document.id, chunks: chunks.length });
-        reports.push(urlReport(url, finalUrl, response.status, 'imported', 'imported', chunks.length, page.title, canonical, crawledAt));
+        chunksCreated += importedDocument.chunks;
+        imported.push({
+          url: finalUrl,
+          documentId: importedDocument.document.id,
+          chunks: importedDocument.chunks
+        });
+        reports.push(urlReport(url, finalUrl, response.status, 'imported', 'imported', importedDocument.chunks, page.title, canonical, crawledAt));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push(`${url}: ${message}`);
@@ -378,7 +373,7 @@ function normalizeDiscoveredUrl(
   }
 }
 
-function extractPage(html: string, url: string, crawledAt: Date): ExtractedPage {
+function extractPage(html: string, url: string): ExtractedPage {
   const links = [...html.matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>/gi)].map((match) =>
     decodeHtml(match[1] ?? '')
   );
@@ -394,7 +389,6 @@ function extractPage(html: string, url: string, crawledAt: Date): ExtractedPage 
   const canonical = firstAttribute(html, /<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']*)["'][^>]*>/i);
   const sections = [
     `URL: ${url}`,
-    `Crawled at: ${crawledAt.toISOString()}`,
     `Title: ${title}`,
     description ? `Description: ${description}` : '',
     ...tagTexts(withoutNoise, 'h1').map((text) => `H1: ${text}`),

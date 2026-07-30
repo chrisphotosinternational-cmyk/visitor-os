@@ -46,19 +46,34 @@ export function chunkKnowledgeText(
   const normalized = content.replace(/\r\n/g, '\n').trim();
   if (!normalized) return [];
 
-  const blocks = config.splitByParagraph
-    ? normalized
-        .split(/\n{2,}/)
-        .map((paragraph) => paragraph.trim())
-        .filter(Boolean)
-    : [normalized];
+  if (!config.splitByParagraph) return splitBlock(normalized, config);
+
+  const blocks = normalized
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   const chunks: string[] = [];
+  let pending: string[] = [];
+
+  const flushPending = (): void => {
+    if (pending.length === 0) return;
+    chunks.push(...packBlocks(pending, config));
+    pending = [];
+  };
 
   for (const block of blocks) {
-    chunks.push(...splitBlock(block, config));
+    // A FAQ answer must never be detached from its question or mixed with a
+    // neighbouring answer. It is a useful semantic chunk even when it is short.
+    if (isFaqBlock(block)) {
+      flushPending();
+      chunks.push(...splitBlock(block, config));
+    } else {
+      pending.push(block);
+    }
   }
+  flushPending();
 
-  return chunks.length > 0 ? chunks : [normalized];
+  return mergeTinyChunks(chunks, config.maxCharacters);
 }
 
 export function tokenizeKnowledge(value: string): string[] {
@@ -95,6 +110,78 @@ function splitBlock(block: string, config: KnowledgeChunkingConfig): string[] {
   }
 
   return chunks;
+}
+
+function packBlocks(blocks: string[], config: KnowledgeChunkingConfig): string[] {
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const block of blocks) {
+    if (block.length > config.maxCharacters) {
+      if (current) chunks.push(current);
+      current = '';
+      chunks.push(...splitBlock(block, config));
+      continue;
+    }
+
+    const candidate = current ? `${current}\n\n${block}` : block;
+    if (candidate.length <= config.maxCharacters) {
+      current = candidate;
+      continue;
+    }
+
+    chunks.push(current);
+    const overlap = semanticTail(current, config.overlapCharacters);
+    const withOverlap = overlap ? `${overlap}\n\n${block}` : block;
+    current = withOverlap.length <= config.maxCharacters ? withOverlap : block;
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function semanticTail(value: string, maximum: number): string {
+  if (maximum <= 0) return '';
+  const tail = value.slice(-maximum);
+  const paragraphBreak = tail.indexOf('\n\n');
+  if (paragraphBreak >= 0) return tail.slice(paragraphBreak + 2).trim();
+  const sentenceBreak = Math.max(tail.indexOf('. '), tail.indexOf('? '), tail.indexOf('! '));
+  if (sentenceBreak >= 0) return tail.slice(sentenceBreak + 2).trim();
+  const wordBreak = tail.indexOf(' ');
+  return (wordBreak >= 0 ? tail.slice(wordBreak + 1) : tail).trim();
+}
+
+function mergeTinyChunks(chunks: string[], maximum: number): string[] {
+  const minimumUsefulLength = 50;
+  const merged: string[] = [];
+
+  for (const chunk of chunks.filter(Boolean)) {
+    if (
+      chunk.length < minimumUsefulLength &&
+      !isFaqBlock(chunk) &&
+      merged.length > 0 &&
+      merged[merged.length - 1]!.length + chunk.length + 2 <= maximum
+    ) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]}\n\n${chunk}`;
+    } else {
+      merged.push(chunk);
+    }
+  }
+
+  if (
+    merged.length > 1 &&
+    merged[0]!.length < minimumUsefulLength &&
+    !isFaqBlock(merged[0]!) &&
+    merged[0]!.length + merged[1]!.length + 2 <= maximum
+  ) {
+    merged.splice(0, 2, `${merged[0]}\n\n${merged[1]}`);
+  }
+
+  return merged;
+}
+
+function isFaqBlock(block: string): boolean {
+  return /^FAQ Question:/i.test(block) && /(?:^|\n)FAQ Answer:/i.test(block);
 }
 
 function findSoftBreak(block: string, start: number, hardEnd: number): number {

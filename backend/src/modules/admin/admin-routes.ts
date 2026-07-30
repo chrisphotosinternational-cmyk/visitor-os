@@ -532,8 +532,7 @@ export function registerAdminRoutes(
       });
     }
 
-    return {
-      document: await knowledgeImporter.import({
+    return knowledgeImporter.import({
         organizationId,
         siteId: body.siteId,
         title: body.title,
@@ -545,8 +544,7 @@ export function registerAdminRoutes(
         tags: body.tags,
         ...(body.author ? { author: body.author } : {}),
         source: body.source
-      })
-    };
+      });
   });
 
   app.post('/api/admin/knowledge/import-file', async (request) => {

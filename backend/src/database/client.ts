@@ -6,13 +6,17 @@ type QueryResultRow = pg.QueryResultRow;
 
 export type DatabaseConfig = AppConfig['database'];
 
-export type Database = {
-  isConfigured: () => boolean;
-  checkConnection: () => Promise<void>;
+export type DatabaseExecutor = {
   query: <T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: unknown[]
   ) => Promise<pg.QueryResult<T>>;
+};
+
+export type Database = DatabaseExecutor & {
+  isConfigured: () => boolean;
+  checkConnection: () => Promise<void>;
+  transaction?: <T>(callback: (executor: DatabaseExecutor) => Promise<T>) => Promise<T>;
   close: () => Promise<void>;
 };
 
@@ -47,6 +51,25 @@ export function createDatabase(config: DatabaseConfig): Database {
       values?: unknown[]
     ): Promise<pg.QueryResult<T>> {
       return pool.query<T>(text, values);
+    },
+
+    async transaction<T>(callback: (executor: DatabaseExecutor) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      const executor: DatabaseExecutor = {
+        query: (text, values) => client.query(text, values)
+      };
+
+      try {
+        await client.query('begin');
+        const result = await callback(executor);
+        await client.query('commit');
+        return result;
+      } catch (error) {
+        await client.query('rollback');
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async close(): Promise<void> {

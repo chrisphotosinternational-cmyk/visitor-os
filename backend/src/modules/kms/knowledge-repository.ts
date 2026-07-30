@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Database } from '../../database/client.js';
+import type { Database, DatabaseExecutor } from '../../database/client.js';
 import type {
   KnowledgeChunk,
   KnowledgeDocument,
@@ -22,17 +22,66 @@ export type KnowledgeListFilters = {
 export class KnowledgeRepository {
   constructor(private readonly database: Database) {}
 
+  async importDocument(
+    input: KnowledgeImportInput,
+    createChunks: (document: KnowledgeDocument) => KnowledgeChunk[]
+  ): Promise<{ document: KnowledgeDocument; chunksCreated: number }> {
+    return this.withTransaction(async (executor) => {
+      await this.lockDocumentIdentity(executor, input);
+      const existing = await this.findExistingDocument(executor, input);
+      const hash = hashContent(input.content);
+
+      if (existing?.hash === hash) {
+        return { document: existing, chunksCreated: 0 };
+      }
+
+      const document = await this.saveDocument(executor, input, existing, hash);
+      await this.addVersion(executor, {
+        documentId: document.id,
+        organizationId: document.organization_id,
+        version: document.version,
+        title: document.title,
+        content: input.content,
+        hash,
+        ...(input.author ? { author: input.author } : {})
+      });
+      const chunks = createChunks(document);
+      await this.replaceChunksWithExecutor(executor, document, chunks);
+
+      return { document, chunksCreated: chunks.length };
+    });
+  }
+
   async upsertDocument(input: KnowledgeImportInput): Promise<KnowledgeDocument> {
-    const hash = hashContent(input.content);
-    const existing = await this.findExistingDocument(
-      input.organizationId,
-      input.siteId,
-      hash,
-      input.source
-    );
+    return this.withTransaction(async (executor) => {
+      await this.lockDocumentIdentity(executor, input);
+      const existing = await this.findExistingDocument(executor, input);
+      const hash = hashContent(input.content);
+      if (existing?.hash === hash) return existing;
+
+      const document = await this.saveDocument(executor, input, existing, hash);
+      await this.addVersion(executor, {
+        documentId: document.id,
+        organizationId: document.organization_id,
+        version: document.version,
+        title: document.title,
+        content: input.content,
+        hash,
+        ...(input.author ? { author: input.author } : {})
+      });
+      return document;
+    });
+  }
+
+  private async saveDocument(
+    executor: DatabaseExecutor,
+    input: KnowledgeImportInput,
+    existing: KnowledgeDocument | null,
+    hash: string
+  ): Promise<KnowledgeDocument> {
     const version = existing ? existing.version + 1 : 1;
     const documentId = existing?.id ?? randomUUID();
-    const result = await this.database.query<KnowledgeDocument>(
+    const result = await executor.query<KnowledgeDocument>(
       `
       insert into knowledge_documents (
         id,
@@ -87,26 +136,22 @@ export class KnowledgeRepository {
         input.source ?? 'manual'
       ]
     );
-    const document = requireRow(result.rows[0], 'Knowledge document was not saved');
-
-    await this.addVersion({
-      documentId: document.id,
-      organizationId: document.organization_id,
-      version: document.version,
-      title: document.title,
-      content: input.content,
-      hash,
-      ...(input.author ? { author: input.author } : {})
-    });
-
-    return document;
+    return requireRow(result.rows[0], 'Knowledge document was not saved');
   }
 
   async replaceChunks(document: KnowledgeDocument, chunks: KnowledgeChunk[]): Promise<void> {
-    await this.database.query(`delete from knowledge_chunks where document_id = $1`, [document.id]);
+    await this.replaceChunksWithExecutor(this.database, document, chunks);
+  }
+
+  private async replaceChunksWithExecutor(
+    executor: DatabaseExecutor,
+    document: KnowledgeDocument,
+    chunks: KnowledgeChunk[]
+  ): Promise<void> {
+    await executor.query(`delete from knowledge_chunks where document_id = $1`, [document.id]);
 
     for (const chunk of chunks) {
-      await this.database.query(
+      await executor.query(
         `
         insert into knowledge_chunks (
           id,
@@ -370,16 +415,19 @@ export class KnowledgeRepository {
     };
   }
 
-  private async addVersion(input: {
-    documentId: string;
-    organizationId: string;
-    version: number;
-    title: string;
-    content: string;
-    hash: string;
-    author?: string;
-  }): Promise<void> {
-    await this.database.query(
+  private async addVersion(
+    executor: DatabaseExecutor,
+    input: {
+      documentId: string;
+      organizationId: string;
+      version: number;
+      title: string;
+      content: string;
+      hash: string;
+      author?: string;
+    }
+  ): Promise<void> {
+    await executor.query(
       `
       insert into knowledge_versions (
         id,
@@ -407,29 +455,40 @@ export class KnowledgeRepository {
   }
 
   private async findExistingDocument(
-    organizationId: string,
-    siteId: string,
-    hash: string,
-    source?: string
+    executor: DatabaseExecutor,
+    input: KnowledgeImportInput
   ): Promise<KnowledgeDocument | null> {
-    const result = await this.database.query<KnowledgeDocument>(
+    const result = await executor.query<KnowledgeDocument>(
       `
       select *
       from knowledge_documents
       where organization_id = $1
-        and site_id = $2
-        and (
-          hash = $3
-          or ($4::text like 'file:%' and source = $4)
-        )
-        and status <> 'deleted'
+        and site_id is not distinct from $2::uuid
+        and source = $3
+        and status = 'active'
       order by updated_at desc
       limit 1
+      for update
       `,
-      [organizationId, siteId, hash, source ?? null]
+      [input.organizationId, input.siteId, input.source ?? 'manual']
     );
 
     return result.rows[0] ?? null;
+  }
+
+  private async lockDocumentIdentity(
+    executor: DatabaseExecutor,
+    input: KnowledgeImportInput
+  ): Promise<void> {
+    const identity = `${input.organizationId}:${input.siteId}:${input.source ?? 'manual'}`;
+    await executor.query(`select pg_advisory_xact_lock(hashtextextended($1, 0))`, [identity]);
+  }
+
+  private withTransaction<T>(callback: (executor: DatabaseExecutor) => Promise<T>): Promise<T> {
+    if (!this.database.transaction) {
+      return Promise.reject(new Error('Knowledge imports require database transaction support'));
+    }
+    return this.database.transaction(callback);
   }
 }
 
