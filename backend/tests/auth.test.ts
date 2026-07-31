@@ -3,7 +3,7 @@ import { describe, it, mock } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/core/config/env.js';
 import { createLogger } from '../src/core/logger/logger.js';
-import type { Database } from '../src/database/client.js';
+import type { Database, DatabaseExecutor } from '../src/database/client.js';
 import { signJwt } from '../src/modules/auth/jwt.js';
 import { hashPassword } from '../src/modules/auth/password.js';
 import type { UserRole } from '../src/modules/users/user-model.js';
@@ -1892,10 +1892,13 @@ async function createAuthMemoryDatabase(): Promise<Database> {
   await addUser(users, 'user-super', ORG_A, 'super@example.com', 'SuperAdmin');
   await addUser(users, 'user-viewer', ORG_A, 'viewer@example.com', 'Viewer');
 
-  return {
+  const database: Database = {
     isConfigured: () => true,
     async checkConnection() {},
     async close() {},
+    async transaction<T>(callback: (executor: DatabaseExecutor) => Promise<T>): Promise<T> {
+      return callback({ query: (text, values) => database.query(text, values) });
+    },
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(
       text: string,
       values: unknown[] = []
@@ -2052,14 +2055,16 @@ async function createAuthMemoryDatabase(): Promise<Database> {
         return result([row]);
       }
 
-      if (sql.includes('from knowledge_documents') && sql.includes('hash = $3')) {
+      if (sql.includes('pg_advisory_xact_lock')) return result([]);
+
+      if (sql.includes('from knowledge_documents') && sql.includes('source = $3')) {
         return result(
           [...knowledgeDocuments.values()].filter(
             (row) =>
               row.organization_id === values[0] &&
               row.site_id === values[1] &&
-              row.hash === values[2] &&
-              row.status !== 'deleted'
+              row.source === values[2] &&
+              row.status === 'active'
           )
         );
       }
@@ -3017,6 +3022,8 @@ async function createAuthMemoryDatabase(): Promise<Database> {
       return result([]);
     }
   };
+
+  return database;
 }
 
 async function addUser(

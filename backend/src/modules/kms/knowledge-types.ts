@@ -138,6 +138,11 @@ export type KnowledgeImportReport = {
   durationMs: number;
 };
 
+export type KnowledgeImportResult = {
+  document: KnowledgeDocument;
+  chunks: number;
+};
+
 export type KnowledgeIndexingJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
 export type KnowledgeIndexingJob = {

@@ -49,7 +49,7 @@ describe('Knowledge Management System', () => {
     assert.throws(() => validator.validateImport({ title: '' }), /organizationId/);
   });
 
-  it('indexes content into searchable chunks', () => {
+  it('aggregates short paragraphs into a searchable chunk', () => {
     const chunks = new KnowledgeIndexer().createChunks({
       documentId,
       organizationId,
@@ -57,8 +57,9 @@ describe('Knowledge Management System', () => {
       content: 'Premier paragraphe.\n\nParking disponible proche.'
     });
 
-    assert.equal(chunks.length, 2);
-    assert.ok(chunks[1]?.tokens.includes('parking'));
+    assert.equal(chunks.length, 1);
+    assert.ok(chunks[0]?.tokens.includes('parking'));
+    assert.match(chunks[0]?.content ?? '', /Premier paragraphe\.\n\nParking/);
   });
 
   it('chunks long documents with configurable overlap', () => {
@@ -73,6 +74,101 @@ describe('Knowledge Management System', () => {
 
     assert.ok(chunks.length >= 2);
     assert.ok(chunks.every((chunk) => chunk.length <= 220));
+    assert.ok(chunks.slice(1).every((chunk) => chunk.length >= 40));
+  });
+
+  it('packs many small paragraphs into homogeneous default-sized chunks', () => {
+    const paragraphs = Array.from(
+      { length: 30 },
+      (_, index) => `Paragraphe ${index + 1}: ${String.fromCharCode(65 + (index % 26)).repeat(90)}`
+    );
+    const chunks = chunkKnowledgeText(paragraphs.join('\n\n'));
+
+    assert.ok(chunks.length >= 3);
+    assert.ok(chunks.every((chunk) => chunk.length <= 1200));
+    assert.ok(chunks.slice(0, -1).every((chunk) => chunk.length >= 800));
+    assert.ok(chunks.every((chunk) => chunk.trim().length > 0));
+  });
+
+  it('does not create useless micro-chunks from headings and short list items', () => {
+    const content = [
+      'H1: Accueil',
+      'H2: Services',
+      '- Studio',
+      '- Extérieur',
+      'Une présentation suffisamment détaillée des prestations proposées aux visiteurs.'
+    ].join('\n\n');
+    const chunks = chunkKnowledgeText(content);
+
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0], content);
+    assert.ok(chunks.every((chunk) => chunk.length >= 50));
+  });
+
+  it('keeps a very short document as one justified short chunk', () => {
+    assert.deepEqual(chunkKnowledgeText('Parking privé.'), ['Parking privé.']);
+  });
+
+  it('returns no chunks for empty or whitespace-only content', () => {
+    assert.deepEqual(chunkKnowledgeText(' \n\n  \r\n '), []);
+  });
+
+  it('keeps tables intact while packing them with related context', () => {
+    const introduction = 'Tarifs applicables pour la saison en cours.';
+    const table = 'Table: Formule Essentielle | 800 euros | Formule Premium | 1200 euros';
+    const conclusion = 'Tous les forfaits incluent la préparation et la livraison.';
+    const chunks = chunkKnowledgeText([introduction, table, conclusion].join('\n\n'));
+
+    assert.equal(chunks.length, 1);
+    assert.match(chunks[0] ?? '', new RegExp(table.replace(/[|]/g, '\\|')));
+  });
+
+  it('keeps each FAQ question and answer in its own semantic chunk', () => {
+    const first = 'FAQ Question: Le parking est-il disponible ?\nFAQ Answer: Oui, sur réservation.';
+    const second =
+      'FAQ Question: Les animaux sont-ils admis ?\nFAQ Answer: Non, sauf animaux guides.';
+    const chunks = chunkKnowledgeText(`${first}\n\n${second}`);
+
+    assert.deepEqual(chunks, [first, second]);
+  });
+
+  it('preserves paragraph boundaries and contextual overlap between chunks', () => {
+    const paragraphs = Array.from(
+      { length: 10 },
+      (_, index) => `Section ${index + 1}. ${String.fromCharCode(65 + index).repeat(120)}`
+    );
+    const chunks = chunkKnowledgeText(paragraphs.join('\n\n'), {
+      maxCharacters: 500,
+      overlapCharacters: 100,
+      splitByParagraph: true
+    });
+
+    assert.ok(chunks.length >= 3);
+    assert.ok(chunks.every((chunk) => chunk.length <= 500));
+    assert.ok(chunks.every((chunk) => !chunk.startsWith(' ') && !chunk.endsWith(' ')));
+    assert.ok(
+      chunks.slice(1).every((chunk, index) => {
+        const previous = chunks[index] ?? '';
+        return Array.from({ length: 100 }, (_, offset) => 100 - offset).some(
+          (length) => length >= 50 && chunk.startsWith(previous.slice(-length))
+        );
+      })
+    );
+  });
+
+  it('honours disabled overlap', () => {
+    const content = Array.from(
+      { length: 8 },
+      (_, index) => `Bloc ${index}: ${'x'.repeat(90)}`
+    ).join('\n\n');
+    const chunks = chunkKnowledgeText(content, {
+      maxCharacters: 300,
+      overlapCharacters: 0,
+      splitByParagraph: true
+    });
+
+    const occurrences = chunks.join('\n').match(/Bloc \d+:/g) ?? [];
+    assert.equal(occurrences.length, 8);
   });
 
   it('extracts real file content from supported document formats', () => {
@@ -137,10 +233,10 @@ describe('Knowledge Management System', () => {
       query: 'parking couvert',
       limit: 5
     });
-    const versions = await repository.versions(document.id, organizationId);
+    const versions = await repository.versions(document.document.id, organizationId);
 
-    assert.equal(document.version, 1);
-    assert.equal(results[0]?.documentId, document.id);
+    assert.equal(document.document.version, 1);
+    assert.equal(results[0]?.documentId, document.document.id);
     assert.ok((results[0]?.score ?? 0) > 0);
     assert.equal(versions.length, 1);
   });
@@ -189,6 +285,98 @@ describe('Knowledge Management System', () => {
     assert.equal(second.report.document.version, 2);
     assert.equal(versions.length, 2);
     assert.equal(queue.list(organizationId, siteId).length, 2);
+  });
+
+  it('reimports one web source without duplicate documents or useless versions', async () => {
+    const database = createKnowledgeDatabase();
+    const repository = new KnowledgeRepository(database);
+    const importer = new KnowledgeImporter(repository);
+    const input: KnowledgeImportInput = {
+      organizationId,
+      siteId,
+      title: 'Page accès',
+      category: 'website',
+      type: 'html',
+      content: 'Le parking initial est disponible sur réservation.',
+      source: 'https://example.test/acces'
+    };
+
+    const first = await importer.import(input);
+    const unchanged = await importer.import(input);
+    const modified = await importer.import({
+      ...input,
+      content: 'Le parking modifié est couvert et disponible sur réservation.'
+    });
+    const documents = await repository.list({ organizationId, siteId });
+    const versions = await repository.versions(first.document.id, organizationId);
+
+    assert.equal(unchanged.document.id, first.document.id);
+    assert.equal(unchanged.document.version, 1);
+    assert.equal(unchanged.chunks, 0);
+    assert.equal(modified.document.id, first.document.id);
+    assert.equal(modified.document.version, 2);
+    assert.equal(documents.length, 1);
+    assert.equal(versions.length, 2);
+  });
+
+  it('rolls back document, version and chunks when chunk persistence fails', async () => {
+    const failures = { failChunkInsert: false };
+    const database = createKnowledgeDatabase(failures);
+    const repository = new KnowledgeRepository(database);
+    const importer = new KnowledgeImporter(repository);
+    const input: KnowledgeImportInput = {
+      organizationId,
+      siteId,
+      title: 'Page transactionnelle',
+      category: 'website',
+      type: 'html',
+      content: 'Contenu stable avant la tentative de remplacement.',
+      source: 'https://example.test/transaction'
+    };
+    const first = await importer.import(input);
+    failures.failChunkInsert = true;
+
+    await assert.rejects(
+      () => importer.import({ ...input, content: 'Nouveau contenu qui doit être annulé.' }),
+      /chunk insert failure/
+    );
+
+    const [document] = await repository.list({ organizationId, siteId });
+    const versions = await repository.versions(first.document.id, organizationId);
+    const oldResults = await repository.search({
+      organizationId,
+      siteId,
+      query: 'stable',
+      limit: 5
+    });
+
+    assert.equal(document?.version, 1);
+    assert.equal(versions.length, 1);
+    assert.equal(oldResults[0]?.documentId, first.document.id);
+  });
+
+  it('runs the chunker exactly once for one import', async () => {
+    const repository = new KnowledgeRepository(createKnowledgeDatabase());
+    let calls = 0;
+    const indexer = new KnowledgeIndexer();
+    const originalCreateChunks = indexer.createChunks.bind(indexer);
+    indexer.createChunks = (input) => {
+      calls += 1;
+      return originalCreateChunks(input);
+    };
+    const importer = new KnowledgeImporter(repository, undefined, indexer);
+
+    await importer.import({
+      organizationId,
+      siteId,
+      title: 'Passage unique',
+      category: 'website',
+      type: 'html',
+      content: 'Ce contenu ne doit être découpé qu’une seule fois.',
+      source: 'https://example.test/unique-pass'
+    });
+
+    assert.equal(calls, 1);
   });
 
   it('keeps document search isolated by organization', async () => {
@@ -292,10 +480,10 @@ describe('Knowledge Management System', () => {
 
     assert.deepEqual(
       siteResults.map((result) => result.documentId),
-      [siteDocument.id]
+      [siteDocument.document.id]
     );
     assert.equal(otherSiteResults.length, 1);
-    assert.notEqual(otherSiteResults[0]?.documentId, siteDocument.id);
+    assert.notEqual(otherSiteResults[0]?.documentId, siteDocument.document.id);
     assert.equal(wrongSiteResults.length, 0);
   });
 
@@ -313,8 +501,11 @@ describe('Knowledge Management System', () => {
     });
 
     assert.equal((await repository.list({ organizationId, siteId })).length, 1);
-    assert.equal((await repository.archive(document.id, organizationId))?.status, 'archived');
-    assert.equal(await repository.delete(document.id, organizationId), true);
+    assert.equal(
+      (await repository.archive(document.document.id, organizationId))?.status,
+      'archived'
+    );
+    assert.equal(await repository.delete(document.document.id, organizationId), true);
     assert.equal((await repository.statistics(organizationId, siteId)).documents, 1);
   });
 
@@ -588,6 +779,7 @@ describe('Knowledge Management System', () => {
     assert.match(imported.inputs[0]?.content ?? '', /FAQ Question: Quels sont les tarifs/);
     assert.match(imported.inputs[0]?.content ?? '', /FAQ Answer: Les forfaits commencent à 190 euros/);
     assert.match(imported.inputs[0]?.content ?? '', /Formule découverte 190€/);
+    assert.doesNotMatch(imported.inputs[0]?.content ?? '', /Crawled at:/);
     assert.equal(fetched.includes('https://example.com/offre'), false);
     assert.equal(fetched.includes('https://blog.photographe-boudoir-albi.ovh/'), false);
     assert.equal(fetched.includes('https://photographe-boudoir-albi.ovh/tarifs'), false);
@@ -606,9 +798,9 @@ function createRecordingImporter(): {
 } {
   const inputs: KnowledgeImportInput[] = [];
   const importer = {
-    async import(input: KnowledgeImportInput): Promise<KnowledgeDocument> {
+    async import(input: KnowledgeImportInput) {
       inputs.push(input);
-      return {
+      const document: KnowledgeDocument = {
         id: `document-${inputs.length}`,
         organization_id: input.organizationId,
         site_id: input.siteId,
@@ -628,6 +820,7 @@ function createRecordingImporter(): {
         created_at: new Date(),
         updated_at: new Date()
       };
+      return { document, chunks: 1 };
     }
   } as KnowledgeImporter;
 
@@ -656,7 +849,7 @@ function createCrawlResponse(body: string, status = 200, url?: string): {
   };
 }
 
-function createKnowledgeDatabase(): Database {
+function createKnowledgeDatabase(options: { failChunkInsert?: boolean } = {}): Database {
   const documents = new Map<string, KnowledgeDocument>();
   const versions: KnowledgeVersion[] = [];
   const chunks: Array<{
@@ -674,22 +867,37 @@ function createKnowledgeDatabase(): Database {
     isConfigured: () => true,
     async checkConnection() {},
     async close() {},
+    async transaction<T>(callback: (executor: Database) => Promise<T>): Promise<T> {
+      const documentSnapshot = new Map(
+        [...documents].map(([id, document]) => [id, { ...document }])
+      );
+      const versionSnapshot = versions.map((version) => ({ ...version }));
+      const chunkSnapshot = chunks.map((chunk) => ({ ...chunk, tokens: [...chunk.tokens] }));
+      try {
+        return await callback(this);
+      } catch (error) {
+        documents.clear();
+        for (const [id, document] of documentSnapshot) documents.set(id, document);
+        versions.splice(0, versions.length, ...versionSnapshot);
+        chunks.splice(0, chunks.length, ...chunkSnapshot);
+        throw error;
+      }
+    },
     async query<T extends pg.QueryResultRow = pg.QueryResultRow>(
       text: string,
       values: unknown[] = []
     ): Promise<pg.QueryResult<T>> {
       const sql = text.toLowerCase();
 
-      if (sql.includes('select *') && sql.includes('hash =')) {
+      if (sql.includes('pg_advisory_xact_lock')) return result([]);
+
+      if (sql.includes('select *') && sql.includes('source = $3')) {
         const found = [...documents.values()].find(
           (document) =>
             document.organization_id === values[0] &&
             document.site_id === values[1] &&
-            (document.hash === values[2] ||
-              (typeof values[3] === 'string' &&
-                values[3].startsWith('file:') &&
-                document.source === values[3])) &&
-            document.status !== 'deleted'
+            document.source === values[2] &&
+            document.status === 'active'
         );
 
         return result(found ? [found] : []);
@@ -746,6 +954,7 @@ function createKnowledgeDatabase(): Database {
       }
 
       if (sql.includes('insert into knowledge_chunks')) {
+        if (options.failChunkInsert) throw new Error('chunk insert failure');
         chunks.push({
           id: valueToString(values[0]),
           document_id: valueToString(values[1]),

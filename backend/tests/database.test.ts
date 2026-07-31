@@ -50,6 +50,31 @@ describe('database contract', () => {
     }
   });
 
+  it('enforces one active knowledge document per organization, site and source', async () => {
+    let startupSchemaSql = '';
+    const database: Database = {
+      isConfigured: mock.fn(() => true),
+      checkConnection: mock.fn(async () => undefined),
+      close: mock.fn(async () => undefined),
+      query: mock.fn(async (text: string) => {
+        startupSchemaSql += text;
+        return { rows: [] } as never;
+      })
+    };
+
+    await initializeSchema(database);
+
+    const normalized = startupSchemaSql.toLowerCase().replace(/\s+/g, ' ');
+    assert.match(
+      normalized,
+      /unique index[^;]+on knowledge_documents\(organization_id, site_id, source\)[^;]+status = 'active' and site_id is not null/
+    );
+    assert.match(
+      normalized,
+      /unique index[^;]+on knowledge_documents\(organization_id, source\)[^;]+status = 'active' and site_id is null/
+    );
+  });
+
   it('stays disabled when no database url is configured', async () => {
     const database = createDatabase({
       ssl: false,
