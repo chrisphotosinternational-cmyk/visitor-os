@@ -115,33 +115,6 @@ export async function initializeSchema(database: Database): Promise<void> {
       unique (site_id, question)
     );
 
-    create table if not exists chatbot_unanswered_questions (
-      id uuid primary key,
-      organization_id uuid not null references organizations(id),
-      site_id uuid not null references sites(id) on delete cascade,
-      conversation_id uuid references conversations(id) on delete set null,
-      question text not null,
-      status text not null default 'pending',
-      suggested_answer text,
-      category text,
-      tags text[] not null default '{}',
-      detected_intent text,
-      occurrence_count integer not null default 1,
-      last_seen_at timestamptz,
-      confidence_score numeric,
-      suggested_knowledge_item uuid,
-      action_status text not null default 'pending',
-      created_at timestamptz not null default now(),
-      updated_at timestamptz not null default now()
-    );
-
-    alter table chatbot_unanswered_questions add column if not exists detected_intent text;
-    alter table chatbot_unanswered_questions add column if not exists occurrence_count integer not null default 1;
-    alter table chatbot_unanswered_questions add column if not exists last_seen_at timestamptz;
-    alter table chatbot_unanswered_questions add column if not exists confidence_score numeric;
-    alter table chatbot_unanswered_questions add column if not exists suggested_knowledge_item uuid;
-    alter table chatbot_unanswered_questions add column if not exists action_status text not null default 'pending';
-
     create table if not exists chatbot_intents (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -538,6 +511,34 @@ export async function initializeSchema(database: Database): Promise<void> {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    create table if not exists chatbot_unanswered_questions (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id),
+      site_id uuid not null references sites(id) on delete cascade,
+      conversation_id uuid references conversations(id) on delete set null,
+      question text not null,
+      status text not null default 'pending',
+      suggested_answer text,
+      category text,
+      tags text[] not null default '{}',
+      detected_intent text,
+      occurrence_count integer not null default 1,
+      last_seen_at timestamptz,
+      confidence_score numeric,
+      suggested_knowledge_item uuid,
+      action_status text not null default 'pending',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    alter table chatbot_unanswered_questions add column if not exists detected_intent text;
+    alter table chatbot_unanswered_questions add column if not exists occurrence_count integer not null default 1;
+    alter table chatbot_unanswered_questions add column if not exists last_seen_at timestamptz;
+    alter table chatbot_unanswered_questions add column if not exists confidence_score numeric;
+    alter table chatbot_unanswered_questions add column if not exists suggested_knowledge_item uuid;
+    alter table chatbot_unanswered_questions add column if not exists action_status text not null default 'pending';
+
 
     create table if not exists conversation_tags (
       conversation_id uuid not null references conversations(id) on delete cascade,
