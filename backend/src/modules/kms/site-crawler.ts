@@ -53,7 +53,10 @@ type CrawlResponse = {
   url?: string;
 };
 
-type CrawlFetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<CrawlResponse>;
+type CrawlFetch = (
+  url: string,
+  init?: { headers?: Record<string, string> }
+) => Promise<CrawlResponse>;
 
 type ExtractedPage = {
   title: string;
@@ -79,8 +82,8 @@ export class SiteCrawlerService {
     const siteHost = normalizeHost(input.siteDomain);
     const primaryStartUrl = normalizeHttpUrl(input.startUrl, siteHost, siteHost);
     const allowedHosts = allowedHostVariants(siteHost);
-    const startUrls = [input.startUrl, ...(input.startUrls ?? [])].map((url) =>
-      normalizeHttpUrl(url, siteHost, siteHost, allowedHosts).href
+    const startUrls = [input.startUrl, ...(input.startUrls ?? [])].map(
+      (url) => normalizeHttpUrl(url, siteHost, siteHost, allowedHosts).href
     );
     const domain = primaryStartUrl.hostname;
 
@@ -92,7 +95,12 @@ export class SiteCrawlerService {
     }
 
     const robots = await this.loadRobots(primaryStartUrl.origin, siteHost, allowedHosts);
-    const sitemapUrls = await this.discoverSitemapUrls(primaryStartUrl.origin, siteHost, allowedHosts, robots.sitemaps);
+    const sitemapUrls = await this.discoverSitemapUrls(
+      primaryStartUrl.origin,
+      siteHost,
+      allowedHosts,
+      robots.sitemaps
+    );
     const sitemapSet = new Set(sitemapUrls);
     const queue: string[] = [];
     const seen = new Set<string>();
@@ -131,7 +139,19 @@ export class SiteCrawlerService {
         const finalUrl = normalizeRedirectUrl(response.url ?? url, url, siteHost, allowedHosts);
         if (!finalUrl) {
           skipped.push({ url, reason: 'external-redirect' });
-          reports.push(urlReport(url, response.url ?? url, response.status, 'skipped', 'external-redirect', 0, '', '', crawledAt));
+          reports.push(
+            urlReport(
+              url,
+              response.url ?? url,
+              response.status,
+              'skipped',
+              'external-redirect',
+              0,
+              '',
+              '',
+              crawledAt
+            )
+          );
           continue;
         }
         const contentType = response.headers?.get('content-type')?.toLowerCase() ?? '';
@@ -139,18 +159,23 @@ export class SiteCrawlerService {
         if (!response.ok) {
           const reason = `http ${response.status}`;
           skipped.push({ url: finalUrl, reason });
-          reports.push(urlReport(url, finalUrl, response.status, 'skipped', reason, 0, '', '', crawledAt));
+          reports.push(
+            urlReport(url, finalUrl, response.status, 'skipped', reason, 0, '', '', crawledAt)
+          );
           continue;
         }
         if (contentType && !contentType.includes('text/html')) {
           skipped.push({ url: finalUrl, reason: 'non-html' });
-          reports.push(urlReport(url, finalUrl, response.status, 'skipped', 'non-html', 0, '', '', crawledAt));
+          reports.push(
+            urlReport(url, finalUrl, response.status, 'skipped', 'non-html', 0, '', '', crawledAt)
+          );
           continue;
         }
 
         const html = await response.text();
         const page = extractPage(html, finalUrl);
-        const canonical = normalizeCanonicalUrl(page.canonical, finalUrl, siteHost, allowedHosts) ?? finalUrl;
+        const canonical =
+          normalizeCanonicalUrl(page.canonical, finalUrl, siteHost, allowedHosts) ?? finalUrl;
         for (const link of page.links) {
           const normalized = normalizeDiscoveredUrl(link, finalUrl, siteHost, allowedHosts);
           if (normalized) enqueue(normalized);
@@ -158,7 +183,19 @@ export class SiteCrawlerService {
 
         if (!page.content) {
           skipped.push({ url: finalUrl, reason: 'empty-content' });
-          reports.push(urlReport(url, finalUrl, response.status, 'skipped', 'empty-content', 0, page.title, canonical, crawledAt));
+          reports.push(
+            urlReport(
+              url,
+              finalUrl,
+              response.status,
+              'skipped',
+              'empty-content',
+              0,
+              page.title,
+              canonical,
+              crawledAt
+            )
+          );
           continue;
         }
 
@@ -180,7 +217,19 @@ export class SiteCrawlerService {
           documentId: importedDocument.document.id,
           chunks: importedDocument.chunks
         });
-        reports.push(urlReport(url, finalUrl, response.status, 'imported', 'imported', importedDocument.chunks, page.title, canonical, crawledAt));
+        reports.push(
+          urlReport(
+            url,
+            finalUrl,
+            response.status,
+            'imported',
+            'imported',
+            importedDocument.chunks,
+            page.title,
+            canonical,
+            crawledAt
+          )
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push(`${url}: ${message}`);
@@ -194,7 +243,9 @@ export class SiteCrawlerService {
     }
 
     const sitemapUrlCount = sitemapSet.size;
-    const crawledSitemapUrls = reports.filter((report) => sitemapSet.has(report.initialUrl) || sitemapSet.has(report.finalUrl)).length;
+    const crawledSitemapUrls = reports.filter(
+      (report) => sitemapSet.has(report.initialUrl) || sitemapSet.has(report.finalUrl)
+    ).length;
 
     return {
       startUrl: primaryStartUrl.href,
@@ -214,7 +265,8 @@ export class SiteCrawlerService {
       importedUrlCount: reports.filter((report) => report.crawlStatus === 'imported').length,
       skippedUrlCount: reports.filter((report) => report.crawlStatus === 'skipped').length,
       errorUrlCount: reports.filter((report) => report.crawlStatus === 'error').length,
-      sitemapCoveragePercent: sitemapUrlCount > 0 ? Math.round((crawledSitemapUrls / sitemapUrlCount) * 100) : null
+      sitemapCoveragePercent:
+        sitemapUrlCount > 0 ? Math.round((crawledSitemapUrls / sitemapUrlCount) * 100) : null
     };
   }
 
@@ -249,7 +301,12 @@ export class SiteCrawlerService {
     const urls = new Set<string>();
     const visitedSitemaps = new Set<string>();
     const visit = async (sitemapUrl: string): Promise<void> => {
-      const normalizedSitemapUrl = normalizeCanonicalUrl(sitemapUrl, origin, canonicalHost, allowedHosts);
+      const normalizedSitemapUrl = normalizeCanonicalUrl(
+        sitemapUrl,
+        origin,
+        canonicalHost,
+        allowedHosts
+      );
       if (!normalizedSitemapUrl || visitedSitemaps.has(normalizedSitemapUrl)) return;
       visitedSitemaps.add(normalizedSitemapUrl);
       try {
@@ -257,7 +314,12 @@ export class SiteCrawlerService {
           headers: { 'user-agent': 'VISITOR-OS SiteCrawler/1.0' }
         });
         if (!response.ok) return;
-        const parsed = parseSitemapXml(await response.text(), normalizedSitemapUrl, canonicalHost, allowedHosts);
+        const parsed = parseSitemapXml(
+          await response.text(),
+          normalizedSitemapUrl,
+          canonicalHost,
+          allowedHosts
+        );
         for (const childSitemap of parsed.sitemaps) await visit(childSitemap);
         for (const url of parsed.urls) urls.add(url);
       } catch {
@@ -384,19 +446,25 @@ function extractPage(html: string, url: string): ExtractedPage {
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
     .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, ' ')
     .replace(/<(nav|footer|header|aside|form)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-  const title = firstText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i) || firstTagText(withoutNoise, 'h1') || url;
-  const description = firstAttribute(html, /<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i);
-  const canonical = firstAttribute(html, /<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']*)["'][^>]*>/i);
+  const title =
+    firstText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i) ||
+    firstTagText(withoutNoise, 'h1') ||
+    url;
+  const description = firstAttribute(
+    html,
+    /<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i
+  );
+  const canonical = firstAttribute(
+    html,
+    /<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']*)["'][^>]*>/i
+  );
+  const orderedContent = extractOrderedContent(withoutNoise, url);
   const sections = [
     `URL: ${url}`,
     `Title: ${title}`,
     description ? `Description: ${description}` : '',
-    ...tagTexts(withoutNoise, 'h1').map((text) => `H1: ${text}`),
-    ...tagTexts(withoutNoise, 'h2').map((text) => `H2: ${text}`),
-    ...tagTexts(withoutNoise, 'h3').map((text) => `H3: ${text}`),
-    ...tagTexts(withoutNoise, 'p'),
-    ...tagTexts(withoutNoise, 'li').map((text) => `- ${text}`),
-    ...extractTables(withoutNoise),
+    orderedContent.some((block) => /^H1:/i.test(block)) ? '' : `H1: ${title}`,
+    ...orderedContent,
     ...jsonLd
   ];
 
@@ -409,8 +477,64 @@ function extractPage(html: string, url: string): ExtractedPage {
   };
 }
 
+function extractOrderedContent(html: string, pageUrl: string): string[] {
+  const blocks: string[] = [];
+  const elements = html.matchAll(/<(h[1-3]|p|li|table)\b[^>]*>([\s\S]*?)<\/\1>/gi);
+
+  for (const element of elements) {
+    const tag = element[1]!.toLowerCase();
+    const innerHtml = element[2] ?? '';
+    const text = compactWhitespace(stripTags(innerHtml));
+    if (!text) continue;
+
+    if (/^h[1-3]$/.test(tag)) {
+      blocks.push(`${tag.toUpperCase()}: ${text}`);
+      continue;
+    }
+    if (tag === 'li') {
+      if (containsOnlyInternalAnchors(innerHtml, pageUrl)) continue;
+      blocks.push(`- ${text}`);
+      continue;
+    }
+    if (tag === 'table') {
+      blocks.push(`Table: ${text}`);
+      continue;
+    }
+    blocks.push(text);
+  }
+
+  return blocks;
+}
+
+function containsOnlyInternalAnchors(html: string, pageUrl: string): boolean {
+  const anchors = [...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>[\s\S]*?<\/a>/gi)];
+  if (anchors.length === 0) return false;
+  const textOutsideAnchors = compactWhitespace(
+    stripTags(html.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, ''))
+  );
+  if (textOutsideAnchors) return false;
+
+  return anchors.every((anchor) => {
+    try {
+      const href = decodeHtml(anchor[1] ?? '');
+      const target = new URL(href, pageUrl);
+      const page = new URL(pageUrl);
+      const targetPath = target.pathname.replace(/\/$/, '') || '/';
+      const pagePath = page.pathname.replace(/\/$/, '') || '/';
+      return (
+        href.startsWith('#') ||
+        (Boolean(target.hash) && target.origin === page.origin && targetPath === pagePath)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 function extractJsonLd(html: string): string[] {
-  const blocks = [...html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  const blocks = [
+    ...html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)
+  ];
   const lines: string[] = [];
   for (const block of blocks) {
     const raw = decodeHtml(block[1] ?? '').trim();
@@ -480,13 +604,6 @@ function localBusinessLines(item: Record<string, unknown>): string[] {
   return lines.filter(Boolean).map(compactWhitespace);
 }
 
-function extractTables(html: string): string[] {
-  return [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
-    .map((match) => compactWhitespace(stripTags(match[1] ?? '')))
-    .filter(Boolean)
-    .map((text) => `Table: ${text}`);
-}
-
 function tagTexts(html: string, tag: string): string[] {
   return [...html.matchAll(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi'))]
     .map((match) => compactWhitespace(stripTags(match[1] ?? '')))
@@ -525,11 +642,7 @@ function compactWhitespace(value: string): string {
 }
 
 function compactKnowledgeBlock(value: string): string {
-  return value
-    .split(/\r?\n/)
-    .map(compactWhitespace)
-    .filter(Boolean)
-    .join('\n');
+  return value.split(/\r?\n/).map(compactWhitespace).filter(Boolean).join('\n');
 }
 
 function dedupeLines(lines: string[]): string[] {
@@ -626,7 +739,17 @@ function urlReport(
   return { initialUrl, finalUrl, status, crawlStatus, reason, chunks, title, canonical, crawledAt };
 }
 
-const priorityTerms = ['faq', 'questions', 'tarifs', 'forfaits', 'retouches', 'studio', 'couple', 'shooting', 'confidentialite'];
+const priorityTerms = [
+  'faq',
+  'questions',
+  'tarifs',
+  'forfaits',
+  'retouches',
+  'studio',
+  'couple',
+  'shooting',
+  'confidentialite'
+];
 
 function compareUrlPriority(a: string, b: string): number {
   return urlPriority(b) - urlPriority(a) || a.localeCompare(b);
