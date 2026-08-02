@@ -398,6 +398,16 @@ export async function initializeSchema(database: Database): Promise<void> {
       created_at timestamptz not null default now()
     );
 
+    create table if not exists site_intelligence_reports (
+      id uuid primary key,
+      organization_id uuid not null references organizations(id) on delete cascade,
+      site_id uuid not null references sites(id) on delete cascade,
+      report jsonb not null,
+      page_count integer not null,
+      chunk_count integer not null,
+      created_at timestamptz not null default now()
+    );
+
     create table if not exists knowledge_search_events (
       id uuid primary key,
       organization_id uuid not null references organizations(id),
@@ -919,6 +929,8 @@ export async function initializeSchema(database: Database): Promise<void> {
       on knowledge_chunks(document_id, position);
     create index if not exists idx_knowledge_chunks_tokens
       on knowledge_chunks using gin(tokens);
+    create index if not exists idx_site_intelligence_reports_latest
+      on site_intelligence_reports(organization_id, site_id, created_at desc);
     create index if not exists idx_knowledge_search_events_organization
       on knowledge_search_events(organization_id, created_at desc);
     create index if not exists idx_conversations_prospect on conversations(prospect_id);

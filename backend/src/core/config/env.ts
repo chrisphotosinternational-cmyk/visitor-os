@@ -69,7 +69,12 @@ const environmentSchema = z.object({
   FIRST_ADMIN_PASSWORD: z.string().min(12).optional(),
   FIRST_ADMIN_FIRST_NAME: z.string().min(1).default('VISITOR'),
   FIRST_ADMIN_LAST_NAME: z.string().min(1).default('Admin'),
-  FIRST_ADMIN_ORGANIZATION_ID: z.string().uuid().optional()
+  FIRST_ADMIN_ORGANIZATION_ID: z.string().uuid().optional(),
+  SITE_INTELLIGENCE_DEBUG_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  SITE_INTELLIGENCE_DEBUG_TOKEN: z.string().min(32).optional()
 });
 
 export type AppConfig = {
@@ -134,6 +139,10 @@ export type AppConfig = {
       organizationId?: string;
     };
   };
+  siteIntelligenceDebug?: {
+    enabled: boolean;
+    token?: string;
+  };
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
@@ -148,6 +157,11 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   }
 
   const env = result.data;
+  if (env.SITE_INTELLIGENCE_DEBUG_ENABLED && !env.SITE_INTELLIGENCE_DEBUG_TOKEN) {
+    throw new Error(
+      'SITE_INTELLIGENCE_DEBUG_TOKEN is required when site intelligence debug is enabled'
+    );
+  }
 
   const config: AppConfig = {
     app: {
@@ -200,6 +214,12 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
       sessionTtlMs: env.ADMIN_SESSION_TTL_MS,
       sessionRenewalMs: env.ADMIN_SESSION_RENEWAL_MS,
       jwtTtlSeconds: env.JWT_TTL_SECONDS
+    },
+    siteIntelligenceDebug: {
+      enabled: env.SITE_INTELLIGENCE_DEBUG_ENABLED && env.NODE_ENV !== 'production',
+      ...(env.SITE_INTELLIGENCE_DEBUG_TOKEN
+        ? { token: env.SITE_INTELLIGENCE_DEBUG_TOKEN }
+        : {})
     }
   };
 

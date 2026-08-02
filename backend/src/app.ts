@@ -23,6 +23,8 @@ import { NotificationRepository } from './modules/notifications/notification-rep
 import { NotificationEngine } from './modules/notifications/notification-engine.js';
 import { KnowledgeRepository } from './modules/kms/knowledge-repository.js';
 import { RepositoryKnowledgeSearch } from './modules/kms/knowledge-search.js';
+import { SiteIntelligenceService } from './modules/site-intelligence/site-intelligence-service.js';
+import { registerSiteIntelligenceDebugRoutes } from './modules/site-intelligence/site-intelligence-routes.js';
 import { AppCache } from './core/cache/app-cache.js';
 import { InMemoryJobQueue } from './core/jobs/in-memory-job-queue.js';
 import { renderMetrics } from './core/monitoring/metrics.js';
@@ -166,6 +168,17 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     timeoutMs: dependencies.config.notifications.timeoutMs
   });
   const notificationEngine = new NotificationEngine(notificationRepository, dependencies.config);
+
+  if (
+    dependencies.config.siteIntelligenceDebug?.enabled &&
+    dependencies.config.siteIntelligenceDebug.token
+  ) {
+    registerSiteIntelligenceDebugRoutes(
+      app,
+      new SiteIntelligenceService(dependencies.database),
+      dependencies.config.siteIntelligenceDebug.token
+    );
+  }
 
   registerJwtAuthRoutes(app, dependencies.database, dependencies.config);
   registerAdminManagementRoutes(app, dependencies.database, dependencies.config, {
