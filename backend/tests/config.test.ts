@@ -18,6 +18,29 @@ describe('loadConfig', () => {
     assert.equal(config.notifications.fromEmail, 'notifications@visitor-os.local');
     assert.equal(config.notifications.retryAttempts, 2);
     assert.equal(config.auth.jwtTtlSeconds, 3_600);
+    assert.equal(config.siteIntelligenceDebug?.enabled, false);
+  });
+
+  it('enables site intelligence debug only outside production with a dedicated token', () => {
+    const enabled = loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'test',
+      SITE_INTELLIGENCE_DEBUG_ENABLED: 'true',
+      SITE_INTELLIGENCE_DEBUG_TOKEN: 'site-intelligence-debug-token-32-chars'
+    });
+    const production = loadConfig({
+      ...baseEnv,
+      NODE_ENV: 'production',
+      SITE_INTELLIGENCE_DEBUG_ENABLED: 'true',
+      SITE_INTELLIGENCE_DEBUG_TOKEN: 'site-intelligence-debug-token-32-chars'
+    });
+
+    assert.equal(enabled.siteIntelligenceDebug?.enabled, true);
+    assert.equal(production.siteIntelligenceDebug?.enabled, false);
+    assert.throws(
+      () => loadConfig({ ...baseEnv, SITE_INTELLIGENCE_DEBUG_ENABLED: 'true' }),
+      /SITE_INTELLIGENCE_DEBUG_TOKEN/
+    );
   });
 
   it('parses allowed origins', () => {

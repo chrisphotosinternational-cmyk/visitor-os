@@ -73,6 +73,8 @@ describe('database contract', () => {
       normalized,
       /unique index[^;]+on knowledge_documents\(organization_id, source\)[^;]+status = 'active' and site_id is null/
     );
+    assert.ok(normalized.includes('create table if not exists site_intelligence_reports'));
+    assert.ok(normalized.includes('create index if not exists idx_site_intelligence_reports_latest'));
   });
 
   it('stays disabled when no database url is configured', async () => {

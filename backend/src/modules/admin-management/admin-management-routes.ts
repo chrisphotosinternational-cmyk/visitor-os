@@ -74,6 +74,7 @@ import { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js
 import { KnowledgeRepository } from '../kms/knowledge-repository.js';
 import { KnowledgeImporter } from '../kms/knowledge-importer.js';
 import { SiteCrawlerService } from '../kms/site-crawler.js';
+import { SiteIntelligenceService } from '../site-intelligence/site-intelligence-service.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
 import {
   assertReviewStatus,
@@ -551,6 +552,7 @@ export function registerAdminManagementRoutes(
   const knowledgeRepository = new KnowledgeRepository(database);
   const knowledgeImporter = new KnowledgeImporter(knowledgeRepository);
   const siteCrawler = new SiteCrawlerService(knowledgeImporter);
+  const siteIntelligence = new SiteIntelligenceService(database);
   const knowledgeEngine = new KnowledgeEngineService(database);
   const chatbotStudio = new ChatbotStudioService(database, knowledgeEngine);
   const reasoningEngine = new ReasoningEngineService(database, knowledgeEngine);
@@ -1119,16 +1121,23 @@ export function registerAdminManagementRoutes(
     }
     const startUrl = body.startUrl ?? site.domain;
 
-    return {
-      crawl: await siteCrawler.crawl({
+    const crawl = await siteCrawler.crawl({
+      organizationId: site.organization_id,
+      siteId: site.id,
+      siteDomain: site.domain,
+      startUrl: /^https?:\/\//i.test(startUrl) ? startUrl : `https://${startUrl}`,
+      ...(body.maxPages ? { maxPages: body.maxPages } : {}),
+      ...(body.delayMs !== undefined ? { delayMs: body.delayMs } : {})
+    });
+    void siteIntelligence
+      .analyzeAndStore({
         organizationId: site.organization_id,
-        siteId: site.id,
-        siteDomain: site.domain,
-        startUrl: /^https?:\/\//i.test(startUrl) ? startUrl : `https://${startUrl}`,
-        ...(body.maxPages ? { maxPages: body.maxPages } : {}),
-        ...(body.delayMs !== undefined ? { delayMs: body.delayMs } : {})
+        siteId: site.id
       })
-    };
+      .catch((error: unknown) => {
+        request.log.error({ error, siteId: site.id }, 'Site intelligence analysis failed');
+      });
+    return { crawl };
   });
 
   app.get('/admin-api/sites/:siteId/unanswered', async (request) => {
