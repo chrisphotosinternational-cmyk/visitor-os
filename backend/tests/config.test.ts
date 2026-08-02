@@ -19,6 +19,7 @@ describe('loadConfig', () => {
     assert.equal(config.notifications.retryAttempts, 2);
     assert.equal(config.auth.jwtTtlSeconds, 3_600);
     assert.equal(config.siteIntelligenceDebug?.enabled, false);
+    assert.equal(config.visitorEvaluation?.enabled, false);
   });
 
   it('enables site intelligence debug only outside production with a dedicated token', () => {
@@ -40,6 +41,21 @@ describe('loadConfig', () => {
     assert.throws(
       () => loadConfig({ ...baseEnv, SITE_INTELLIGENCE_DEBUG_ENABLED: 'true' }),
       /SITE_INTELLIGENCE_DEBUG_TOKEN/
+    );
+  });
+
+  it('enables visitor evaluation only with its dedicated debug token', () => {
+    const config = loadConfig({
+      ...baseEnv,
+      VISITOR_EVALUATION_ENABLED: 'true',
+      VISITOR_EVALUATION_DEBUG_TOKEN: 'visitor-evaluation-debug-token-32-chars'
+    });
+
+    assert.equal(config.visitorEvaluation?.enabled, true);
+    assert.equal(config.visitorEvaluation?.token, 'visitor-evaluation-debug-token-32-chars');
+    assert.throws(
+      () => loadConfig({ ...baseEnv, VISITOR_EVALUATION_ENABLED: 'true' }),
+      /VISITOR_EVALUATION_DEBUG_TOKEN/
     );
   });
 

@@ -75,6 +75,7 @@ import { KnowledgeRepository } from '../kms/knowledge-repository.js';
 import { KnowledgeImporter } from '../kms/knowledge-importer.js';
 import { SiteCrawlerService } from '../kms/site-crawler.js';
 import { SiteIntelligenceService } from '../site-intelligence/site-intelligence-service.js';
+import type { VisitorEvaluationService } from '../visitor-evaluation/visitor-evaluation-service.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
 import {
   assertReviewStatus,
@@ -536,6 +537,7 @@ export function registerAdminManagementRoutes(
       database: 'disabled' | 'pending' | 'ok' | 'error';
     };
     startedAt?: Date;
+    visitorEvaluation?: VisitorEvaluationService;
   }
 ): void {
   const organizations = new OrganizationRepository(database);
@@ -1104,7 +1106,6 @@ export function registerAdminManagementRoutes(
     };
   });
 
-
   app.post('/admin-api/sites/:siteId/crawl', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'sites:write');
@@ -1137,6 +1138,13 @@ export function registerAdminManagementRoutes(
       .catch((error: unknown) => {
         request.log.error({ error, siteId: site.id }, 'Site intelligence analysis failed');
       });
+    if (dependencies?.visitorEvaluation) {
+      void dependencies.visitorEvaluation
+        .evaluateAndStore({ organizationId: site.organization_id, siteId: site.id })
+        .catch((error: unknown) => {
+          request.log.error({ error, siteId: site.id }, 'Visitor evaluation failed');
+        });
+    }
     return { crawl };
   });
 

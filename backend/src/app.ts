@@ -25,6 +25,8 @@ import { KnowledgeRepository } from './modules/kms/knowledge-repository.js';
 import { RepositoryKnowledgeSearch } from './modules/kms/knowledge-search.js';
 import { SiteIntelligenceService } from './modules/site-intelligence/site-intelligence-service.js';
 import { registerSiteIntelligenceDebugRoutes } from './modules/site-intelligence/site-intelligence-routes.js';
+import { VisitorEvaluationService } from './modules/visitor-evaluation/visitor-evaluation-service.js';
+import { registerVisitorEvaluationDebugRoutes } from './modules/visitor-evaluation/visitor-evaluation-routes.js';
 import { AppCache } from './core/cache/app-cache.js';
 import { InMemoryJobQueue } from './core/jobs/in-memory-job-queue.js';
 import { renderMetrics } from './core/monitoring/metrics.js';
@@ -168,6 +170,9 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     timeoutMs: dependencies.config.notifications.timeoutMs
   });
   const notificationEngine = new NotificationEngine(notificationRepository, dependencies.config);
+  const visitorEvaluation = dependencies.config.visitorEvaluation?.enabled
+    ? new VisitorEvaluationService(dependencies.database, decisionEngine)
+    : undefined;
 
   if (
     dependencies.config.siteIntelligenceDebug?.enabled &&
@@ -180,12 +185,21 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     );
   }
 
+  if (visitorEvaluation && dependencies.config.visitorEvaluation?.token) {
+    registerVisitorEvaluationDebugRoutes(
+      app,
+      visitorEvaluation,
+      dependencies.config.visitorEvaluation.token
+    );
+  }
+
   registerJwtAuthRoutes(app, dependencies.database, dependencies.config);
   registerAdminManagementRoutes(app, dependencies.database, dependencies.config, {
     cache,
     queue,
     ...(dependencies.readiness ? { readiness: dependencies.readiness } : {}),
-    startedAt
+    startedAt,
+    ...(visitorEvaluation ? { visitorEvaluation } : {})
   });
   registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(

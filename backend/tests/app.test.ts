@@ -32,6 +32,25 @@ describe('createApp', () => {
     await app.close();
   });
 
+  it('does not register the visitor evaluation endpoint by default', async () => {
+    const app = await createApp({
+      config: loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent' }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/internal/visitor-evaluation/00000000-0000-4000-8000-000000000001'
+    });
+    assert.equal(response.statusCode, 404);
+    await app.close();
+  });
+
   it('serves the admin login page from the root route', async () => {
     const app = await createApp({
       config: loadConfig({
