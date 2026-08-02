@@ -101,7 +101,16 @@ describe('Knowledge Management System', () => {
     const chunks = chunkKnowledgeText(content);
 
     assert.equal(chunks.length, 1);
-    assert.equal(chunks[0], content);
+    const chunk = chunks[0] ?? '';
+    const h1Position = chunk.indexOf('H1: Accueil');
+    const h2Position = chunk.indexOf('H2: Services');
+    const explanationPosition = chunk.indexOf(
+      'Une présentation suffisamment détaillée des prestations proposées aux visiteurs.'
+    );
+
+    assert.ok(h1Position >= 0);
+    assert.ok(h2Position > h1Position);
+    assert.ok(explanationPosition > h2Position);
     assert.ok(chunks.every((chunk) => chunk.length >= 50));
   });
 
