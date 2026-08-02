@@ -74,7 +74,12 @@ const environmentSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
-  SITE_INTELLIGENCE_DEBUG_TOKEN: z.string().min(32).optional()
+  SITE_INTELLIGENCE_DEBUG_TOKEN: z.string().min(32).optional(),
+  VISITOR_EVALUATION_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  VISITOR_EVALUATION_DEBUG_TOKEN: z.string().min(32).optional()
 });
 
 export type AppConfig = {
@@ -143,6 +148,10 @@ export type AppConfig = {
     enabled: boolean;
     token?: string;
   };
+  visitorEvaluation?: {
+    enabled: boolean;
+    token?: string;
+  };
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
@@ -160,6 +169,12 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   if (env.SITE_INTELLIGENCE_DEBUG_ENABLED && !env.SITE_INTELLIGENCE_DEBUG_TOKEN) {
     throw new Error(
       'SITE_INTELLIGENCE_DEBUG_TOKEN is required when site intelligence debug is enabled'
+    );
+  }
+
+  if (env.VISITOR_EVALUATION_ENABLED && !env.VISITOR_EVALUATION_DEBUG_TOKEN) {
+    throw new Error(
+      'VISITOR_EVALUATION_DEBUG_TOKEN is required when visitor evaluation is enabled'
     );
   }
 
@@ -217,9 +232,11 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     },
     siteIntelligenceDebug: {
       enabled: env.SITE_INTELLIGENCE_DEBUG_ENABLED && env.NODE_ENV !== 'production',
-      ...(env.SITE_INTELLIGENCE_DEBUG_TOKEN
-        ? { token: env.SITE_INTELLIGENCE_DEBUG_TOKEN }
-        : {})
+      ...(env.SITE_INTELLIGENCE_DEBUG_TOKEN ? { token: env.SITE_INTELLIGENCE_DEBUG_TOKEN } : {})
+    },
+    visitorEvaluation: {
+      enabled: env.VISITOR_EVALUATION_ENABLED,
+      ...(env.VISITOR_EVALUATION_DEBUG_TOKEN ? { token: env.VISITOR_EVALUATION_DEBUG_TOKEN } : {})
     }
   };
 
