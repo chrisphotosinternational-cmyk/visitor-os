@@ -27,6 +27,9 @@ import { SiteIntelligenceService } from './modules/site-intelligence/site-intell
 import { registerSiteIntelligenceDebugRoutes } from './modules/site-intelligence/site-intelligence-routes.js';
 import { VisitorEvaluationService } from './modules/visitor-evaluation/visitor-evaluation-service.js';
 import { registerVisitorEvaluationDebugRoutes } from './modules/visitor-evaluation/visitor-evaluation-routes.js';
+import { IntelligentRetrievalEngine } from './modules/intelligent-retrieval/intelligent-retrieval-engine.js';
+import { registerIntelligentRetrievalDebugRoutes } from './modules/intelligent-retrieval/intelligent-retrieval-routes.js';
+import { RetrievalBenchmarkService } from './modules/intelligent-retrieval/retrieval-benchmark-service.js';
 import { AppCache } from './core/cache/app-cache.js';
 import { InMemoryJobQueue } from './core/jobs/in-memory-job-queue.js';
 import { renderMetrics } from './core/monitoring/metrics.js';
@@ -158,7 +161,22 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   const aiProviderFactory = new ProviderFactory(dependencies.config, aiConfigurations);
   const aiProvider = aiProviderFactory.createProvider();
   const knowledgeRepository = new KnowledgeRepository(dependencies.database);
-  const knowledgeSearch = new RepositoryKnowledgeSearch(knowledgeRepository);
+  const repositoryKnowledgeSearch = new RepositoryKnowledgeSearch(knowledgeRepository);
+  const siteIntelligence = new SiteIntelligenceService(dependencies.database);
+  const intelligentRetrieval = new IntelligentRetrievalEngine(
+    repositoryKnowledgeSearch,
+    siteIntelligence,
+    dependencies.config.intelligentRetrieval?.bonuses ?? {
+      category: 0.08,
+      pageType: 0.06,
+      blockType: 0.12,
+      closeScoreThreshold: 0.15
+    },
+    dependencies.config.intelligentRetrieval?.enabled ?? false
+  );
+  const knowledgeSearch = dependencies.config.intelligentRetrieval?.enabled
+    ? intelligentRetrieval
+    : repositoryKnowledgeSearch;
   const decisionEngine = createDecisionEngine({
     aiProvider,
     businessConfigEngine,
@@ -173,6 +191,32 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
   const visitorEvaluation = dependencies.config.visitorEvaluation?.enabled
     ? new VisitorEvaluationService(dependencies.database, decisionEngine)
     : undefined;
+  const retrievalBenchmark =
+    visitorEvaluation && dependencies.config.intelligentRetrieval?.enabled
+      ? new RetrievalBenchmarkService(
+          dependencies.database,
+          new VisitorEvaluationService(
+            dependencies.database,
+            createDecisionEngine({
+              aiProvider,
+              businessConfigEngine,
+              knowledgeSearch: repositoryKnowledgeSearch
+            })
+          ),
+          visitorEvaluation
+        )
+      : undefined;
+
+  if (
+    dependencies.config.intelligentRetrieval?.enabled &&
+    dependencies.config.intelligentRetrieval.token
+  ) {
+    registerIntelligentRetrievalDebugRoutes(
+      app,
+      intelligentRetrieval,
+      dependencies.config.intelligentRetrieval.token
+    );
+  }
 
   if (
     dependencies.config.siteIntelligenceDebug?.enabled &&
@@ -199,7 +243,8 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     queue,
     ...(dependencies.readiness ? { readiness: dependencies.readiness } : {}),
     startedAt,
-    ...(visitorEvaluation ? { visitorEvaluation } : {})
+    ...(visitorEvaluation ? { visitorEvaluation } : {}),
+    ...(retrievalBenchmark ? { retrievalBenchmark } : {})
   });
   registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(
