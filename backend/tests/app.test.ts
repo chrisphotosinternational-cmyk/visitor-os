@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { describe, it, mock } from 'node:test';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/core/config/env.js';
@@ -118,6 +119,32 @@ describe('createApp', () => {
     assert.equal(spaRoute.statusCode, 200);
     assert.match(spaRoute.body, /Connexion admin VISITOR-OS/);
     assert.equal(apiRoute.statusCode, 404);
+
+    await app.close();
+  });
+
+  it('serves syntactically valid admin JavaScript', async () => {
+    const app = await createApp({
+      config: loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent' }),
+      database: {
+        isConfigured: mock.fn(() => false),
+        checkConnection: mock.fn(async () => undefined),
+        query: mock.fn(async () => ({ rows: [] }) as never),
+        close: mock.fn(async () => undefined)
+      },
+      logger: createLogger()
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/app.js' });
+
+    const syntaxCheck = spawnSync(process.execPath, ['--check', '--input-type=module'], {
+      input: response.body,
+      encoding: 'utf8'
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
+    assert.match(response.body, /\.join\('\\n'\)/);
 
     await app.close();
   });

@@ -681,7 +681,7 @@ createApp({
       const rows = this.siteCrawlerResult?.urls ?? [];
       if (!rows.length) return;
       const headers = ['initialUrl', 'finalUrl', 'status', 'crawlStatus', 'reason', 'chunks', 'title', 'canonical', 'crawledAt'];
-      const csv = [headers.join(','), ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(','))].join('\n');
+      const csv = [headers.join(','), ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(','))].join('\\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
