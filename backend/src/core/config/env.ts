@@ -79,7 +79,16 @@ const environmentSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
-  VISITOR_EVALUATION_DEBUG_TOKEN: z.string().min(32).optional()
+  VISITOR_EVALUATION_DEBUG_TOKEN: z.string().min(32).optional(),
+  INTELLIGENT_RETRIEVAL_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  INTELLIGENT_RETRIEVAL_DEBUG_TOKEN: z.string().min(32).optional(),
+  INTELLIGENT_RETRIEVAL_CATEGORY_BONUS: z.coerce.number().nonnegative().default(0.08),
+  INTELLIGENT_RETRIEVAL_PAGE_TYPE_BONUS: z.coerce.number().nonnegative().default(0.06),
+  INTELLIGENT_RETRIEVAL_BLOCK_TYPE_BONUS: z.coerce.number().nonnegative().default(0.12),
+  INTELLIGENT_RETRIEVAL_CLOSE_SCORE_THRESHOLD: z.coerce.number().nonnegative().default(0.15)
 });
 
 export type AppConfig = {
@@ -152,6 +161,11 @@ export type AppConfig = {
     enabled: boolean;
     token?: string;
   };
+  intelligentRetrieval?: {
+    enabled: boolean;
+    token?: string;
+    bonuses: { category: number; pageType: number; blockType: number; closeScoreThreshold: number };
+  };
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
@@ -175,6 +189,11 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
   if (env.VISITOR_EVALUATION_ENABLED && !env.VISITOR_EVALUATION_DEBUG_TOKEN) {
     throw new Error(
       'VISITOR_EVALUATION_DEBUG_TOKEN is required when visitor evaluation is enabled'
+    );
+  }
+  if (env.INTELLIGENT_RETRIEVAL_ENABLED && !env.INTELLIGENT_RETRIEVAL_DEBUG_TOKEN) {
+    throw new Error(
+      'INTELLIGENT_RETRIEVAL_DEBUG_TOKEN is required when intelligent retrieval is enabled'
     );
   }
 
@@ -237,6 +256,18 @@ export function loadConfig(source: NodeJS.ProcessEnv): AppConfig {
     visitorEvaluation: {
       enabled: env.VISITOR_EVALUATION_ENABLED,
       ...(env.VISITOR_EVALUATION_DEBUG_TOKEN ? { token: env.VISITOR_EVALUATION_DEBUG_TOKEN } : {})
+    },
+    intelligentRetrieval: {
+      enabled: env.INTELLIGENT_RETRIEVAL_ENABLED,
+      ...(env.INTELLIGENT_RETRIEVAL_DEBUG_TOKEN
+        ? { token: env.INTELLIGENT_RETRIEVAL_DEBUG_TOKEN }
+        : {}),
+      bonuses: {
+        category: env.INTELLIGENT_RETRIEVAL_CATEGORY_BONUS,
+        pageType: env.INTELLIGENT_RETRIEVAL_PAGE_TYPE_BONUS,
+        blockType: env.INTELLIGENT_RETRIEVAL_BLOCK_TYPE_BONUS,
+        closeScoreThreshold: env.INTELLIGENT_RETRIEVAL_CLOSE_SCORE_THRESHOLD
+      }
     }
   };
 
