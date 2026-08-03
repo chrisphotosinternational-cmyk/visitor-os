@@ -76,6 +76,7 @@ import { KnowledgeImporter } from '../kms/knowledge-importer.js';
 import { SiteCrawlerService } from '../kms/site-crawler.js';
 import { SiteIntelligenceService } from '../site-intelligence/site-intelligence-service.js';
 import type { VisitorEvaluationService } from '../visitor-evaluation/visitor-evaluation-service.js';
+import type { RetrievalBenchmarkService } from '../intelligent-retrieval/retrieval-benchmark-service.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
 import {
   assertReviewStatus,
@@ -538,6 +539,7 @@ export function registerAdminManagementRoutes(
     };
     startedAt?: Date;
     visitorEvaluation?: VisitorEvaluationService;
+    retrievalBenchmark?: RetrievalBenchmarkService;
   }
 ): void {
   const organizations = new OrganizationRepository(database);
@@ -1143,6 +1145,16 @@ export function registerAdminManagementRoutes(
         .evaluateAndStore({ organizationId: site.organization_id, siteId: site.id })
         .catch((error: unknown) => {
           request.log.error({ error, siteId: site.id }, 'Visitor evaluation failed');
+        });
+    }
+    if (dependencies?.retrievalBenchmark) {
+      void dependencies.retrievalBenchmark
+        .runAndStore({
+          organizationId: site.organization_id,
+          siteId: site.id
+        })
+        .catch((error: unknown) => {
+          request.log.error({ error, siteId: site.id }, 'Intelligent retrieval benchmark failed');
         });
     }
     return { crawl };
