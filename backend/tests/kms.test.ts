@@ -321,11 +321,36 @@ describe('Knowledge Management System', () => {
 
     assert.equal(unchanged.document.id, first.document.id);
     assert.equal(unchanged.document.version, 1);
-    assert.equal(unchanged.chunks, 0);
+    assert.equal(unchanged.chunks, first.chunks);
     assert.equal(modified.document.id, first.document.id);
     assert.equal(modified.document.version, 2);
     assert.equal(documents.length, 1);
     assert.equal(versions.length, 2);
+  });
+
+  it('recreates missing chunks for unchanged content without creating a version', async () => {
+    const database = createKnowledgeDatabase();
+    const repository = new KnowledgeRepository(database);
+    const importer = new KnowledgeImporter(repository);
+    const input: KnowledgeImportInput = {
+      organizationId,
+      siteId,
+      title: 'Page à réparer',
+      category: 'website',
+      type: 'html',
+      content: 'Le parking est disponible sur réservation.',
+      source: 'https://example.test/reparer'
+    };
+
+    const first = await importer.import(input);
+    await database.query(`delete from knowledge_chunks where document_id = $1`, [first.document.id]);
+    const repaired = await importer.import(input);
+    const versions = await repository.versions(first.document.id, organizationId);
+
+    assert.equal(repaired.document.id, first.document.id);
+    assert.equal(repaired.document.version, 1);
+    assert.equal(repaired.chunks, first.chunks);
+    assert.equal(versions.length, 1);
   });
 
   it('rolls back document, version and chunks when chunk persistence fails', async () => {
@@ -422,8 +447,7 @@ describe('Knowledge Management System', () => {
       category: 'access',
       type: 'txt',
       content: 'Parking prive pour le studio Albi.',
-      tags: ['parking']
-    });
+      tags: ['parking']    });
     await importer.import({
       organizationId,
       siteId: otherSiteId,
@@ -577,6 +601,68 @@ describe('Knowledge Management System', () => {
         }),
       /domain/i
     );
+  });
+
+  it('reports persisted chunks for the first and unchanged crawls of meaningful HTML', async () => {
+    const database = createKnowledgeDatabase();
+    const repository = new KnowledgeRepository(database);
+    const crawler = new SiteCrawlerService(new KnowledgeImporter(repository), async (url) =>
+      createCrawlResponse(
+        url.endsWith('robots.txt')
+          ? ''
+          : `
+            <html>
+              <head><title>Services du studio</title></head>
+              <body>
+                <h1>Photographe professionnel</h1>
+                <p>Le studio propose des séances photo sur réservation avec préparation personnalisée.</p>
+              </body>
+            </html>
+          `,
+        200
+      )
+    );
+    const input = {
+      organizationId,
+      siteId,
+      siteDomain: 'example.test',
+      startUrl: 'https://example.test',
+      maxPages: 1,
+      delayMs: 0
+    };
+
+    const first = await crawler.crawl(input);
+    const unchanged = await crawler.crawl(input);
+    const [document] = await repository.list({ organizationId, siteId });
+    const versions = await repository.versions(document?.id ?? '', organizationId);
+
+    assert.ok(first.chunksCreated > 0);
+    assert.equal(unchanged.chunksCreated, first.chunksCreated);
+    assert.equal(document?.version, 1);
+    assert.equal(versions.length, 1);
+  });
+
+  it('does not throw URI malformed for invalid percent escapes in shop URLs', async () => {
+    const imported = createRecordingImporter();
+    const crawler = new SiteCrawlerService(imported.importer, async (url) =>
+      createCrawlResponse(
+        url.endsWith('robots.txt')
+          ? ''
+          : '<html><body><a href="/boutique%ZZ">Boutique</a><a href="/boutique%EA">Produits</a><p>Catalogue du studio.</p></body></html>',
+        200
+      )
+    );
+
+    const summary = await crawler.crawl({
+      organizationId,
+      siteId,
+      siteDomain: 'example.test',
+      startUrl: 'https://example.test',
+      maxPages: 3,
+      delayMs: 0
+    });
+
+    assert.equal(summary.pagesImported, 3);
   });
 
 
@@ -960,6 +1046,14 @@ function createKnowledgeDatabase(options: { failChunkInsert?: boolean } = {}): D
           ...chunks.filter((chunk) => chunk.document_id !== values[0])
         );
         return result([]);
+      }
+
+      if (sql.includes('select count(*)::text as count from knowledge_chunks')) {
+        return result([
+          {
+            count: String(chunks.filter((chunk) => chunk.document_id === values[0]).length)
+          }
+        ]);
       }
 
       if (sql.includes('insert into knowledge_chunks')) {
