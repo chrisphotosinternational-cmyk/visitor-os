@@ -32,7 +32,14 @@ export class KnowledgeRepository {
       const hash = hashContent(input.content);
 
       if (existing?.hash === hash) {
-        return { document: existing, chunksCreated: 0 };
+        const existingChunks = await this.countDocumentChunks(executor, existing.id);
+        if (existingChunks > 0) {
+          return { document: existing, chunksCreated: existingChunks };
+        }
+
+        const chunks = createChunks(existing);
+        await this.replaceChunksWithExecutor(executor, existing, chunks);
+        return { document: existing, chunksCreated: chunks.length };
       }
 
       const document = await this.saveDocument(executor, input, existing, hash);
@@ -141,6 +148,18 @@ export class KnowledgeRepository {
 
   async replaceChunks(document: KnowledgeDocument, chunks: KnowledgeChunk[]): Promise<void> {
     await this.replaceChunksWithExecutor(this.database, document, chunks);
+  }
+
+  private async countDocumentChunks(
+    executor: DatabaseExecutor,
+    documentId: string
+  ): Promise<number> {
+    const result = await executor.query<{ count: string }>(
+      `select count(*)::text as count from knowledge_chunks where document_id = $1`,
+      [documentId]
+    );
+
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   private async replaceChunksWithExecutor(
