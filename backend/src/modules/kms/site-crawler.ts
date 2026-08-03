@@ -756,8 +756,16 @@ function compareUrlPriority(a: string, b: string): number {
 }
 
 function urlPriority(url: string): number {
-  const normalized = decodeURIComponent(normalizeHostSafe(url)).toLowerCase();
+  const normalized = safeDecodeURIComponent(normalizeHostSafe(url)).toLowerCase();
   return priorityTerms.reduce((score, term) => score + (normalized.includes(term) ? 1 : 0), 0);
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function normalizeHostSafe(value: string): string {
