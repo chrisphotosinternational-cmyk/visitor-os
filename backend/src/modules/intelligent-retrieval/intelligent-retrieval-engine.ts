@@ -48,6 +48,7 @@ export class IntelligentRetrievalEngine implements KnowledgeSearch {
   async search(input: KnowledgeSearchInput): Promise<KnowledgeSearchResult[]> {
     const trace = await this.inspect(input);
     return trace.candidates.map((candidate) => ({
+      ...(candidate.chunkId ? { chunkId: candidate.chunkId } : {}),
       documentId: candidate.documentId,
       title: candidate.title,
       content: candidate.content,
@@ -55,12 +56,17 @@ export class IntelligentRetrievalEngine implements KnowledgeSearch {
       language: candidate.language,
       score: candidate.score,
       relevance: candidate.relevance,
-      source: candidate.source
+      source: candidate.source,
+      ...(candidate.position === undefined ? {} : { position: candidate.position })
     }));
   }
 
   async inspect(input: KnowledgeSearchInput): Promise<IntelligentRetrievalTrace> {
+    const startedAt = performance.now();
+    const searchStartedAt = performance.now();
     const candidates = await this.searchEngine.search(input);
+    const searchMs = performance.now() - searchStartedAt;
+    const rerankingStartedAt = performance.now();
     const intent = detectRetrievalIntent(input.query);
     const preference = PREFERENCES[intent];
     if (!this.enabled || intent === 'general' || candidates.length < 2) {
@@ -69,6 +75,8 @@ export class IntelligentRetrievalEngine implements KnowledgeSearch {
         categories: preference.categories,
         preferredPageTypes: preference.pages,
         enabled: this.enabled,
+        timings: timings(startedAt, searchMs, rerankingStartedAt),
+        candidatesBeforeReranking: candidates,
         candidates: unchanged(candidates)
       };
     }
@@ -79,6 +87,8 @@ export class IntelligentRetrievalEngine implements KnowledgeSearch {
         categories: preference.categories,
         preferredPageTypes: preference.pages,
         enabled: this.enabled,
+        timings: timings(startedAt, searchMs, rerankingStartedAt),
+        candidatesBeforeReranking: candidates,
         candidates: unchanged(candidates, 'Aucun rapport Site Intelligence disponible.')
       };
     }
@@ -95,9 +105,27 @@ export class IntelligentRetrievalEngine implements KnowledgeSearch {
       categories: preference.categories,
       preferredPageTypes: preference.pages,
       enabled: true,
+      timings: timings(startedAt, searchMs, rerankingStartedAt),
+      candidatesBeforeReranking: candidates,
       candidates: ranked
     };
   }
+}
+
+function timings(
+  startedAt: number,
+  searchMs: number,
+  rerankingStartedAt: number
+): IntelligentRetrievalTrace['timings'] {
+  return {
+    searchMs: roundMilliseconds(searchMs),
+    rerankingMs: roundMilliseconds(performance.now() - rerankingStartedAt),
+    totalMs: roundMilliseconds(performance.now() - startedAt)
+  };
+}
+
+function roundMilliseconds(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function scoreCandidate(

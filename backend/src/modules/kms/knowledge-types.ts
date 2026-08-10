@@ -73,6 +73,7 @@ export type KnowledgeChunkingInput = {
 };
 
 export type KnowledgeSearchResult = {
+  chunkId?: string;
   documentId: string;
   title: string;
   content: string;
@@ -81,6 +82,7 @@ export type KnowledgeSearchResult = {
   score: number;
   relevance: 'high' | 'medium' | 'low';
   source: string;
+  position?: number;
 };
 
 export type KnowledgeImportInput = {

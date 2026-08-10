@@ -286,22 +286,26 @@ export class KnowledgeRepository {
     if (tokens.length === 0) return [];
 
     const result = await this.database.query<{
+      chunk_id: string;
       document_id: string;
       title: string;
       content: string;
       category: string;
       language: string;
       source: string;
+      position: number;
       score: string;
     }>(
       `
       select
+        c.id as chunk_id,
         d.id as document_id,
         d.title,
         c.content,
         d.category,
         d.language,
         d.source,
+        c.position,
         (
           (
             select count(*)
@@ -373,6 +377,7 @@ export class KnowledgeRepository {
       const score = Math.min(0.98, Number(row.score));
 
       return {
+        chunkId: row.chunk_id,
         documentId: row.document_id,
         title: row.title,
         content: row.content,
@@ -380,7 +385,8 @@ export class KnowledgeRepository {
         language: row.language,
         score,
         relevance: score >= 0.7 ? 'high' : score >= 0.45 ? 'medium' : 'low',
-        source: row.source
+        source: row.source,
+        position: row.position
       };
     });
   }

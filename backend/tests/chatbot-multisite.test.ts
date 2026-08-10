@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ConversationRepository } from '../src/modules/conversations/conversation-repository.js';
 import type { CrmRepository } from '../src/modules/crm/crm-repository.js';
-import type { DecisionEngine, DecisionEngineResult } from '../src/modules/decision-engine/decision-engine.js';
+import type {
+  DecisionEngine,
+  DecisionEngineResult
+} from '../src/modules/decision-engine/decision-engine.js';
 import type { NotificationEngine } from '../src/modules/notifications/notification-engine.js';
 import type { ProspectRepository } from '../src/modules/prospects/prospect-repository.js';
 import { MultiSiteChatbotService } from '../src/modules/chatbot-multisite/chatbot-multisite-service.js';
@@ -70,7 +73,6 @@ describe('Multi-site chatbot service', () => {
     );
   });
 
-
   it('uses crawled KMS knowledge for the current public widget site when reasoning is enabled', async () => {
     const fixture = createChatbotFixture({
       decisionResult: {
@@ -118,6 +120,69 @@ describe('Multi-site chatbot service', () => {
     assert.equal(response.source, 'fallback');
     assert.equal(response.reply, 'Je transmets votre demande.');
     assert.deepEqual(fixture.calls.decisionScopes, [{ organizationId: ORG_A, siteId: SITE_B }]);
+  });
+
+  it('preserves a grounded AI answer and citations without exposing debug context', async () => {
+    const citation = {
+      sourceNumber: 1,
+      chunkId: 'site-a-price',
+      documentId: 'site-a-document',
+      title: 'Tarifs',
+      source: '/tarifs'
+    };
+    const fixture = createChatbotFixture({
+      decisionResult: {
+        reply: 'La formule coûte 190 €. [SOURCE 1]',
+        source: 'ai',
+        confidence: 0.8,
+        shouldEscalate: false,
+        processingTimeMs: 5,
+        reason: 'mock:grounded',
+        usedChunkIds: ['site-a-price'],
+        usedDocumentIds: ['site-a-document'],
+        sources: [citation],
+        citations: [citation],
+        debug: {
+          totalTimeMs: 5,
+          intent: 'pricing',
+          chunksBeforeReranking: [],
+          chunksAfterReranking: [],
+          prompt: { system: 'secret', messages: [] },
+          rawLlmResponse: null,
+          injectedChunks: [],
+          kmsContext: 'secret KMS context',
+          contextCharacters: 18,
+          contextTokens: 5,
+          droppedChunks: [],
+          citedChunkIds: ['site-a-price'],
+          unsupportedInformationAlert: null,
+          timings: {
+            kmsSearchMs: 1,
+            rerankingMs: 1,
+            promptConstructionMs: 1,
+            llmCallMs: 2,
+            totalMs: 5
+          },
+          tokens: { prompt: 20, response: 8, total: 28 },
+          retainedSources: [],
+          weakAnswer: { weak: false, explanation: 'ok', suggestion: null }
+        }
+      },
+      withReasoning: true
+    });
+
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Quel est le prix ?'
+    });
+
+    assert.equal(response.source, 'ai');
+    assert.match(response.reply, /190 €/);
+    assert.deepEqual(response.usedChunkIds, ['site-a-price']);
+    assert.deepEqual(response.citations, [citation]);
+    assert.equal('debug' in response, false);
+    assert.equal('kmsContext' in response, false);
+    assert.equal('prompt' in response, false);
   });
 
   it('keeps KMS lookup scoped to the conversation organization', async () => {
@@ -212,7 +277,8 @@ function createChatbotFixture(options?: {
   const site = {
     ...defaultSite,
     ...(options?.site ?? {}),
-    widget_enabled: options?.siteEnabled ?? options?.site?.widget_enabled ?? defaultSite.widget_enabled
+    widget_enabled:
+      options?.siteEnabled ?? options?.site?.widget_enabled ?? defaultSite.widget_enabled
   };
   const conversation = {
     ...defaultConversation,
@@ -363,7 +429,12 @@ function createChatbotFixture(options?: {
         escalation: { enabled: true, triggers: [] }
       };
     },
-    decide: async (input: { message: string; activity: string; organizationId: string; siteId: string }) => {
+    decide: async (input: {
+      message: string;
+      activity: string;
+      organizationId: string;
+      siteId: string;
+    }) => {
       calls.decisions.push(input);
       calls.decisionScopes.push({ organizationId: input.organizationId, siteId: input.siteId });
       return (

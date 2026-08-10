@@ -542,7 +542,7 @@ describe('Knowledge Management System', () => {
     assert.equal((await repository.statistics(organizationId, siteId)).documents, 1);
   });
 
-  it('lets the Decision Engine answer from Knowledge Search before AI', async () => {
+  it('lets the Decision Engine generate an answer grounded in Knowledge Search', async () => {
     let aiCalls = 0;
     const engine = createDecisionEngine({
       businessConfigEngine: createMemoryBusinessConfigEngine(testConfig),
@@ -564,9 +564,21 @@ describe('Knowledge Management System', () => {
       },
       aiProvider: {
         providerName: 'mock',
-        async generateReply() {
+        async generateReply(input) {
           aiCalls += 1;
-          throw new Error('AI should not be called when KMS matches');
+          assert.match(input.systemPrompt, /Le spa est accessible sur reservation/);
+          return {
+            reply: 'Le spa est accessible sur réservation. [SOURCE 1]',
+            confidence: 0.8,
+            reason: 'grounded_kms',
+            provider: 'mock',
+            model: 'test',
+            inputTokens: 30,
+            outputTokens: 10,
+            latencyMs: 1,
+            estimatedCost: 0,
+            fallbackUsed: false
+          };
         },
         estimateCost() {
           return 0;
@@ -582,9 +594,10 @@ describe('Knowledge Management System', () => {
       recentHistory: []
     });
 
-    assert.equal(result.source, 'knowledge_search');
-    assert.equal(result.reply, 'Le spa est accessible sur reservation.');
-    assert.equal(aiCalls, 0);
+    assert.equal(result.source, 'ai');
+    assert.match(result.reply, /Le spa est accessible/);
+    assert.equal(aiCalls, 1);
+    assert.deepEqual(result.usedChunkIds, [`${documentId}:0`]);
   });
 
   it('refuses to crawl a start URL outside the registered site domain', async () => {
@@ -688,14 +701,15 @@ describe('Knowledge Management System', () => {
     assert.doesNotMatch(chunks[1]?.content ?? '', /originaux/);
   });
 
-
   it('combines robots and sitemap discovery with normalized URL reporting and strict site imports', async () => {
     const imported = createRecordingImporter();
     const fetched: string[] = [];
     const responses = new Map<string, { body: string; status?: number; url?: string }>([
       [
         'https://photographe-boudoir-albi.ovh/robots.txt',
-        { body: `User-agent: *\nDisallow: /private\nSitemap: https://www.photographe-boudoir-albi.ovh/sitemap_index.xml` }
+        {
+          body: `User-agent: *\nDisallow: /private\nSitemap: https://www.photographe-boudoir-albi.ovh/sitemap_index.xml`
+        }
       ],
       [
         'https://photographe-boudoir-albi.ovh/sitemap_index.xml',
@@ -723,16 +737,22 @@ describe('Knowledge Management System', () => {
       ],
       [
         'https://photographe-boudoir-albi.ovh/faq',
-        { body: '<html><head><title>FAQ photos</title><link rel="canonical" href="https://www.photographe-boudoir-albi.ovh/faq/" /></head><body><h1>FAQ</h1><p>Combien de photos sont livrées ? 12 photos retouchées.</p></body></html>' }
+        {
+          body: '<html><head><title>FAQ photos</title><link rel="canonical" href="https://www.photographe-boudoir-albi.ovh/faq/" /></head><body><h1>FAQ</h1><p>Combien de photos sont livrées ? 12 photos retouchées.</p></body></html>'
+        }
       ],
       [
         'https://photographe-boudoir-albi.ovh/studio',
-        { body: '<html><head><title>Studio Albi</title></head><body><p>Le studio accueille les shootings boudoir.</p></body></html>' }
+        {
+          body: '<html><head><title>Studio Albi</title></head><body><p>Le studio accueille les shootings boudoir.</p></body></html>'
+        }
       ],
       ['https://photographe-boudoir-albi.ovh/missing', { body: 'not found', status: 404 }],
       [
         'https://photographe-boudoir-albi.ovh/',
-        { body: '<html><head><title>Accueil</title></head><body><a href="/retouches?utm_medium=email&utm_source=newsletter#details">Retouches</a><a href="https://example.com/offre">Externe</a></body></html>' }
+        {
+          body: '<html><head><title>Accueil</title></head><body><a href="/retouches?utm_medium=email&utm_source=newsletter#details">Retouches</a><a href="https://example.com/offre">Externe</a></body></html>'
+        }
       ],
       [
         'https://photographe-boudoir-albi.ovh/retouches',
@@ -745,7 +765,11 @@ describe('Knowledge Management System', () => {
     const crawler = new SiteCrawlerService(imported.importer, async (url) => {
       fetched.push(url);
       const response = responses.get(url);
-      return createCrawlResponse(response?.body ?? '', response?.status ?? (response ? 200 : 404), response?.url);
+      return createCrawlResponse(
+        response?.body ?? '',
+        response?.status ?? (response ? 200 : 404),
+        response?.url
+      );
     });
 
     const summary = await crawler.crawl({
@@ -766,15 +790,37 @@ describe('Knowledge Management System', () => {
     assert.equal(summary.errorUrlCount, 0);
     assert.equal(summary.sitemapCoveragePercent, 100);
     assert.equal(fetched.includes('https://example.com/offre'), false);
-    assert.equal(fetched.some((url) => url.includes('utm_')), false);
+    assert.equal(
+      fetched.some((url) => url.includes('utm_')),
+      false
+    );
     assert.equal(fetched.includes('https://blog.photographe-boudoir-albi.ovh/satellite'), false);
-    assert.ok(summary.urls.some((url) => url.initialUrl.endsWith('/missing') && url.reason === 'http 404'));
-    assert.ok(summary.urls.some((url) => url.finalUrl === 'https://photographe-boudoir-albi.ovh/retouches'));
-    assert.deepEqual(imported.inputs.map((input) => input.organizationId), [organizationId, organizationId, organizationId, organizationId]);
-    assert.deepEqual(imported.inputs.map((input) => input.siteId), [siteId, siteId, siteId, siteId]);
-    assert.equal(imported.inputs.some((input) => input.source?.includes('example.com')), false);
-    assert.ok(imported.inputs.some((input) => input.source === 'https://photographe-boudoir-albi.ovh/faq'));
-    assert.ok(imported.inputs.some((input) => input.source === 'https://photographe-boudoir-albi.ovh/retouches'));
+    assert.ok(
+      summary.urls.some((url) => url.initialUrl.endsWith('/missing') && url.reason === 'http 404')
+    );
+    assert.ok(
+      summary.urls.some((url) => url.finalUrl === 'https://photographe-boudoir-albi.ovh/retouches')
+    );
+    assert.deepEqual(
+      imported.inputs.map((input) => input.organizationId),
+      [organizationId, organizationId, organizationId, organizationId]
+    );
+    assert.deepEqual(
+      imported.inputs.map((input) => input.siteId),
+      [siteId, siteId, siteId, siteId]
+    );
+    assert.equal(
+      imported.inputs.some((input) => input.source?.includes('example.com')),
+      false
+    );
+    assert.ok(
+      imported.inputs.some((input) => input.source === 'https://photographe-boudoir-albi.ovh/faq')
+    );
+    assert.ok(
+      imported.inputs.some(
+        (input) => input.source === 'https://photographe-boudoir-albi.ovh/retouches'
+      )
+    );
   });
 
   it('crawls only internal pages, deduplicates URLs, respects robots and imports into KMS by site', async () => {
@@ -866,13 +912,19 @@ describe('Knowledge Management System', () => {
       imported.inputs.map((input) => input.siteId),
       [siteId, siteId]
     );
-    assert.equal(imported.inputs.some((input) => input.siteId === null), false);
+    assert.equal(
+      imported.inputs.some((input) => input.siteId === null),
+      false
+    );
     assert.deepEqual(
       imported.inputs.map((input) => input.source),
       ['https://photographe-boudoir-albi.ovh/', 'https://photographe-boudoir-albi.ovh/about']
     );
     assert.match(imported.inputs[0]?.content ?? '', /FAQ Question: Quels sont les tarifs/);
-    assert.match(imported.inputs[0]?.content ?? '', /FAQ Answer: Les forfaits commencent à 190 euros/);
+    assert.match(
+      imported.inputs[0]?.content ?? '',
+      /FAQ Answer: Les forfaits commencent à 190 euros/
+    );
     assert.match(imported.inputs[0]?.content ?? '', /Formule découverte 190€/);
     assert.doesNotMatch(imported.inputs[0]?.content ?? '', /Crawled at:/);
     assert.equal(fetched.includes('https://example.com/offre'), false);
@@ -922,7 +974,11 @@ function createRecordingImporter(): {
   return { importer, inputs };
 }
 
-function createCrawlResponse(body: string, status = 200, url?: string): {
+function createCrawlResponse(
+  body: string,
+  status = 200,
+  url?: string
+): {
   ok: boolean;
   status: number;
   url?: string;

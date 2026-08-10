@@ -49,6 +49,8 @@ export type IntelligentRetrievalTrace = {
   categories: SiteContentType[];
   preferredPageTypes: SitePageType[];
   enabled: boolean;
+  timings: { searchMs: number; rerankingMs: number; totalMs: number };
+  candidatesBeforeReranking: KnowledgeSearchResult[];
   candidates: RankedRetrievalCandidate[];
 };
 

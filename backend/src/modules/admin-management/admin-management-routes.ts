@@ -77,6 +77,7 @@ import { SiteCrawlerService } from '../kms/site-crawler.js';
 import { SiteIntelligenceService } from '../site-intelligence/site-intelligence-service.js';
 import type { VisitorEvaluationService } from '../visitor-evaluation/visitor-evaluation-service.js';
 import type { RetrievalBenchmarkService } from '../intelligent-retrieval/retrieval-benchmark-service.js';
+import type { DecisionEngine } from '../decision-engine/decision-engine.js';
 import { ConversationRepository } from '../conversations/conversation-repository.js';
 import {
   assertReviewStatus,
@@ -540,6 +541,7 @@ export function registerAdminManagementRoutes(
     startedAt?: Date;
     visitorEvaluation?: VisitorEvaluationService;
     retrievalBenchmark?: RetrievalBenchmarkService;
+    decisionEngine?: DecisionEngine;
   }
 ): void {
   const organizations = new OrganizationRepository(database);
@@ -1707,17 +1709,41 @@ export function registerAdminManagementRoutes(
   app.post('/admin-api/chatbots/:siteId/reasoning/test', async (request) => {
     const context = await resolveContext(request, config, users);
     requirePermission(context.user, 'sites:read');
+    requireChatbotDebugAccess(context.user);
     const params = z.object({ siteId: z.string().uuid() }).parse(request.params);
     const body = reasoningTestPayloadSchema.parse(request.body);
     const organizationId = resolveOrganizationFilter(context.user, body.organizationId);
     await requireSiteAccess(database, params.siteId, organizationId);
+    const siteConfig = await database.query<{ business_config_id: string | null }>(
+      `select business_config_id from sites where id = $1 and organization_id = $2`,
+      [params.siteId, organizationId]
+    );
+
+    const reasoning = await reasoningEngine.test({
+      organizationId,
+      siteId: params.siteId,
+      message: body.message
+    });
+    const decision = await dependencies?.decisionEngine?.decide({
+      organizationId,
+      siteId: params.siteId,
+      conversationId: '00000000-0000-4000-8000-000000000000',
+      activity: siteConfig.rows[0]?.business_config_id ?? 'default',
+      message: body.message,
+      recentHistory: [],
+      debug: true
+    });
 
     return {
-      reasoning: await reasoningEngine.test({
-        organizationId,
-        siteId: params.siteId,
-        message: body.message
-      })
+      reasoning,
+      debug: decision
+        ? {
+            reply: decision.reply,
+            source: decision.source,
+            confidence: decision.confidence,
+            trace: decision.debug
+          }
+        : null
     };
   });
 
@@ -2568,6 +2594,15 @@ function requirePermission(
 ): void {
   if (!hasPermission(user.role, permission)) {
     throw new AppError('Permission denied', { statusCode: 403, code: 'PERMISSION_DENIED' });
+  }
+}
+
+function requireChatbotDebugAccess(user: UserRecord): void {
+  if (user.role !== 'SuperAdmin' && user.role !== 'Admin') {
+    throw new AppError('Chatbot Debug is restricted to administrators', {
+      statusCode: 403,
+      code: 'CHATBOT_DEBUG_FORBIDDEN'
+    });
   }
 }
 
