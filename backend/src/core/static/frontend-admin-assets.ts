@@ -75,6 +75,7 @@ createApp({
       chatbotSuggestions: [],
       reasoningLabMessage: '',
       reasoningLabResult: null,
+      chatbotDebug: null,
       reasoningMetrics: null,
       chatbotReviewQueue: [],
       chatbotReviewStatus: 'pending',
@@ -189,6 +190,9 @@ createApp({
     },
     canWriteSites() {
       return ['SuperAdmin', 'Admin', 'Manager'].includes(this.user?.role);
+    },
+    canDebugChatbot() {
+      return ['SuperAdmin', 'Admin'].includes(this.user?.role);
     },
     filteredCrawlerUrls() {
       const urls = this.siteCrawlerResult?.urls ?? [];
@@ -795,7 +799,9 @@ createApp({
         body: JSON.stringify({ message: this.reasoningLabMessage })
       });
       if (!response.ok) throw new Error('Test Reasoning impossible.');
-      this.reasoningLabResult = (await response.json()).reasoning;
+      const data = await response.json();
+      this.reasoningLabResult = data.reasoning;
+      this.chatbotDebug = data.debug;
       await this.loadReasoningMetrics();
     },
     async loadChatbotReviewQueue(siteId = this.selectedChatbot?.id) {
@@ -1961,7 +1967,7 @@ createApp({
             <button type="button" @click="navigate('chatbot-flows', selectedChatbot?.id)">Parcours</button>
             <button type="button" @click="navigate('chatbot-personality', selectedChatbot?.id)">Personnalite</button>
             <button type="button" @click="navigate('chatbot-goals', selectedChatbot?.id)">Objectifs</button>
-            <button type="button" @click="navigate('chatbot-reasoning', selectedChatbot?.id)">Reasoning Lab</button>
+            <button v-if="canDebugChatbot" type="button" @click="navigate('chatbot-reasoning', selectedChatbot?.id)">Chatbot Debug</button>
             <button type="button" @click="navigate('chatbot-review', selectedChatbot?.id)">Review</button>
             <button type="button" @click="openSiteWidget(selectedChatbot)">Widget</button>
           </nav>
@@ -1974,7 +1980,7 @@ createApp({
             <article class="metric"><span>Suggestions</span><strong>{{ chatbotOverview?.suggestions ?? 0 }}</strong><small>En attente</small></article>
           </div>
 
-          <div v-if="route === 'chatbot-reasoning'" class="split-layout">
+          <div v-if="route === 'chatbot-reasoning' && canDebugChatbot" class="split-layout">
             <form class="admin-form" @submit.prevent="testReasoningLab">
               <h3>Reasoning Lab</h3>
               <textarea v-model="reasoningLabMessage" placeholder="Question visiteur a tester"></textarea>
@@ -1988,6 +1994,24 @@ createApp({
                 <small>Connaissance : {{ reasoningLabResult.selected_knowledge_item_id || '-' }}</small>
                 <small>Objectif : {{ reasoningLabResult.applied_goal || '-' }} · personnalite : {{ reasoningLabResult.applied_personality || '-' }}</small>
                 <pre>{{ reasoningLabResult.reasoning_trace }}</pre>
+                <details v-if="chatbotDebug?.trace" class="chatbot-debug-panel">
+                  <summary>Chatbot Debug · {{ chatbotDebug.trace.totalTimeMs }} ms</summary>
+                  <div class="debug-grid">
+                    <section><h4>Décision</h4><p>Intention : <strong>{{ chatbotDebug.trace.intent }}</strong></p><p>Source : {{ chatbotDebug.source }} · confiance {{ Math.round(chatbotDebug.confidence * 100) }}%</p></section>
+                    <section><h4>Temps détaillés</h4><p>KMS {{ chatbotDebug.trace.timings.kmsSearchMs }} ms · reranking {{ chatbotDebug.trace.timings.rerankingMs }} ms</p><p>Prompt {{ chatbotDebug.trace.timings.promptConstructionMs }} ms · LLM {{ chatbotDebug.trace.timings.llmCallMs }} ms · total {{ chatbotDebug.trace.timings.totalMs }} ms</p></section>
+                    <section><h4>Tokens</h4><p>Prompt {{ chatbotDebug.trace.tokens.prompt }} · réponse {{ chatbotDebug.trace.tokens.response }} · total {{ chatbotDebug.trace.tokens.total }}</p></section>
+                  </div>
+                  <section><h4>10 chunks avant reranking</h4><div class="debug-table"><article v-for="(chunk, index) in chatbotDebug.trace.chunksBeforeReranking" :key="'before-' + index"><strong>#{{ index + 1 }} · {{ chunk.title }}</strong><span>score vectoriel {{ chunk.score }} · {{ chunk.category }} · position {{ chunk.position ?? '-' }}</span><small>{{ chunk.content }}</small></article></div></section>
+                  <section><h4>10 chunks après reranking</h4><div class="debug-table"><article v-for="chunk in chatbotDebug.trace.chunksAfterReranking" :key="'after-' + chunk.documentId + '-' + chunk.rank"><strong>#{{ chunk.rank }} (avant #{{ chunk.originalRank }}) · {{ chunk.title }}</strong><span>{{ chunk.scoreBeforeBonus }} → {{ chunk.scoreAfterBonus }}</span><small v-if="chunk.bonusesApplied.length"><span v-for="bonus in chunk.bonusesApplied" :key="bonus.kind">+{{ bonus.value }} {{ bonus.kind }} ({{ bonus.category }}) </span></small><small v-else>aucun bonus</small><small>{{ chunk.content }}</small></article></div></section>
+                  <section><h4>Chunks injectés dans le prompt</h4><p>{{ chatbotDebug.trace.contextCharacters }} caractères · ~{{ chatbotDebug.trace.contextTokens }} tokens</p><div class="debug-table"><article v-for="chunk in chatbotDebug.trace.injectedChunks" :key="'injected-' + chunk.chunkId"><strong>[SOURCE {{ chunk.sourceNumber }}] {{ chunk.title }}</strong><span>chunk {{ chunk.chunkId }} · document {{ chunk.documentId }} · score {{ chunk.score }}</span><small>{{ chunk.content }}</small></article></div></section>
+                  <section><h4>Contexte KMS final exact</h4><pre>{{ chatbotDebug.trace.kmsContext }}</pre></section>
+                  <section><h4>Chunks écartés</h4><article v-for="chunk in chatbotDebug.trace.droppedChunks" :key="'dropped-' + chunk.chunkId"><strong>{{ chunk.title }} · {{ chunk.chunkId }}</strong><small>{{ chunk.reason }}</small></article><p v-if="!chatbotDebug.trace.droppedChunks.length">Aucun chunk écarté.</p></section>
+                  <section><h4>Prompt complet envoyé au LLM</h4><pre>{{ chatbotDebug.trace.prompt || 'LLM non appelé pour cette décision.' }}</pre></section>
+                  <section><h4>Réponse brute du LLM</h4><pre>{{ chatbotDebug.trace.rawLlmResponse || 'LLM non appelé pour cette décision.' }}</pre></section>
+                  <section><h4>Citations détectées</h4><p>{{ chatbotDebug.trace.citedChunkIds.length ? chatbotDebug.trace.citedChunkIds.join(', ') : 'Aucun chunk cité.' }}</p><p v-if="chatbotDebug.trace.unsupportedInformationAlert" class="debug-alert">{{ chatbotDebug.trace.unsupportedInformationAlert }}</p></section>
+                  <section><h4>Sources retenues</h4><article v-for="source in chatbotDebug.trace.retainedSources" :key="source.documentId + '-' + source.rank"><strong>#{{ source.rank }} · {{ source.document }}</strong><p>{{ source.chunk }}</p><small>{{ source.reason }}</small></article><p v-if="!chatbotDebug.trace.retainedSources.length">Aucune source retenue.</p></section>
+                  <section :class="{ 'debug-warning': chatbotDebug.trace.weakAnswer.weak }"><h4>Diagnostic qualité</h4><p>{{ chatbotDebug.trace.weakAnswer.explanation }}</p><strong v-if="chatbotDebug.trace.weakAnswer.suggestion">Suggestion : {{ chatbotDebug.trace.weakAnswer.suggestion }}</strong></section>
+                </details>
               </article>
               <article v-if="reasoningMetrics">
                 <strong>Metriques Reasoning</strong>
@@ -3455,6 +3479,16 @@ td strong, td small { display: block; }
 .chat-message { max-width: 880px; border: 1px solid #dfe5ee; border-radius: 8px; padding: 14px; background: #fff; }
 .chat-message.user { justify-self: end; background: #eef6ff; }
 .chat-message p { white-space: pre-wrap; color: #354157; }
+.chatbot-debug-panel { margin-top: 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
+.chatbot-debug-panel summary { cursor: pointer; padding: 12px; font-weight: 700; color: #0f172a; }
+.chatbot-debug-panel > section, .chatbot-debug-panel > div { margin: 0 12px 12px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
+.debug-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.debug-grid section { padding: 8px; }
+.debug-table { display: grid; gap: 8px; }
+.debug-table article { display: grid; gap: 4px; padding: 10px; border-left: 3px solid #64748b; background: #f8fafc; }
+.chatbot-debug-panel pre { max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.chatbot-debug-panel .debug-warning { border-color: #f59e0b; background: #fffbeb; }
+.chatbot-debug-panel .debug-alert { border: 1px solid #fca5a5; border-radius: 6px; padding: 10px; color: #991b1b; background: #fef2f2; }
 .chat-citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chat-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; border-top: 1px solid #e6ebf2; padding: 14px 18px; background: #fbfcfe; }
 @media (max-width: 1180px) {

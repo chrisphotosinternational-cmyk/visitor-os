@@ -6,7 +6,11 @@ import type {
 } from '../conversations/conversation-repository.js';
 import type { ProspectRepository } from '../prospects/prospect-repository.js';
 import type { CrmRepository } from '../crm/crm-repository.js';
-import type { DecisionEngine, DecisionEngineResult } from '../decision-engine/decision-engine.js';
+import type {
+  DecisionCitation,
+  DecisionEngine,
+  DecisionEngineResult
+} from '../decision-engine/decision-engine.js';
 import type { NotificationEngine } from '../notifications/notification-engine.js';
 import type { ChatbotProductionService } from '../chatbot-production/chatbot-production-service.js';
 import type { KnowledgeEngineService } from '../knowledge-engine/knowledge-engine-service.js';
@@ -72,6 +76,10 @@ export type ChatbotMessageResponse = {
   processingTimeMs: number;
   matchedItemId: string | undefined;
   reason: string | undefined;
+  usedChunkIds?: string[];
+  usedDocumentIds?: string[];
+  sources?: DecisionCitation[];
+  citations?: DecisionCitation[];
   leadCapture:
     | {
         enabled: true;
@@ -281,22 +289,19 @@ export class MultiSiteChatbotService {
         })
       : null;
     const reasoningTimeMs = Date.now() - reasoningStartedAt;
+    const preserveBaseDecision = ['ai', 'human_escalation'].includes(baseDecision.source);
     const decision = reasoning
       ? {
           ...baseDecision,
-          reply:
-            baseDecision.source === 'human_escalation'
-              ? baseDecision.reply
-              : reasoning.response_text,
-          source:
-            baseDecision.source === 'human_escalation' && reasoning.response_type === 'fallback'
-              ? baseDecision.source
-              : reasoning.response_type,
-          confidence: reasoning.confidence_score,
+          reply: preserveBaseDecision ? baseDecision.reply : reasoning.response_text,
+          source: preserveBaseDecision ? baseDecision.source : reasoning.response_type,
+          confidence: preserveBaseDecision ? baseDecision.confidence : reasoning.confidence_score,
           shouldEscalate:
             baseDecision.shouldEscalate || reasoning.next_best_action === 'escalate_to_admin',
-          matchedItemId: reasoning.selected_knowledge_item_id ?? baseDecision.matchedItemId,
-          reason: reasoning.detected_intent
+          matchedItemId: preserveBaseDecision
+            ? baseDecision.matchedItemId
+            : (reasoning.selected_knowledge_item_id ?? baseDecision.matchedItemId),
+          reason: preserveBaseDecision ? baseDecision.reason : reasoning.detected_intent
         }
       : baseDecision;
 
@@ -435,6 +440,10 @@ export class MultiSiteChatbotService {
       processingTimeMs: decision.processingTimeMs,
       matchedItemId: decision.matchedItemId,
       reason: decision.reason,
+      ...(decision.usedChunkIds ? { usedChunkIds: decision.usedChunkIds } : {}),
+      ...(decision.usedDocumentIds ? { usedDocumentIds: decision.usedDocumentIds } : {}),
+      ...(decision.sources ? { sources: decision.sources } : {}),
+      ...(decision.citations ? { citations: decision.citations } : {}),
       leadCapture:
         shouldCaptureLead && leadSettings
           ? {
@@ -647,7 +656,6 @@ export class MultiSiteChatbotService {
     throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
   }
 }
-
 
 function knowledgeAnswerFromDecision(decision: DecisionEngineResult) {
   if (!['knowledge_base', 'knowledge_search', 'faq'].includes(decision.source)) return null;
