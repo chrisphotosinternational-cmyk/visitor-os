@@ -174,13 +174,10 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     },
     dependencies.config.intelligentRetrieval?.enabled ?? false
   );
-  const knowledgeSearch = dependencies.config.intelligentRetrieval?.enabled
-    ? intelligentRetrieval
-    : repositoryKnowledgeSearch;
   const decisionEngine = createDecisionEngine({
     aiProvider,
     businessConfigEngine,
-    knowledgeSearch
+    knowledgeSearch: intelligentRetrieval
   });
   const authService = new AuthService(dependencies.database, dependencies.config);
   const notificationRepository = new NotificationRepository(dependencies.database, {
@@ -244,7 +241,8 @@ export async function createApp(dependencies: AppDependencies): Promise<FastifyI
     ...(dependencies.readiness ? { readiness: dependencies.readiness } : {}),
     startedAt,
     ...(visitorEvaluation ? { visitorEvaluation } : {}),
-    ...(retrievalBenchmark ? { retrievalBenchmark } : {})
+    ...(retrievalBenchmark ? { retrievalBenchmark } : {}),
+    decisionEngine
   });
   registerWidgetRoutes(app, dependencies.database, decisionEngine, notificationEngine);
   registerAdminRoutes(
