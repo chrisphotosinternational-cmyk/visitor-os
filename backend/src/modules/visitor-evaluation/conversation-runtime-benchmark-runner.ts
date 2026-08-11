@@ -13,6 +13,7 @@ import type { CrmRepository } from '../crm/crm-repository.js';
 import { createDecisionEngine } from '../decision-engine/decision-engine.js';
 import { KnowledgeRepository } from '../kms/knowledge-repository.js';
 import { RepositoryKnowledgeSearch } from '../kms/knowledge-search.js';
+import { tokenizeKnowledge } from '../kms/knowledge-indexer.js';
 import type { KnowledgeDocument } from '../kms/knowledge-types.js';
 import type { ProspectRepository } from '../prospects/prospect-repository.js';
 import { ReasoningEngineService } from '../reasoning/reasoning-engine-service.js';
@@ -31,6 +32,11 @@ export type RuntimeBenchmarkFixture = {
   markers: string[];
   contacts: BenchmarkContact[];
   facts: string[];
+  knowledgeItems?: Array<{
+    id: string;
+    title: string;
+    content: string;
+  }>;
   exhaustiveOffers: { name: string; price: string }[];
   absentFacts: string[];
 };
@@ -112,6 +118,8 @@ export async function runConversationRuntimeBenchmark(input: {
           reply: response.reply,
           source: response.source,
           confidence: response.confidence,
+          usedChunkIds: response.usedChunkIds,
+          usedDocumentIds: response.usedDocumentIds,
           citations: response.citations
         }
       });
@@ -470,7 +478,7 @@ function createCrmRepository(): CrmRepository {
 
 function createRuntimeDatabase(fixtures: Record<string, RuntimeBenchmarkFixture>): Database {
   const documents = new Map<string, KnowledgeDocument>();
-  const chunks = Object.values(fixtures).map((fixture) => {
+  const chunks = Object.values(fixtures).flatMap((fixture) => {
     const documentId = `document-${fixture.id}`;
     documents.set(documentId, {
       id: documentId,
@@ -497,7 +505,37 @@ function createRuntimeDatabase(fixtures: Record<string, RuntimeBenchmarkFixture>
       ...fixture.facts,
       ...fixture.exhaustiveOffers.flatMap((offer) => [offer.name, offer.price])
     ].join(' ');
-    return { id: `chunk-${fixture.id}`, documentId, fixture, content };
+    const fixtureChunks = [{ id: `chunk-${fixture.id}`, documentId, fixture, content }];
+    for (const item of fixture.knowledgeItems ?? []) {
+      const itemDocumentId = `document-${fixture.id}-${item.id}`;
+      documents.set(itemDocumentId, {
+        id: itemDocumentId,
+        organization_id: fixture.organizationId,
+        site_id: fixture.id,
+        title: item.title,
+        description: null,
+        category: 'benchmark',
+        type: 'txt',
+        language: 'fr',
+        version: 1,
+        size_bytes: Buffer.byteLength(item.content, 'utf8'),
+        hash: `${fixture.id}-${item.id}`,
+        status: 'active',
+        tags: ['runtime-benchmark'],
+        author: null,
+        source: `benchmark://${fixture.id}/${item.id}`,
+        usage_count: 0,
+        created_at: new Date(0),
+        updated_at: new Date(0)
+      });
+      fixtureChunks.push({
+        id: `chunk-${fixture.id}-${item.id}`,
+        documentId: itemDocumentId,
+        fixture,
+        content: item.content
+      });
+    }
+    return fixtureChunks;
   });
   const database: Database = {
     isConfigured: () => true,
@@ -536,7 +574,12 @@ function createRuntimeDatabase(fixtures: Record<string, RuntimeBenchmarkFixture>
         .filter(
           (chunk) => chunk.fixture.organizationId === values[0] && chunk.fixture.id === values[1]
         )
-        .filter((chunk) => tokens.some((token) => chunk.content.toLowerCase().includes(token)))
+        .map((chunk) => ({
+          ...chunk,
+          relevance: tokens.filter((token) => tokenizeKnowledge(chunk.content).includes(token)).length
+        }))
+        .filter((chunk) => chunk.relevance > 0)
+        .sort((left, right) => right.relevance - left.relevance)
         .map((chunk) => ({
           chunk_id: chunk.id,
           document_id: chunk.documentId,
@@ -544,14 +587,31 @@ function createRuntimeDatabase(fixtures: Record<string, RuntimeBenchmarkFixture>
           content: chunk.content,
           category: 'benchmark',
           language: 'fr',
-          source: `benchmark://${chunk.fixture.id}`,
+          source: documents.get(chunk.documentId)?.source,
           position: 0,
-          score: '0.88'
+          score: String(chunk.relevance * 0.22)
         }));
       return Promise.resolve(queryResult<T>(rows as unknown as T[]));
     }
   };
   return database;
+}
+
+/** Searches the synthetic KMS with the same repository used by the runtime benchmark. */
+export function searchRuntimeBenchmarkKnowledge(input: {
+  fixtures: Record<string, RuntimeBenchmarkFixture>;
+  organizationId: string;
+  siteId: string;
+  query: string;
+}) {
+  return new RepositoryKnowledgeSearch(
+    new KnowledgeRepository(createRuntimeDatabase(input.fixtures))
+  ).search({
+    organizationId: input.organizationId,
+    siteId: input.siteId,
+    query: input.query,
+    limit: 10
+  });
 }
 
 function queryResult<T extends pg.QueryResultRow>(rows: T[]): pg.QueryResult<T> {

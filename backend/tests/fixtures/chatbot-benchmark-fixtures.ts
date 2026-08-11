@@ -6,6 +6,11 @@ export type ChatbotBenchmarkFixture = {
   markers: string[];
   contacts: BenchmarkContact[];
   facts: string[];
+  knowledgeItems?: Array<{
+    id: string;
+    title: string;
+    content: string;
+  }>;
   exhaustiveOffers: { name: string; price: string }[];
   absentFacts: string[];
 };
@@ -81,6 +86,32 @@ export const chatbotBenchmarkFixtures: Record<string, ChatbotBenchmarkFixture> =
       'SMOKE-A1-MULTI-CHECKIN-17H',
       'SMOKE-A1-MULTI-PARKING-VIOLET',
       'SMOKE-A1-MULTI-BREAKFAST-07H30'
+    ],
+    knowledgeItems: [
+      {
+        id: 'travel',
+        title: 'Déplacements à Lyon',
+        content:
+          'DEPLACEMENT-A1-COPPER. Vous déplacez-vous ? Le photographe se déplace à Lyon, notamment pour une séance le 12 juin. Contact WhatsApp : +33 6 00 00 00 11.'
+      },
+      {
+        id: 'studio',
+        title: 'Équipement et réservation du studio',
+        content:
+          'STUDIO-A1-VIOLET. Le studio dispose de son équipement et peut être réservé sur demande. Contact WhatsApp : +33 6 00 00 00 11.'
+      },
+      {
+        id: 'booking',
+        title: 'Processus de réservation portrait',
+        content:
+          'PROCESS-A1-BOOKING et STUDIO-A1-VIOLET. Comment réserver ? Pour réserver un portrait, le visiteur confirme son projet puis dit : je veux réserver. Contact WhatsApp : +33 6 00 00 00 11.'
+      },
+      {
+        id: 'video',
+        title: 'Projets vidéo',
+        content:
+          'VIDEO-A1. Les projets vidéo concrets, notamment prévus en juillet, sont pris en charge. Contact WhatsApp : +33 6 00 00 00 11.'
+      }
     ],
     exhaustiveOffers: [
       { name: 'OFFRE-A1-AURORE', price: '41 EUR' },
