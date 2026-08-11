@@ -12,10 +12,11 @@
     "dev": "pnpm build && node --watch dist/main.js",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "smoke:chatbot-public": "node scripts/chatbot-public-runtime-smoke.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.test.json && node --test \"dist-test/tests/**/*.test.js\"",
     "test:coverage": "tsc -p tsconfig.test.json && node --experimental-test-coverage --test \"dist-test/tests/**/*.test.js\"",
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern 'scripts/**/*.mjs'",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build"
