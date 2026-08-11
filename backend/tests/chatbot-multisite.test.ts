@@ -59,7 +59,10 @@ describe('Multi-site chatbot service', () => {
     assert.equal(response.conversationId, CONVERSATION_A);
     assert.equal(response.prospectId, PROSPECT_A);
     assert.equal(response.source, 'faq');
-    assert.equal(response.reply, 'Oui, nous avons des disponibilites cette semaine.');
+    assert.equal(
+      response.reply,
+      'Oui, nous avons des disponibilites cette semaine. Si vous souhaitez avancer, vous pouvez contacter directement VISITOR DEMO.'
+    );
     assert.equal(fixture.calls.linkedProspectId, PROSPECT_A);
     assert.deepEqual(
       fixture.calls.messages.map((message) => message.senderType),
@@ -429,6 +432,80 @@ describe('Multi-site chatbot service', () => {
       /Widget site not found/
     );
   });
+
+  it('adds the trusted WhatsApp CTA after the useful answer for booking intent', async () => {
+    const fixture = createChatbotFixture({
+      businessContact: { whatsapp: '+33 6 12 34 56 78', phone: '+33 1 23 45 67 89' },
+      decisionResult: {
+        reply: 'Le studio est équipé de flashes professionnels. [SOURCE 1]',
+        source: 'ai',
+        confidence: 0.9,
+        shouldEscalate: false,
+        processingTimeMs: 3
+      }
+    });
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Je veux réserver le studio'
+    });
+    assert.match(response.reply, /flashes professionnels.*WhatsApp.*\+33 6 12 34 56 78/);
+    assert.doesNotMatch(response.reply, /\+33 1 23 45 67 89/);
+  });
+
+  it('does not add a premature CTA to an informational question', async () => {
+    const fixture = createChatbotFixture({ businessContact: { phone: '+33 1 23 45 67 89' } });
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Quel équipement avez-vous ?'
+    });
+    assert.doesNotMatch(response.reply, /contacter directement/);
+  });
+
+  it('does not add a CTA to a pure fallback or republish an older assistant answer', async () => {
+    const fixture = createChatbotFixture({
+      businessContact: { whatsapp: '+33 6 12 34 56 78' },
+      history: [
+        { senderType: 'visitor', content: 'Parlez-moi du studio' },
+        { senderType: 'assistant', content: 'ANCIENNE-REPONSE-STUDIO [SOURCE 1]' }
+      ],
+      decisionResult: {
+        reply: 'Cette information est absente de mes sources.',
+        source: 'fallback',
+        confidence: 0.25,
+        shouldEscalate: true,
+        processingTimeMs: 3
+      }
+    });
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Je veux réserver'
+    });
+
+    assert.equal(response.reply, 'Cette information est absente de mes sources.');
+    assert.doesNotMatch(response.reply, /ANCIENNE-REPONSE-STUDIO|contacter directement|WhatsApp/);
+  });
+
+  it('falls back from WhatsApp to phone then email without inventing a channel', async () => {
+    const phoneFixture = createChatbotFixture({
+      businessContact: { phone: '+33 1 23 45 67 89', email: 'chris@example.test' }
+    });
+    const phoneResponse = await phoneFixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Je veux réserver'
+    });
+    assert.match(phoneResponse.reply, /disponibilites.*téléphone : \+33 1 23 45 67 89/);
+    assert.doesNotMatch(phoneResponse.reply, /chris@example\.test|WhatsApp/);
+
+    const emailFixture = createChatbotFixture({
+      businessContact: { email: 'chris@example.test' }
+    });
+    const emailResponse = await emailFixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Je veux réserver'
+    });
+    assert.match(emailResponse.reply, /disponibilites.*e-mail : chris@example\.test/);
+    assert.doesNotMatch(emailResponse.reply, /WhatsApp|téléphone|\+33/);
+  });
 });
 
 type DecisionResultFixture = Omit<DecisionEngineResult, 'source'> & {
@@ -470,6 +547,7 @@ function createChatbotFixture(options?: {
   legacyKnowledgeReply?: string;
   legacyQaReply?: string;
   history?: Array<{ senderType: 'visitor' | 'assistant'; content: string }>;
+  businessContact?: { whatsapp?: string; phone?: string; email?: string };
 }) {
   const site = {
     ...defaultSite,
@@ -620,6 +698,7 @@ function createChatbotFixture(options?: {
           language: 'fr',
           colors: { primary: '#145c4b', secondary: '#f5f5f5' }
         },
+        contact: { openingHours: [], ...options?.businessContact },
         widget: {
           welcomeMessage: 'Bonjour',
           fallbackMessage: 'Je transmets votre demande.',
