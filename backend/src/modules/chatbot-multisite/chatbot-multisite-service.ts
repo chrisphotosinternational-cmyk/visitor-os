@@ -298,12 +298,21 @@ export class MultiSiteChatbotService {
           reason: baseDecision.reason
         }
       : baseDecision;
+    const businessConfig = await this.dependencies.decisionEngine.getBusinessConfig(
+      site?.business_config_id
+    );
+    const publicReply = clarifyPublicAssistantIdentity({
+      reply: decision.reply,
+      visitorMessage: input.content,
+      brandName: businessConfig.identity.name,
+      isFirstAssistantReply: !recentHistory.some((message) => message.sender_type === 'assistant')
+    });
 
     const assistantMessage = await this.dependencies.conversations.addMessage({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
       senderType: 'assistant',
-      content: decision.reply,
+      content: publicReply,
       decision: {
         responseSource: decision.source,
         responseConfidence: decision.confidence,
@@ -372,7 +381,7 @@ export class MultiSiteChatbotService {
 
     const prospectId = prospect?.id ?? conversation.prospect_id;
     if (prospectId) {
-      const scoringMessages = [...recentHistory.map((message) => message.content), decision.reply];
+      const scoringMessages = [...recentHistory.map((message) => message.content), publicReply];
       const appliedTags = await this.dependencies.crm.applyAutomaticTags({
         organizationId: conversation.organization_id,
         prospectId,
@@ -427,7 +436,7 @@ export class MultiSiteChatbotService {
     const response: ChatbotMessageResponse = {
       conversationId: conversation.id,
       prospectId,
-      reply: decision.reply,
+      reply: publicReply,
       source: decision.source,
       confidence: decision.confidence,
       shouldEscalate: decision.shouldEscalate,
@@ -607,6 +616,80 @@ export class MultiSiteChatbotService {
 
     throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
   }
+}
+
+function clarifyPublicAssistantIdentity(input: {
+  reply: string;
+  visitorMessage: string;
+  brandName: string;
+  isFirstAssistantReply: boolean;
+}): string {
+  const visitor = normalizeIdentityText(input.visitorMessage);
+  const brand = normalizeIdentityText(input.brandName);
+  const asksWho =
+    /\b(?:qui es tu|tu es qui|est ce (?:que )?c est|je parle a|tu es)\b/.test(visitor) ||
+    /\b(?:who are you|is this|am i (?:speaking|talking) to|are you)\b/.test(visitor);
+  const asksAboutBrandIdentity =
+    brand.length > 0 &&
+    new RegExp(
+      `\\b(?:est ce|c est|je parle a|tu es|is this|are you) ${escapeRegExp(brand)}\\b`
+    ).test(visitor);
+  const addressesBrand =
+    brand.length > 0 &&
+    (visitor.startsWith(`${brand} `) || visitor === brand || visitor.includes(`tu es ${brand}`));
+  const asksPersonalAnswer =
+    brand.length > 0 &&
+    (new RegExp(`\\b(?:demande a|que pense|avis (?:personnel )?de) ${escapeRegExp(brand)}\\b`).test(
+      visitor
+    ) ||
+      new RegExp(
+        `\\b(?:ask|what does|personal (?:answer|opinion) (?:from|of)) ${escapeRegExp(brand)}\\b`
+      ).test(visitor));
+  const needsClarification =
+    input.isFirstAssistantReply ||
+    asksWho ||
+    asksAboutBrandIdentity ||
+    addressesBrand ||
+    asksPersonalAnswer;
+
+  if (!needsClarification || hasUnambiguousAiIdentity(input.reply, input.brandName)) {
+    return input.reply;
+  }
+
+  const english = /\b(?:who|is this|am i|are you|ask|what does|you|your)\b/.test(visitor);
+  const introduction = english
+    ? `I'm ${input.brandName}'s AI chatbot, not ${input.brandName} personally.`
+    : `Je suis le chatbot IA de ${input.brandName}, pas ${input.brandName} lui-même.`;
+  const personalBoundary = asksPersonalAnswer
+    ? english
+      ? ` I can share the available information, but I cannot speak for ${input.brandName}'s personal opinion or decision.`
+      : ` Je peux partager les informations disponibles, mais pas inventer l'avis ou la décision personnelle de ${input.brandName}.`
+    : '';
+
+  return `${introduction}${personalBoundary} ${input.reply}`.trim();
+}
+
+function hasUnambiguousAiIdentity(reply: string, brandName: string): boolean {
+  const normalized = normalizeIdentityText(reply);
+  const brand = escapeRegExp(normalizeIdentityText(brandName));
+  return (
+    /\b(?:chatbot|assistant)\b/.test(normalized) &&
+    /\b(?:ia|ai|intelligence artificielle)\b/.test(normalized) &&
+    new RegExp(`\\b(?:pas|not) ${brand}\\b`).test(normalized)
+  );
+}
+
+function normalizeIdentityText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function knowledgeAnswerFromDecision(decision: DecisionEngineResult) {

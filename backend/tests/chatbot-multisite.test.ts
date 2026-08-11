@@ -279,6 +279,148 @@ describe('Multi-site chatbot service', () => {
     assert.equal(response.source, 'ai');
   });
 
+  describe('public AI identity transparency', () => {
+    it('introduces itself as the brand AI chatbot on the first useful response', async () => {
+      const fixture = createChatbotFixture({
+        history: [{ senderType: 'visitor', content: 'Bonjour' }],
+        decisionResult: {
+          reply: 'Les portraits sont réalisés en studio.',
+          source: 'knowledge_search',
+          confidence: 0.9,
+          shouldEscalate: false,
+          processingTimeMs: 3,
+          matchedItemId: 'portrait',
+          reason: 'grounded'
+        }
+      });
+
+      const response = await fixture.chatbot.sendMessage({
+        conversationId: CONVERSATION_A,
+        content: 'Quels portraits proposez-vous ?'
+      });
+
+      assert.match(response.reply, /chatbot IA de VISITOR DEMO/);
+      assert.match(response.reply, /pas VISITOR DEMO lui-même/);
+      assert.match(response.reply, /portraits sont réalisés en studio/);
+      assert.equal(response.matchedItemId, 'portrait');
+    });
+
+    for (const question of ['Qui es-tu ?', 'Est-ce VISITOR DEMO ?', 'VISITOR DEMO, réponds-moi']) {
+      it(`removes human identity ambiguity for: ${question}`, async () => {
+        const fixture = createChatbotFixture({
+          decisionResult: {
+            reply: 'Oui, je peux vous renseigner sur les séances.',
+            source: 'ai',
+            confidence: 0.85,
+            shouldEscalate: false,
+            processingTimeMs: 3,
+            reason: 'identity'
+          }
+        });
+
+        const response = await fixture.chatbot.sendMessage({
+          conversationId: CONVERSATION_A,
+          content: question
+        });
+
+        assert.match(response.reply, /chatbot IA de VISITOR DEMO/);
+        assert.match(response.reply, /pas VISITOR DEMO lui-même/);
+        assert.match(response.reply, /séances/);
+      });
+    }
+
+    it('keeps the identity clarification explicit in English', async () => {
+      const fixture = createChatbotFixture({
+        decisionResult: {
+          reply: 'I can help with the available services.',
+          source: 'ai',
+          confidence: 0.85,
+          shouldEscalate: false,
+          processingTimeMs: 3,
+          reason: 'identity'
+        }
+      });
+
+      const response = await fixture.chatbot.sendMessage({
+        conversationId: CONVERSATION_A,
+        content: 'Are you VISITOR DEMO?'
+      });
+
+      assert.match(response.reply, /VISITOR DEMO's AI chatbot/);
+      assert.match(response.reply, /not VISITOR DEMO personally/);
+      assert.match(response.reply, /available services/);
+    });
+
+    it('keeps a personal answer attributed to the human and preserves existing contact details', async () => {
+      const fixture = createChatbotFixture({
+        decisionResult: {
+          reply: 'WhatsApp : +33 6 12 34 56 78.',
+          source: 'fallback',
+          confidence: 0.35,
+          shouldEscalate: true,
+          processingTimeMs: 3,
+          reason: 'personal_answer'
+        }
+      });
+
+      const response = await fixture.chatbot.sendMessage({
+        conversationId: CONVERSATION_A,
+        content: "Quel est l'avis personnel de VISITOR DEMO ?"
+      });
+
+      assert.match(response.reply, /pas inventer l'avis ou la décision personnelle/);
+      assert.match(response.reply, /WhatsApp : \+33 6 12 34 56 78/);
+    });
+
+    it('clarifies a late identity question without exposing internal response data', async () => {
+      const fixture = createChatbotFixture({
+        history: [
+          { senderType: 'visitor', content: 'Bonjour' },
+          { senderType: 'assistant', content: 'Bienvenue.' },
+          { senderType: 'visitor', content: 'Parlez-moi du studio.' },
+          { senderType: 'assistant', content: 'Le studio réalise des portraits.' }
+        ],
+        decisionResult: {
+          reply: 'Je peux continuer à vous renseigner.',
+          source: 'ai',
+          confidence: 0.85,
+          shouldEscalate: false,
+          processingTimeMs: 3,
+          reason: 'identity'
+        }
+      });
+
+      const response = await fixture.chatbot.sendMessage({
+        conversationId: CONVERSATION_A,
+        content: 'Et qui es-tu ?'
+      });
+
+      assert.match(response.reply, /chatbot IA/);
+      assert.equal('debug' in response, false);
+      assert.equal('systemPrompt' in response, false);
+    });
+
+    it('does not repeat the introduction after identity is clear without new ambiguity', async () => {
+      const fixture = createChatbotFixture({
+        decisionResult: {
+          reply: 'La séance dure une heure. [SOURCE 1]',
+          source: 'ai',
+          confidence: 0.9,
+          shouldEscalate: false,
+          processingTimeMs: 3,
+          reason: 'grounded'
+        }
+      });
+
+      const response = await fixture.chatbot.sendMessage({
+        conversationId: CONVERSATION_A,
+        content: 'Combien de temps dure la séance ?'
+      });
+
+      assert.equal(response.reply, 'La séance dure une heure. [SOURCE 1]');
+    });
+  });
+
   it('rejects inactive or unknown public sites', async () => {
     const fixture = createChatbotFixture({ siteEnabled: false });
 
@@ -327,6 +469,7 @@ function createChatbotFixture(options?: {
   reasoningReply?: string;
   legacyKnowledgeReply?: string;
   legacyQaReply?: string;
+  history?: Array<{ senderType: 'visitor' | 'assistant'; content: string }>;
 }) {
   const site = {
     ...defaultSite,
@@ -386,22 +529,26 @@ function createChatbotFixture(options?: {
     linkProspect: async (_conversationId: string, prospectId: string) => {
       calls.linkedProspectId = prospectId;
     },
-    listMessages: async () => [
-      {
+    listMessages: async () =>
+      (
+        options?.history ?? [
+          { senderType: 'visitor' as const, content: 'Bonjour' },
+          { senderType: 'assistant' as const, content: 'Bienvenue.' }
+        ]
+      ).map((message, index) => ({
         id: '00000000-0000-4000-8000-00000000m001',
         organization_id: conversation.organization_id,
         conversation_id: conversation.id,
-        sender_type: 'visitor',
-        content: 'Bonjour',
+        sender_type: message.senderType,
+        content: message.content,
         response_source: null,
         response_confidence: null,
         should_escalate: null,
         processing_time_ms: null,
         matched_item_id: null,
         decision_reason: null,
-        created_at: new Date('2026-07-06T08:01:00Z')
-      }
-    ],
+        created_at: new Date(`2026-07-06T08:0${index + 1}:00Z`)
+      })),
     addDecisionEvent: async (input: { source: string }) => {
       calls.decisionEvents.push(input);
     },
