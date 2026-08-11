@@ -13,6 +13,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "smoke:chatbot-public": "node scripts/chatbot-public-runtime-smoke.mjs",
+    "benchmark:chatbot-conversations": "tsc -p tsconfig.test.json && node --test dist-test/tests/chatbot-conversation-benchmark.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.test.json && node --test \"dist-test/tests/**/*.test.js\"",
     "test:coverage": "tsc -p tsconfig.test.json && node --experimental-test-coverage --test \"dist-test/tests/**/*.test.js\"",
