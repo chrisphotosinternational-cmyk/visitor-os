@@ -67,6 +67,7 @@ export type ConversationBenchmarkTurn = {
   userMessage: string;
   requiredFacts?: string[];
   forbiddenFacts?: string[];
+  identityExpectation?: ConversationIdentityExpectation;
   cta: ConversationCtaExpectation;
 };
 export type ConversationBenchmarkExpectation = {

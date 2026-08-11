@@ -35,6 +35,7 @@ type Definition = {
   forbidden?: string[];
   firstCta?: number;
   identity?: ConversationBenchmarkScenario['identityExpectation'];
+  turnIdentities?: ConversationBenchmarkTurn['identityExpectation'][];
   fixture?: 'site-a1' | 'site-a2' | 'site-b1';
   critical?: boolean;
 };
@@ -50,6 +51,9 @@ function scenario(definition: Definition): ConversationBenchmarkScenario {
     criticality: definition.critical ? 'blocking' : 'standard',
     turns: definition.messages.map((userMessage, index) => ({
       userMessage,
+      ...(definition.turnIdentities?.[index] === undefined
+        ? {}
+        : { identityExpectation: definition.turnIdentities[index] }),
       cta: ctas[index] ?? 'forbidden'
     })),
     expectedIntent: definition.intent,
@@ -82,7 +86,8 @@ const definitions: Definition[] = [
     category: 'identity',
     intent: 'presentation_then_question',
     messages: ['Bonjour', 'Que proposes-tu ?'],
-    identity: 'introduce_ai'
+    identity: 'introduce_ai',
+    turnIdentities: ['introduce_ai', 'not_applicable']
   },
   {
     id: 'ID-03',
@@ -111,7 +116,8 @@ const definitions: Definition[] = [
     category: 'identity',
     intent: 'late_identity',
     messages: ['Bonjour', 'Parle-moi du studio', 'Et qui es-tu ?'],
-    identity: 'remain_ai'
+    identity: 'remain_ai',
+    turnIdentities: ['introduce_ai', 'not_applicable', 'remain_ai']
   },
   {
     id: 'ID-07',
