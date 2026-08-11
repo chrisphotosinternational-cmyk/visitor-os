@@ -60,6 +60,7 @@ export const businessConfigSchema = z.object({
       .default({})
   }),
   contact: z.object({
+    whatsapp: optionalString,
     phone: optionalString,
     email: z.string().email().optional(),
     website: z.string().url().optional(),

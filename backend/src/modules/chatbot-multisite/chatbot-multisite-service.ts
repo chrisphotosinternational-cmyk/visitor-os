@@ -257,13 +257,26 @@ export class MultiSiteChatbotService {
     }
 
     const recentHistory = await this.dependencies.conversations.listMessages(conversation.id);
+    const commercialIntent = hasStrongCommercialIntent(
+      input.content,
+      recentHistory.map((message) => ({
+        senderType: message.sender_type,
+        content: message.content
+      }))
+    );
+    const decisionMessage = commercialIntent
+      ? recentHistory
+          .filter((message) => message.sender_type === 'visitor')
+          .map((message) => message.content)
+          .join(' ')
+      : input.content;
     const knowledgeStartedAt = Date.now();
     const baseDecision = await this.dependencies.decisionEngine.decide({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
       siteId: conversation.site_id,
       activity: site?.business_config_id ?? 'default',
-      message: input.content,
+      message: decisionMessage,
       recentHistory: recentHistory.map((message) => ({
         senderType: message.sender_type,
         content: message.content
@@ -301,8 +314,18 @@ export class MultiSiteChatbotService {
     const businessConfig = await this.dependencies.decisionEngine.getBusinessConfig(
       site?.business_config_id
     );
-    const publicReply = clarifyPublicAssistantIdentity({
+    const replyWithConversionCta = appendConversionCta({
       reply: decision.reply,
+      visitorMessage: input.content,
+      history: recentHistory.map((message) => ({
+        senderType: message.sender_type,
+        content: message.content
+      })),
+      brandName: businessConfig.identity.name,
+      contact: businessConfig.contact
+    });
+    const publicReply = clarifyPublicAssistantIdentity({
+      reply: replyWithConversionCta,
       visitorMessage: input.content,
       brandName: businessConfig.identity.name,
       isFirstAssistantReply: !recentHistory.some((message) => message.sender_type === 'assistant')
@@ -616,6 +639,86 @@ export class MultiSiteChatbotService {
 
     throw new AppError('Widget site not found', { statusCode: 404, code: 'SITE_NOT_FOUND' });
   }
+}
+
+function appendConversionCta(input: {
+  reply: string;
+  visitorMessage: string;
+  history: Array<{ senderType: string; content: string }>;
+  brandName: string;
+  contact: {
+    whatsapp?: string | undefined;
+    phone?: string | undefined;
+    email?: string | undefined;
+  };
+}): string {
+  if (!hasStrongCommercialIntent(input.visitorMessage, input.history)) return input.reply;
+  if (
+    input.history.some(
+      (message) => message.senderType === 'assistant' && hasContactCta(message.content)
+    )
+  ) {
+    return input.reply;
+  }
+  if (hasContactCta(input.reply)) return input.reply;
+  if (isUninformativeReply(input.reply)) return input.reply;
+
+  const channel = input.contact.whatsapp
+    ? ` sur WhatsApp : ${input.contact.whatsapp}`
+    : input.contact.phone
+      ? ` par téléphone : ${input.contact.phone}`
+      : input.contact.email
+        ? ` par e-mail : ${input.contact.email}`
+        : '';
+  return `${input.reply.trim()} Si vous souhaitez avancer, vous pouvez contacter directement ${input.brandName}${channel}.`;
+}
+
+function hasStrongCommercialIntent(
+  visitorMessage: string,
+  history: Array<{ senderType: string; content: string }>
+): boolean {
+  const current = normalizeIdentityText(visitorMessage);
+  const asksHowToBook = /\b(?:comment|comment faire pour) (?:reserv\w*|prendre rendez vous)\b/.test(
+    current
+  );
+  if (
+    !asksHowToBook &&
+    /\b(?:je veux reserv\w*|souhaite reserv\w*|book\w*|prendre rendez vous|rdv|devis|disponib\w*|parler a|contacter|contact direct|appeler|telephone|whatsapp|e mail|email|pret a avancer|souhaite avancer|veux avancer)\b/.test(
+      current
+    )
+  ) {
+    return true;
+  }
+  if (/\b(?:projet concret|projet (?:photo|video)|shooting (?:photo|video))\b/.test(current)) {
+    return true;
+  }
+
+  const visitorTurns = history
+    .filter((message) => message.senderType === 'visitor')
+    .map((message) => normalizeIdentityText(message.content));
+  const combined = [...visitorTurns, current].join(' ');
+  const hasProject = /\b(?:portrait|shooting|studio|photo|video|projet)\b/.test(combined);
+  const hasTravel = /\b(?:deplac\w*|venir|intervenir)\b/.test(combined);
+  const hasPlace =
+    /\b(?:a|sur|vers) [a-z]{3,}\b/.test(current) ||
+    /\b(?:lyon|paris|ville|deplacement)\b/.test(combined);
+  const hasDate =
+    /\b(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|\d{1,2})\b/.test(
+      combined
+    );
+  return (hasProject || hasTravel) && visitorTurns.length >= 2 && (hasPlace || hasDate);
+}
+
+function hasContactCta(value: string): boolean {
+  return /(?:contacter|parler (?:directement )?a|whatsapp|telephone|e-mail|email)/i.test(
+    normalizeIdentityText(value)
+  );
+}
+
+function isUninformativeReply(value: string): boolean {
+  return /(?:information (?:est |reste )?(?:absente|indisponible)|(?:n ai|n avons|ne dispose|ne disposons|pas encore) (?:pas )?(?:encore )?(?:de )?(?:cette |l )?information)/i.test(
+    normalizeIdentityText(value)
+  );
 }
 
 function clarifyPublicAssistantIdentity(input: {
