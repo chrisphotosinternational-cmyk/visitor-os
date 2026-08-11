@@ -279,8 +279,9 @@ export function createDecisionEngine(options: {
         citations,
         kmsPromptContext.sources.length
       );
+      const fidelityCheckFailed = debugState.unsupportedInformationAlert !== null;
 
-      if (aiResult.confidence >= AI_MIN_CONFIDENCE) {
+      if (aiResult.confidence >= AI_MIN_CONFIDENCE && !fidelityCheckFailed) {
         return withDebug(
           withProcessingTime(
             {
@@ -310,7 +311,9 @@ export function createDecisionEngine(options: {
             source: 'fallback',
             confidence: 0.25,
             shouldEscalate: true,
-            reason: 'low_confidence_fallback',
+            reason: fidelityCheckFailed
+              ? 'grounding_fidelity_fallback'
+              : 'low_confidence_fallback',
             aiEvent: toAIEvent(aiResult),
             usedChunkIds,
             usedDocumentIds,

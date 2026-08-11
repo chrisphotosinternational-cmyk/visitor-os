@@ -92,7 +92,7 @@ describe('Multi-site chatbot service', () => {
       content: 'Combien de photos sont livrées après une séance ?'
     });
 
-    assert.equal(response.source, 'knowledge_engine');
+    assert.equal(response.source, 'knowledge_search');
     assert.match(response.reply, /25 photos retouchées/);
     assert.equal(response.matchedItemId, 'kms-document-site-a');
     assert.deepEqual(fixture.calls.decisionScopes, [{ organizationId: ORG_A, siteId: SITE_A }]);
@@ -228,6 +228,57 @@ describe('Multi-site chatbot service', () => {
     assert.equal(response.reply, 'Je transmets votre demande.');
   });
 
+  it('always uses the Decision Engine instead of legacy direct KMS or site QA answers', async () => {
+    const fixture = createChatbotFixture({
+      decisionResult: {
+        reply: 'Réponse grounded du Decision Engine. [SOURCE 1]',
+        source: 'ai',
+        confidence: 0.82,
+        shouldEscalate: false,
+        processingTimeMs: 4,
+        reason: 'mock:grounded'
+      },
+      legacyKnowledgeReply: 'Ancienne réponse KMS directe.',
+      legacyQaReply: 'Ancienne réponse QA directe.'
+    });
+
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Question couverte par plusieurs anciens chemins'
+    });
+
+    assert.equal(response.reply, 'Réponse grounded du Decision Engine. [SOURCE 1]');
+    assert.equal(response.source, 'ai');
+    assert.equal(fixture.calls.legacyKnowledgeCalls, 0);
+    assert.equal(fixture.calls.legacyQaCalls, 0);
+    assert.equal(fixture.calls.decisionScopes.length, 1);
+  });
+
+  it('never lets the Reasoning Engine replace a valid grounded decision', async () => {
+    const fixture = createChatbotFixture({
+      decisionResult: {
+        reply: 'Les offres grounded sont à 190 € et 390 €. [SOURCE 1] [SOURCE 2]',
+        source: 'ai',
+        confidence: 0.84,
+        shouldEscalate: false,
+        processingTimeMs: 5,
+        reason: 'mock:grounded'
+      },
+      withReasoning: true,
+      reasoningReply: 'Réponse Reasoning incorrecte à 999 €.'
+    });
+
+    const response = await fixture.chatbot.sendMessage({
+      conversationId: CONVERSATION_A,
+      content: 'Quels sont tous les tarifs ?'
+    });
+
+    assert.match(response.reply, /190 €/);
+    assert.match(response.reply, /390 €/);
+    assert.doesNotMatch(response.reply, /999/);
+    assert.equal(response.source, 'ai');
+  });
+
   it('rejects inactive or unknown public sites', async () => {
     const fixture = createChatbotFixture({ siteEnabled: false });
 
@@ -273,6 +324,9 @@ function createChatbotFixture(options?: {
   conversation?: Partial<typeof defaultConversation>;
   decisionResult?: DecisionResultFixture;
   withReasoning?: boolean;
+  reasoningReply?: string;
+  legacyKnowledgeReply?: string;
+  legacyQaReply?: string;
 }) {
   const site = {
     ...defaultSite,
@@ -295,7 +349,9 @@ function createChatbotFixture(options?: {
     decisionScopes: [] as Array<{ organizationId: string; siteId: string }>,
     decisionEvents: [] as Array<{ source: string }>,
     crmProspects: [] as string[],
-    linkedProspectId: null as string | null
+    linkedProspectId: null as string | null,
+    legacyKnowledgeCalls: 0,
+    legacyQaCalls: 0
   };
 
   const conversations = {
@@ -473,6 +529,7 @@ function createChatbotFixture(options?: {
           intent_confidence: 0.8,
           selected_knowledge_item_id: input.knowledgeAnswer?.matchedItemId ?? null,
           response_text:
+            options?.reasoningReply ??
             input.knowledgeAnswer?.reply ??
             "Je n'ai pas encore cette information precise. Je peux vous aider a reformuler ou transmettre la demande.",
           response_type: input.knowledgeAnswer?.source ?? 'fallback',
@@ -502,6 +559,32 @@ function createChatbotFixture(options?: {
       crm,
       decisionEngine,
       notificationEngine,
+      knowledgeEngine: {
+        answerQuestion: async () => {
+          calls.legacyKnowledgeCalls += 1;
+          return options?.legacyKnowledgeReply
+            ? {
+                reply: options.legacyKnowledgeReply,
+                source: 'knowledge_engine',
+                confidence: 0.99,
+                matchedItemId: 'legacy-kms',
+                reason: 'legacy_kms'
+              }
+            : null;
+        },
+        enhancedUnanswered: async () => undefined
+      } as never,
+      production: {
+        assertDomainAllowed: () => undefined,
+        widgetSettings: () => undefined,
+        shouldPromptLeadCapture: async () => false,
+        findQaAnswer: async () => {
+          calls.legacyQaCalls += 1;
+          return options?.legacyQaReply
+            ? { id: 'legacy-qa', answer: options.legacyQaReply, priority: 100, category: 'legacy' }
+            : null;
+        }
+      } as never,
       ...(reasoningEngine ? { reasoningEngine: reasoningEngine as never } : {})
     })
   };

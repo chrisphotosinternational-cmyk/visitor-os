@@ -258,7 +258,7 @@ export class MultiSiteChatbotService {
 
     const recentHistory = await this.dependencies.conversations.listMessages(conversation.id);
     const knowledgeStartedAt = Date.now();
-    const baseDecision = await this.decideWithSiteKnowledge({
+    const baseDecision = await this.dependencies.decisionEngine.decide({
       organizationId: conversation.organization_id,
       conversationId: conversation.id,
       siteId: conversation.site_id,
@@ -289,19 +289,13 @@ export class MultiSiteChatbotService {
         })
       : null;
     const reasoningTimeMs = Date.now() - reasoningStartedAt;
-    const preserveBaseDecision = ['ai', 'human_escalation'].includes(baseDecision.source);
     const decision = reasoning
       ? {
           ...baseDecision,
-          reply: preserveBaseDecision ? baseDecision.reply : reasoning.response_text,
-          source: preserveBaseDecision ? baseDecision.source : reasoning.response_type,
-          confidence: preserveBaseDecision ? baseDecision.confidence : reasoning.confidence_score,
           shouldEscalate:
             baseDecision.shouldEscalate || reasoning.next_best_action === 'escalate_to_admin',
-          matchedItemId: preserveBaseDecision
-            ? baseDecision.matchedItemId
-            : (reasoning.selected_knowledge_item_id ?? baseDecision.matchedItemId),
-          reason: preserveBaseDecision ? baseDecision.reason : reasoning.detected_intent
+          matchedItemId: baseDecision.matchedItemId,
+          reason: baseDecision.reason
         }
       : baseDecision;
 
@@ -540,48 +534,6 @@ export class MultiSiteChatbotService {
       ...captured,
       message: 'Merci, vos coordonnees ont bien ete transmises.'
     };
-  }
-
-  private async decideWithSiteKnowledge(
-    input: Parameters<DecisionEngine['decide']>[0]
-  ): Promise<DecisionEngineResult> {
-    const knowledge = await this.dependencies.knowledgeEngine?.answerQuestion({
-      organizationId: input.organizationId,
-      siteId: input.siteId,
-      question: input.message
-    });
-
-    if (knowledge) {
-      return {
-        reply: knowledge.reply,
-        source: 'knowledge_base',
-        confidence: knowledge.confidence,
-        shouldEscalate: false,
-        processingTimeMs: 1,
-        ...(knowledge.matchedItemId ? { matchedItemId: knowledge.matchedItemId } : {}),
-        reason: knowledge.reason
-      };
-    }
-
-    const qa = await this.dependencies.production?.findQaAnswer({
-      organizationId: input.organizationId,
-      siteId: input.siteId,
-      question: input.message
-    });
-
-    if (qa) {
-      return {
-        reply: qa.answer,
-        source: 'faq',
-        confidence: Math.min(0.99, 0.78 + qa.priority / 500),
-        shouldEscalate: false,
-        processingTimeMs: 1,
-        matchedItemId: qa.id,
-        reason: `site_qa:${qa.category}`
-      };
-    }
-
-    return this.dependencies.decisionEngine.decide(input);
   }
 
   private async recordRuntimeReview(input: {

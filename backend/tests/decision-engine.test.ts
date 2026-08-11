@@ -338,6 +338,39 @@ describe('grounded KMS generation', () => {
     assert.equal(result.debug?.injectedChunks.length, 0);
   });
 
+  it('falls back when a KMS-grounded reply omits its required citation', async () => {
+    const engine = groundedEngine(
+      [kmsCandidate('parking', 'Accès', 'Le parking privé est gratuit sur réservation.', 0.86)],
+      () => 'Le parking privé est gratuit sur réservation.'
+    );
+
+    const result = await engine.decide({
+      ...baseInput('Le parking est-il gratuit ?'),
+      debug: true
+    });
+
+    assert.equal(result.source, 'fallback');
+    assert.equal(result.reason, 'grounding_fidelity_fallback');
+    assert.match(result.debug?.unsupportedInformationAlert ?? '', /ne cite aucun/);
+  });
+
+  it('falls back when the model invents a price absent from the KMS context', async () => {
+    const engine = groundedEngine(
+      [kmsCandidate('portrait', 'Portrait', 'La formule portrait comprend dix photos.', 0.86)],
+      () => 'La formule portrait coûte 290 € et comprend dix photos. [SOURCE 1]'
+    );
+
+    const result = await engine.decide({
+      ...baseInput('Quel est le prix de la formule portrait ?'),
+      debug: true
+    });
+
+    assert.equal(result.source, 'fallback');
+    assert.equal(result.reason, 'grounding_fidelity_fallback');
+    assert.doesNotMatch(result.reply, /290/);
+    assert.match(result.debug?.unsupportedInformationAlert ?? '', /290/);
+  });
+
   it('covers every part of a multi-part question with separate cited chunks', async () => {
     const engine = groundedEngine(
       [
