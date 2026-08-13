@@ -396,9 +396,11 @@ The persistent A1/A2/B1 fixtures are **staging-only**. Seed and cleanup both req
 opt-in and a PostgreSQL URL; neither command prints the URL:
 
 ```bash
-export DATABASE_URL='postgresql://...staging...'
-export CHATBOT_SMOKE_ALLOW_PERSISTENT_FIXTURES=true
-pnpm smoke:chatbot-seed
+set -a
+source backend/.env
+source backend/.env.chatbot-smoke.example
+set +a
+pnpm --dir backend smoke:chatbot-seed
 ```
 
 The seed prints the three non-secret widget keys, origins, questions, and expected markers. They
@@ -406,14 +408,17 @@ also live in `.env.chatbot-smoke.example`; load that example (while retaining th
 `DATABASE_URL` and explicit opt-in), start the backend on port 3000, then run:
 
 ```bash
-pnpm smoke:chatbot-public
+pnpm --dir backend build
+pnpm --dir backend start
+# Dans un second terminal, rechargez les deux fichiers d'environnement ci-dessus, puis :
+pnpm --dir backend smoke:chatbot-public
 ```
 
 The public smoke creates persistent visitor, conversation, message, and prospect data. Remove
 only the reserved fixture sites and their site-scoped runtime data afterward with:
 
 ```bash
-pnpm smoke:chatbot-cleanup
+pnpm --dir backend smoke:chatbot-cleanup
 ```
 
 Use `TEST_DATABASE_URL` to enable the PostgreSQL seed/cleanup lifecycle test. Never point either

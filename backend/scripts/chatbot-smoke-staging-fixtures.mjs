@@ -57,7 +57,17 @@ export function assertPersistentFixtureGuard(environment) {
   if (environment[ALLOW_FLAG] !== 'true') {
     throw new Error(`${ALLOW_FLAG}=true is required (STAGING-ONLY persistent fixtures)`);
   }
-  if (!environment.DATABASE_URL?.trim()) throw new Error('DATABASE_URL is required');
+  const databaseUrl = environment.DATABASE_URL?.trim();
+  if (!databaseUrl) throw new Error('DATABASE_URL is required');
+  let parsed;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL URL');
+  }
+  if (!['postgres:', 'postgresql:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error('DATABASE_URL must be a valid PostgreSQL URL');
+  }
 }
 
 const documentId = (index) => `5a200000-0000-4000-8000-00000000000${index + 1}`;
@@ -166,6 +176,10 @@ async function assertReservedIdentitiesAvailable(client) {
 }
 
 export async function cleanupFixtures(client) {
+  // Refuse to touch dependent rows if any reserved UUID, slug, or public key is
+  // currently attached to a different identity. This check is intentionally done
+  // again at cleanup time: cleanup must also be safe when seed was never run.
+  await assertReservedIdentitiesAvailable(client);
   const ids = SMOKE_ORGANIZATIONS.map(({ id }) => id);
   const siteIds = SMOKE_SITES.map(({ id }) => id);
   const reservedSiteIdsSql = siteIds.map((id) => `'${id}'::uuid`).join(',');

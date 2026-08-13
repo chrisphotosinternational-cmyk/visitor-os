@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import pg from 'pg';
 import {
@@ -48,7 +50,34 @@ describe('chatbot smoke staging fixture manifest', () => {
       new RegExp(ALLOW_FLAG)
     );
     assert.throws(() => assertPersistentFixtureGuard({ [ALLOW_FLAG]: 'true' }), /DATABASE_URL/);
+    assert.throws(
+      () =>
+        assertPersistentFixtureGuard({
+          [ALLOW_FLAG]: 'true',
+          DATABASE_URL: 'https://not-postgresql.example'
+        }),
+      /valid PostgreSQL URL/
+    );
   });
+
+  for (const command of ['seed-chatbot-smoke-staging.mjs', 'cleanup-chatbot-smoke-staging.mjs']) {
+    it(`${command} refuses to run without the explicit opt-in`, () => {
+      const result = spawnSync(
+        process.execPath,
+        [fileURLToPath(new URL(command, import.meta.url))],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            DATABASE_URL: 'postgresql://example.invalid/staging',
+            [ALLOW_FLAG]: ''
+          }
+        }
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, new RegExp(`${ALLOW_FLAG}=true is required`));
+    });
+  }
 });
 
 describe('chatbot smoke staging PostgreSQL lifecycle', () => {
@@ -111,5 +140,24 @@ describe('chatbot smoke cleanup targeting', () => {
     );
     assert.match(statements.join('\n'), /site_id = any/);
     assert.match(statements.join('\n'), /delete from messages where conversation_id/);
+  });
+
+  it('aborts before deletion when a reserved identity belongs to another row', async () => {
+    const statements = [];
+    const client = {
+      async query(sql) {
+        statements.push(sql);
+        if (sql.includes('select id::text, slug from organizations')) {
+          return { rows: [{ id: SMOKE_ORGANIZATIONS[0].id, slug: 'unrelated-organization' }] };
+        }
+        return { rows: [] };
+      }
+    };
+
+    await assert.rejects(() => cleanupFixtures(client), /identity collision/);
+    assert.equal(
+      statements.some((sql) => /^\s*delete\s/i.test(sql)),
+      false
+    );
   });
 });
