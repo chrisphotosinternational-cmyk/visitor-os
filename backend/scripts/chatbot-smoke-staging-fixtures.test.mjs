@@ -44,19 +44,38 @@ describe('chatbot smoke staging fixture manifest', () => {
     assert.doesNotMatch(b1.content, /SMOKE-(?:SITE-)?A[12]|SMOKE-ORG-A/);
   });
 
-  it('requires the explicit guard and DATABASE_URL', () => {
-    assert.throws(
-      () => assertPersistentFixtureGuard({ DATABASE_URL: 'postgres://example' }),
-      new RegExp(ALLOW_FLAG)
-    );
-    assert.throws(() => assertPersistentFixtureGuard({ [ALLOW_FLAG]: 'true' }), /DATABASE_URL/);
-    assert.throws(
-      () =>
-        assertPersistentFixtureGuard({
-          [ALLOW_FLAG]: 'true',
-          DATABASE_URL: 'https://not-postgresql.example'
-        }),
-      /valid PostgreSQL URL/
+  it('requires the opt-in value to be exactly true', () => {
+    for (const value of [undefined, '', 'TRUE', '1', ' true ']) {
+      assert.throws(
+        () =>
+          assertPersistentFixtureGuard({
+            [ALLOW_FLAG]: value,
+            DATABASE_URL: 'postgresql://staging.example/visitor_os'
+          }),
+        new RegExp(ALLOW_FLAG)
+      );
+    }
+  });
+
+  it('requires a valid PostgreSQL DATABASE_URL with a hostname', () => {
+    for (const databaseUrl of [
+      undefined,
+      'not a URL',
+      'http://staging.example/visitor_os',
+      'mysql://staging.example/visitor_os',
+      'postgresql:///visitor_os'
+    ]) {
+      assert.throws(
+        () => assertPersistentFixtureGuard({ [ALLOW_FLAG]: 'true', DATABASE_URL: databaseUrl }),
+        /DATABASE_URL/
+      );
+    }
+
+    assert.doesNotThrow(() =>
+      assertPersistentFixtureGuard({
+        [ALLOW_FLAG]: 'true',
+        DATABASE_URL: 'postgresql://user:secret@staging.example:5432/visitor_os'
+      })
     );
   });
 
@@ -140,9 +159,11 @@ describe('chatbot smoke cleanup targeting', () => {
     );
     assert.match(statements.join('\n'), /site_id = any/);
     assert.match(statements.join('\n'), /delete from messages where conversation_id/);
+    assert.match(statements.join('\n'), /where \(id, slug\) in/);
+    assert.doesNotMatch(statements.join('\n'), /id = any\([^)]*\) and slug = any/);
   });
 
-  it('aborts before deletion when a reserved identity belongs to another row', async () => {
+  it('blocks an organization collision before every destructive statement', async () => {
     const statements = [];
     const client = {
       async query(sql) {
@@ -155,9 +176,47 @@ describe('chatbot smoke cleanup targeting', () => {
     };
 
     await assert.rejects(() => cleanupFixtures(client), /identity collision/);
-    assert.equal(
-      statements.some((sql) => /^\s*delete\s/i.test(sql)),
-      false
-    );
+    assert.equal(statements.length, 1);
+    assert.equal(statements.some(isDestructiveStatement), false);
   });
+
+  for (const collision of [
+    { label: 'id', row: { id: SMOKE_SITES[0].id, slug: 'unrelated', widget_public_key: 'other' } },
+    {
+      label: 'slug',
+      row: {
+        id: '5affffff-0000-4000-8000-000000000002',
+        slug: SMOKE_SITES[0].slug,
+        widget_public_key: 'other'
+      }
+    },
+    {
+      label: 'widget_public_key',
+      row: {
+        id: '5affffff-0000-4000-8000-000000000003',
+        slug: 'unrelated',
+        widget_public_key: SMOKE_SITES[0].key
+      }
+    }
+  ]) {
+    it(`blocks a site ${collision.label} collision before every destructive statement`, async () => {
+      const statements = [];
+      const client = {
+        async query(sql) {
+          statements.push(sql);
+          return sql.includes('select id::text, slug, widget_public_key from sites')
+            ? { rows: [collision.row] }
+            : { rows: [] };
+        }
+      };
+
+      await assert.rejects(() => cleanupFixtures(client), /site identity collision/);
+      assert.equal(statements.length, 2);
+      assert.equal(statements.some(isDestructiveStatement), false);
+    });
+  }
 });
+
+function isDestructiveStatement(sql) {
+  return /^\s*(?:delete|truncate|do\s+\$\$)/i.test(sql);
+}

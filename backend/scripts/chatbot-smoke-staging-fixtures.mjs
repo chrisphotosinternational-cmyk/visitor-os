@@ -180,7 +180,6 @@ export async function cleanupFixtures(client) {
   // currently attached to a different identity. This check is intentionally done
   // again at cleanup time: cleanup must also be safe when seed was never run.
   await assertReservedIdentitiesAvailable(client);
-  const ids = SMOKE_ORGANIZATIONS.map(({ id }) => id);
   const siteIds = SMOKE_SITES.map(({ id }) => id);
   const reservedSiteIdsSql = siteIds.map((id) => `'${id}'::uuid`).join(',');
 
@@ -218,14 +217,20 @@ export async function cleanupFixtures(client) {
         end loop;
       end $$`
   );
-  await client.query('delete from sites where id = any($1) and slug = any($2)', [
-    SMOKE_SITES.map(({ id }) => id),
-    SMOKE_SITES.map(({ slug }) => slug)
-  ]);
-  await client.query('delete from organizations where id = any($1) and slug = any($2)', [
-    ids,
-    SMOKE_ORGANIZATIONS.map(({ slug }) => slug)
-  ]);
+  // Row-value comparison preserves each reserved id ↔ slug association. Separate
+  // ANY predicates would only prove independent membership in both sets.
+  await client.query(
+    `delete from sites where (id, slug) in (
+      select fixture.id, fixture.slug from unnest($1::uuid[], $2::text[]) fixture(id, slug)
+    )`,
+    [SMOKE_SITES.map(({ id }) => id), SMOKE_SITES.map(({ slug }) => slug)]
+  );
+  await client.query(
+    `delete from organizations where (id, slug) in (
+      select fixture.id, fixture.slug from unnest($1::uuid[], $2::text[]) fixture(id, slug)
+    )`,
+    [SMOKE_ORGANIZATIONS.map(({ id }) => id), SMOKE_ORGANIZATIONS.map(({ slug }) => slug)]
+  );
 }
 
 export function smokeEnvironmentLines() {
