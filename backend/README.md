@@ -390,6 +390,40 @@ Fastify/Pino logging is configured through `LOG_LEVEL`.
 
 Future integrations such as Sentry must not replace business audit logs or privacy audit logs.
 
+## Staging chatbot smoke fixtures
+
+The persistent A1/A2/B1 fixtures are **staging-only**. Seed and cleanup both require an explicit
+opt-in and a PostgreSQL URL; neither command prints the URL:
+
+```bash
+set -a
+source backend/.env
+source backend/.env.chatbot-smoke.example
+set +a
+pnpm --dir backend smoke:chatbot-seed
+```
+
+The seed prints the three non-secret widget keys, origins, questions, and expected markers. They
+also live in `.env.chatbot-smoke.example`; load that example (while retaining the staging
+`DATABASE_URL` and explicit opt-in), start the backend on port 3000, then run:
+
+```bash
+pnpm --dir backend build
+pnpm --dir backend start
+# Dans un second terminal, rechargez les deux fichiers d'environnement ci-dessus, puis :
+pnpm --dir backend smoke:chatbot-public
+```
+
+The public smoke creates persistent visitor, conversation, message, and prospect data. Remove
+only the reserved fixture sites and their site-scoped runtime data afterward with:
+
+```bash
+pnpm --dir backend smoke:chatbot-cleanup
+```
+
+Use `TEST_DATABASE_URL` to enable the PostgreSQL seed/cleanup lifecycle test. Never point either
+persistent-fixture command or the public smoke command at a client production database.
+
 ## Error Handling
 
 The backend includes a global error handler that returns stable error payloads and logs internal details server-side.
