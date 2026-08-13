@@ -181,6 +181,7 @@ class SequencedBenchmarkProvider implements AIProvider {
   }
 
   generateReply(input: AIProviderRequest): Promise<AIProviderResult> {
+    if (!input.conversationId) throw new Error('A conversation is required for benchmark plans');
     const scenarioId = this.scenarioByConversation.get(input.conversationId);
     if (!scenarioId) throw new Error(`No deterministic plan for ${input.conversationId}`);
     const turn = this.turnByConversation.get(input.conversationId) ?? 0;

@@ -22,7 +22,7 @@ export type DecisionSource =
 
 export type DecisionEngineInput = {
   organizationId: string;
-  conversationId: string;
+  conversationId?: string;
   siteId: string;
   activity: string;
   message: string;
@@ -33,6 +33,8 @@ export type DecisionEngineInput = {
   language?: string;
   pageUrl?: string | null;
   debug?: boolean;
+  /** Execute the complete decision path without persistent side effects. */
+  persist?: boolean;
 };
 
 export type ChatbotDebugTrace = {
@@ -233,7 +235,8 @@ export function createDecisionEngine(options: {
       const aiInput = {
         organizationId: input.organizationId,
         siteId: input.siteId,
-        conversationId: input.conversationId,
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+        persist: input.persist !== false,
         question: input.message,
         messages: input.recentHistory.map((message) => ({
           role: message.senderType === 'assistant' ? ('assistant' as const) : ('user' as const),

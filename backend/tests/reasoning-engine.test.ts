@@ -68,10 +68,31 @@ describe('Reasoning Engine', () => {
     assert.equal(result.next_best_action, 'escalate_to_admin');
     assert.equal(database.updatedConversationStatus, 'in_review');
   });
+
+  it('runs chatbot debug reasoning without conversation persistence', async () => {
+    const writes: string[] = [];
+    const database = fakeReasoningDatabase({ onWrite: (sql) => writes.push(sql) });
+    const reasoning = new ReasoningEngineService(database);
+
+    const result = await reasoning.test({
+      organizationId: ORG,
+      siteId: SITE,
+      message: 'Avez-vous des disponibilites demain pour reserver ?'
+    });
+
+    assert.equal(result.detected_intent, 'Disponibilites');
+    assert.ok(result.reasoning_trace);
+    assert.deepEqual(writes, []);
+  });
 });
 
 function fakeReasoningDatabase(
-  options: { leadReadinessScore?: number; noKnowledge?: boolean; noIntents?: boolean } = {}
+  options: {
+    leadReadinessScore?: number;
+    noKnowledge?: boolean;
+    noIntents?: boolean;
+    onWrite?: (sql: string) => void;
+  } = {}
 ) {
   const context: Record<string, unknown> = {
     id: 'context-1',
@@ -92,6 +113,7 @@ function fakeReasoningDatabase(
       values: unknown[] = []
     ): Promise<pg.QueryResult<T>> {
       const sql = text.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (/^(insert|update|delete) /.test(sql)) options.onWrite?.(sql);
 
       if (sql.startsWith('select * from visitor_conversation_context')) {
         return result<T>([context]);
