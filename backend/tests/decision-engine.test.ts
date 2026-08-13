@@ -9,8 +9,65 @@ import type {
 } from '../src/modules/business-config/configuration-loader.js';
 import { createDecisionEngine } from '../src/modules/decision-engine/decision-engine.js';
 import { MockAIProvider } from '../src/modules/ai/mock-ai-provider.js';
+import { createBusinessConfigEngine } from '../src/modules/business-config/configuration-loader.js';
 
 describe('decision engine', () => {
+  it('routes pricing through KMS with the dedicated smoke configuration', async () => {
+    let searches = 0;
+    const engine = createDecisionEngine({
+      businessConfigEngine: createBusinessConfigEngine({ configDirectory: '../configs' }),
+      knowledgeSearch: {
+        async search() {
+          searches += 1;
+          return [
+            kmsCandidate(
+              'pricing-grounded',
+              'Tarification synthétique',
+              'Le tarif commence à FACT-PRICE-420, la durée est FACT-DURATION-3H et la livraison coûte FACT-DELIVERY-200.',
+              0.9
+            )
+          ];
+        }
+      },
+      aiProvider: new MockAIProvider()
+    });
+    const result = await engine.decide({
+      ...baseInput('Quel est le tarif, la durée et le coût de livraison synthétiques ?'),
+      activity: 'chatbot-smoke-staging'
+    });
+    assert.equal(searches, 1);
+    assert.equal(result.source, 'ai');
+    assert.notEqual(result.reason, 'pricing_requires_human_confirmation');
+    for (const fact of ['FACT-PRICE-420', 'FACT-DURATION-3H', 'FACT-DELIVERY-200'])
+      assert.match(result.reply, new RegExp(fact));
+    assert.deepEqual(result.usedChunkIds, ['pricing-grounded']);
+  });
+
+  it('falls back when an injected source shares only one generic token', async () => {
+    const engine = createDecisionEngine({
+      businessConfigEngine: createBusinessConfigEngine({ configDirectory: '../configs' }),
+      knowledgeSearch: {
+        async search() {
+          return [
+            kmsCandidate(
+              'weak-generic-match',
+              'Documentation',
+              'La documentation de validation décrit uniquement le parking.',
+              0.3
+            )
+          ];
+        }
+      },
+      aiProvider: new MockAIProvider()
+    });
+    const result = await engine.decide({
+      ...baseInput('Quel est le code technique de validation ?'),
+      activity: 'chatbot-smoke-staging'
+    });
+    assert.equal(result.source, 'fallback');
+    assert.deepEqual(result.usedChunkIds, []);
+    assert.deepEqual(result.citations, []);
+  });
   it('accepts a grounded reply from the real mock provider through the fidelity check', async () => {
     const engine = createDecisionEngine({
       businessConfigEngine: createMemoryBusinessConfigEngine(testConfig),

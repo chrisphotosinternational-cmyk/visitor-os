@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import pg from 'pg';
 import {
   ALLOW_FLAG,
+  SMOKE_BUSINESS_CONFIG_ID,
   SMOKE_ORGANIZATIONS,
   SMOKE_SITES,
   assertPersistentFixtureGuard,
@@ -65,12 +66,31 @@ describe('chatbot smoke staging fixture manifest', () => {
   }
 
   it('has exactly two isolated organizations and three deterministic sites', () => {
+    assert.equal(SMOKE_BUSINESS_CONFIG_ID, 'chatbot-smoke-staging');
     assert.equal(SMOKE_ORGANIZATIONS.length, 2);
     assert.equal(SMOKE_SITES.length, 3);
     assert.equal(SMOKE_SITES[0].organizationId, SMOKE_SITES[1].organizationId);
     assert.notEqual(SMOKE_SITES[0].organizationId, SMOKE_SITES[2].organizationId);
     assert.equal(new Set(SMOKE_SITES.map(({ key }) => key)).size, 3);
     assert.equal(new Set(SMOKE_SITES.map(({ origin }) => origin)).size, 3);
+  });
+
+  it('assigns and restores the dedicated business configuration on every seed', async () => {
+    const statements = [];
+    const client = {
+      async query(sql, values = []) {
+        statements.push({ sql, values });
+        return { rows: [] };
+      }
+    };
+    await seedFixtures(client);
+    const siteInserts = statements.filter(({ sql }) => /insert into sites/i.test(sql));
+    assert.equal(siteInserts.length, 3);
+    for (const { sql, values } of siteInserts) {
+      assert.match(sql, /business_config_id/);
+      assert.match(sql, /business_config_id=excluded\.business_config_id/);
+      assert.equal(values[5], SMOKE_BUSINESS_CONFIG_ID);
+    }
   });
 
   it('contains required knowledge without cross-organization leakage', () => {

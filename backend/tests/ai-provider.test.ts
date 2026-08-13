@@ -63,6 +63,22 @@ describe('AI Provider Engine', () => {
     assert.doesNotMatch(result.reply, /\[SOURCE \d+\]/);
   });
 
+  it('rejects a source that shares only one weak generic token with the question', async () => {
+    const result = await new MockAIProvider().generateReply({
+      ...baseRequest(),
+      question: 'Quel est le code technique de validation ?',
+      systemPrompt: kmsPrompt([
+        {
+          number: 1,
+          content: 'La documentation de validation décrit uniquement le parking.',
+          score: 0.22
+        }
+      ])
+    });
+    assert.match(result.reply, /pas encore une reponse locale certaine/);
+    assert.doesNotMatch(result.reply, /\[SOURCE \d+\]/);
+  });
+
   it('calls the OpenAI provider through its abstraction', async () => {
     const provider = new OpenAIProvider(
       'test-key',
@@ -151,11 +167,11 @@ function baseRequest() {
   };
 }
 
-function kmsPrompt(sources: Array<{ number: number; content: string }>): string {
+function kmsPrompt(sources: Array<{ number: number; content: string; score?: number }>): string {
   return `Instructions\n\nKMS CONTEXT\n\n${sources
     .map(
-      ({ number, content }) =>
-        `[SOURCE ${number}]\nchunkId: chunk-${number}\ndocumentId: document-${number}\ntitle: Test\ncategory: FAQ\nsource: test\nscore: 0.8\nposition: 0\ncontent:\n${content}`
+      ({ number, content, score = 0.8 }) =>
+        `[SOURCE ${number}]\nchunkId: chunk-${number}\ndocumentId: document-${number}\ntitle: Test\ncategory: FAQ\nsource: test\nscore: ${score}\nposition: 0\ncontent:\n${content}`
     )
     .join('\n\n')}`;
 }

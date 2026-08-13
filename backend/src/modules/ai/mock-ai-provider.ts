@@ -66,7 +66,7 @@ function buildMockReply(input: AIProviderRequest): string {
   ].join(' ');
 }
 
-type GroundedSource = { number: number; content: string };
+type GroundedSource = { number: number; content: string; score: number };
 
 const retrievalStopWords = new Set([
   'alors',
@@ -100,8 +100,12 @@ function selectGroundedSources(systemPrompt: string, question: string): Grounded
 
   return sources.filter((source) => {
     const contentTokens = meaningfulTokens(source.content);
-    return [...questionTokens].some((questionToken) =>
+    const matchedQuestionTokens = [...questionTokens].filter((questionToken) =>
       [...contentTokens].some((contentToken) => tokensMatch(questionToken, contentToken))
+    );
+    return (
+      matchedQuestionTokens.length >= 2 ||
+      (matchedQuestionTokens.length === 1 && source.score >= 0.45)
     );
   });
 }
@@ -124,7 +128,8 @@ function parseKmsSources(systemPrompt: string): GroundedSource[] {
   ].flatMap((match) => {
     const contentMarker = match[2]?.indexOf('content:\n') ?? -1;
     const content = contentMarker < 0 ? '' : match[2]!.slice(contentMarker + 9).trim();
-    return content ? [{ number: Number(match[1]), content }] : [];
+    const score = Number(match[2]?.match(/^score:\s*([0-9.]+)$/m)?.[1] ?? 0);
+    return content ? [{ number: Number(match[1]), content, score }] : [];
   });
 }
 

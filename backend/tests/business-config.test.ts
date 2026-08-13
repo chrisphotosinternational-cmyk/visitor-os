@@ -9,6 +9,15 @@ import { createBusinessConfigEngine } from '../src/modules/business-config/confi
 import { buildSystemPrompt } from '../src/modules/business-config/prompt-builder.js';
 
 describe('business configuration engine', () => {
+  it('loads the neutral staging smoke configuration from the real config directory', async () => {
+    const engine = createBusinessConfigEngine({ configDirectory: '../configs' });
+    await engine.loadAll();
+    const config = await engine.getConfig('chatbot-smoke-staging');
+    assert.equal(config.id, 'chatbot-smoke-staging');
+    assert.deepEqual(config.rules, []);
+    assert.deepEqual(config.faq, []);
+    assert.deepEqual(config.knowledgeBase, []);
+  });
   it('loads and validates JSON configurations', async () => {
     const directory = await createTempConfigDirectory();
 

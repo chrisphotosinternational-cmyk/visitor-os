@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export const ALLOW_FLAG = 'CHATBOT_SMOKE_ALLOW_PERSISTENT_FIXTURES';
+export const SMOKE_BUSINESS_CONFIG_ID = 'chatbot-smoke-staging';
 export const SMOKE_ORGANIZATIONS = [
   {
     id: '5a000000-0000-4000-8000-000000000001',
@@ -85,12 +86,20 @@ export async function seedFixtures(client) {
   for (const [index, site] of SMOKE_SITES.entries()) {
     await client.query(
       `insert into sites
-      (id, organization_id, name, slug, domain, widget_public_key, activity, status, widget_enabled, allowed_domains)
-      values ($1,$2,$3,$4,'localhost',$5,'chatbot-smoke-fixture','active',true,$6)
+      (id, organization_id, name, slug, domain, widget_public_key, activity, business_config_id, status, widget_enabled, allowed_domains)
+      values ($1,$2,$3,$4,'localhost',$5,'chatbot-smoke-fixture',$6,'active',true,$7)
       on conflict (id) do update set organization_id=excluded.organization_id,name=excluded.name,slug=excluded.slug,
       domain=excluded.domain,widget_public_key=excluded.widget_public_key,activity=excluded.activity,status='active',
-      widget_enabled=true,allowed_domains=excluded.allowed_domains`,
-      [site.id, site.organizationId, site.name, site.slug, site.key, [site.origin]]
+      business_config_id=excluded.business_config_id,widget_enabled=true,allowed_domains=excluded.allowed_domains`,
+      [
+        site.id,
+        site.organizationId,
+        site.name,
+        site.slug,
+        site.key,
+        SMOKE_BUSINESS_CONFIG_ID,
+        [site.origin]
+      ]
     );
     const hash = createHash('sha256').update(site.content).digest('hex');
     await client.query(
