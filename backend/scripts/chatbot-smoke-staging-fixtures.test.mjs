@@ -13,6 +13,56 @@ import {
 } from './chatbot-smoke-staging-fixtures.mjs';
 
 describe('chatbot smoke staging fixture manifest', () => {
+  for (const shell of ['bash', 'zsh']) {
+    it(`loads .env.chatbot-smoke.example safely with ${shell}`, (context) => {
+      const availability = spawnSync(shell, ['--version'], { encoding: 'utf8' });
+      if (availability.error?.code === 'ENOENT') {
+        context.skip(`${shell} is not installed`);
+        return;
+      }
+
+      const environmentFile = fileURLToPath(
+        new URL('../.env.chatbot-smoke.example', import.meta.url)
+      );
+      const result = spawnSync(
+        shell,
+        ['-c', 'set -a; source "$1"; set +a; env -0', 'chatbot-smoke-env', environmentFile],
+        { encoding: 'utf8', env: {} }
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const loaded = Object.fromEntries(
+        result.stdout
+          .split('\0')
+          .filter(Boolean)
+          .map((entry) => {
+            const separator = entry.indexOf('=');
+            return [entry.slice(0, separator), entry.slice(separator + 1)];
+          })
+      );
+      assert.equal(loaded.CHATBOT_SMOKE_ALLOW_PERSISTENT_FIXTURES, 'true');
+      assert.equal(
+        loaded.CHATBOT_SMOKE_SIMPLE_QUESTION,
+        'Quelle est la réponse simple synthétique ?'
+      );
+      assert.equal(
+        loaded.CHATBOT_SMOKE_PRICING_EXPECT_JSON,
+        '["SMOKE-A1-PRICE-START-420","SMOKE-A1-PRICE-DURATION-3H","SMOKE-A1-PRICE-DELIVERY-200"]'
+      );
+      assert.equal(
+        loaded.CHATBOT_SMOKE_MULTIPART_QUESTION,
+        'Quels sont le check-in, le parking et le petit-déjeuner synthétiques ?'
+      );
+      assert.equal(
+        loaded.CHATBOT_SMOKE_MULTIPART_EXPECT_JSON,
+        '["SMOKE-A1-MULTI-CHECKIN-17H","SMOKE-A1-MULTI-PARKING-VIOLET","SMOKE-A1-MULTI-BREAKFAST-07H30"]'
+      );
+      assert.equal(
+        loaded.CHATBOT_SMOKE_MISSING_QUESTION,
+        'Quel est le code de la navette lunaire SMOKE-MISSING-NEBULA-999 ?'
+      );
+    });
+  }
+
   it('has exactly two isolated organizations and three deterministic sites', () => {
     assert.equal(SMOKE_ORGANIZATIONS.length, 2);
     assert.equal(SMOKE_SITES.length, 3);
