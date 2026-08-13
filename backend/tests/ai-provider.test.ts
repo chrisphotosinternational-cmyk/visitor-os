@@ -20,6 +20,49 @@ describe('AI Provider Engine', () => {
     assert.ok(result.outputTokens > 0);
   });
 
+  it('grounds a deterministic mock reply in one relevant KMS source', async () => {
+    const result = await new MockAIProvider().generateReply({
+      ...baseRequest(),
+      question: 'Le parking est-il gratuit ?',
+      systemPrompt: kmsPrompt([
+        { number: 1, content: 'Le parking privé est gratuit sur réservation.' }
+      ])
+    });
+
+    assert.equal(result.reply, 'Le parking privé est gratuit sur réservation. [SOURCE 1]');
+  });
+
+  it('uses every relevant source for a multipart question without inventing numbers', async () => {
+    const result = await new MockAIProvider().generateReply({
+      ...baseRequest(),
+      question: 'Quelle est la durée et combien de photos sont livrées ?',
+      systemPrompt: kmsPrompt([
+        { number: 1, content: 'La séance dure deux heures.' },
+        { number: 2, content: 'Douze photos sont livrées sous trois semaines.' },
+        { number: 3, content: 'Le parking est privé.' }
+      ])
+    });
+
+    assert.match(result.reply, /deux heures\. \[SOURCE 1\]/);
+    assert.match(result.reply, /Douze photos.*\[SOURCE 2\]/);
+    assert.doesNotMatch(result.reply, /parking|SOURCE 3/i);
+    assert.deepEqual(
+      result.reply.replace(/\[SOURCE \d+\]/g, '').match(/\d+(?:[.,]\d+)?/g) ?? [],
+      []
+    );
+  });
+
+  it('keeps the missing-information behavior when no relevant KMS source exists', async () => {
+    const result = await new MockAIProvider().generateReply({
+      ...baseRequest(),
+      question: 'Quel est le code de la navette lunaire ?',
+      systemPrompt: kmsPrompt([{ number: 1, content: 'Le parking est privé.' }])
+    });
+
+    assert.match(result.reply, /pas encore une reponse locale certaine/);
+    assert.doesNotMatch(result.reply, /\[SOURCE \d+\]/);
+  });
+
   it('calls the OpenAI provider through its abstraction', async () => {
     const provider = new OpenAIProvider(
       'test-key',
@@ -106,6 +149,15 @@ function baseRequest() {
     },
     configuration: defaultAIConfiguration
   };
+}
+
+function kmsPrompt(sources: Array<{ number: number; content: string }>): string {
+  return `Instructions\n\nKMS CONTEXT\n\n${sources
+    .map(
+      ({ number, content }) =>
+        `[SOURCE ${number}]\nchunkId: chunk-${number}\ndocumentId: document-${number}\ntitle: Test\ncategory: FAQ\nsource: test\nscore: 0.8\nposition: 0\ncontent:\n${content}`
+    )
+    .join('\n\n')}`;
 }
 
 function baseAppConfig(): AppConfig {

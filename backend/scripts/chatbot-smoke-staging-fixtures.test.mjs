@@ -9,7 +9,8 @@ import {
   SMOKE_SITES,
   assertPersistentFixtureGuard,
   cleanupFixtures,
-  seedFixtures
+  seedFixtures,
+  tokenizeSmokeKnowledge
 } from './chatbot-smoke-staging-fixtures.mjs';
 
 describe('chatbot smoke staging fixture manifest', () => {
@@ -92,6 +93,18 @@ describe('chatbot smoke staging fixture manifest', () => {
     assert.match(b1.content, /SMOKE-ORG-B-MARKER-SILVER/);
     assert.doesNotMatch(a1.content + a2.content, /SMOKE-(?:SITE-)?B1|SMOKE-ORG-B/);
     assert.doesNotMatch(b1.content, /SMOKE-(?:SITE-)?A[12]|SMOKE-ORG-A/);
+  });
+
+  it('normalizes fixture tokens exactly like KMS queries', () => {
+    assert.deepEqual(tokenizeSmokeKnowledge('Réponse reponse SYNTHÉTIQUE !'), [
+      'reponse',
+      'synthetique'
+    ]);
+    const queryTokens = tokenizeSmokeKnowledge('Quelle est la réponse simple synthétique ?');
+    const fixtureTokens = tokenizeSmokeKnowledge(SMOKE_SITES[0].content);
+    const overlap = queryTokens.filter((token) => fixtureTokens.includes(token));
+    assert.deepEqual(overlap, ['est', 'reponse', 'simple', 'synthetique']);
+    assert.equal(overlap.length * 0.22, 0.88);
   });
 
   it('requires the opt-in value to be exactly true', () => {

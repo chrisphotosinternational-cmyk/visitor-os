@@ -119,7 +119,7 @@ export async function seedFixtures(client) {
         site.organizationId,
         site.id,
         site.content,
-        site.content.toLowerCase().match(/[a-z0-9À-ÿ_-]+/g) ?? [],
+        tokenizeSmokeKnowledge(site.content),
         JSON.stringify({ fixture: 'chatbot-smoke-staging' })
       ]
     );
@@ -142,6 +142,24 @@ export async function seedFixtures(client) {
       ]
     );
   }
+}
+
+// Keep fixture indexing byte-for-byte equivalent to the canonical KMS tokenizer
+// in src/modules/kms/knowledge-indexer.ts. The direct Node scripts cannot import
+// TypeScript source, so the parity test guards this runtime boundary.
+export function tokenizeSmokeKnowledge(value) {
+  return [
+    ...new Set(
+      value
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3)
+    )
+  ];
 }
 
 async function assertReservedIdentitiesAvailable(client) {

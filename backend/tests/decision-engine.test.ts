@@ -8,8 +8,25 @@ import type {
   BusinessConfigSummary
 } from '../src/modules/business-config/configuration-loader.js';
 import { createDecisionEngine } from '../src/modules/decision-engine/decision-engine.js';
+import { MockAIProvider } from '../src/modules/ai/mock-ai-provider.js';
 
 describe('decision engine', () => {
+  it('accepts a grounded reply from the real mock provider through the fidelity check', async () => {
+    const engine = createDecisionEngine({
+      businessConfigEngine: createMemoryBusinessConfigEngine(testConfig),
+      knowledgeSearch: {
+        async search() {
+          return [kmsCandidate('parking-grounded', 'Accès', 'Le parking privé est gratuit.', 0.86)];
+        }
+      },
+      aiProvider: new MockAIProvider()
+    });
+    const result = await engine.decide(baseInput('Le parking privé est-il gratuit ?'));
+
+    assert.equal(result.source, 'ai');
+    assert.match(result.reply, /parking privé est gratuit.*\[SOURCE 1\]/);
+    assert.deepEqual(result.usedChunkIds, ['parking-grounded']);
+  });
   it('matches the parking FAQ', async () => {
     const result = await createTestDecisionEngine().decide(baseInput('Y a-t-il un parking ?'));
 
