@@ -286,6 +286,25 @@ describe('chatbot smoke cleanup targeting', () => {
     assert.equal(statements.some((sql) => /delete from organizations where/i.test(sql)), false);
   });
 
+  it('deletes only null-site CRM tags for the reserved smoke organizations', async () => {
+    const statements = [];
+    const client = {
+      async query(sql, values = []) {
+        statements.push({ sql, values });
+        return { rows: [] };
+      }
+    };
+
+    await cleanupFixtures(client);
+    const statement = statements.find(({ sql }) => /delete from crm_tags/i.test(sql));
+    assert.ok(statement);
+    assert.match(
+      statement.sql,
+      /delete from crm_tags where organization_id = any\(\$1\) and site_id is null/i
+    );
+    assert.deepEqual(statement.values, [SMOKE_ORGANIZATIONS.map(({ id }) => id)]);
+  });
+
   it('binds the reserved site UUID array outside the dynamic delete statement', async () => {
     const statements = [];
     const client = {

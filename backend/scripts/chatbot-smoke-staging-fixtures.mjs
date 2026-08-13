@@ -289,6 +289,14 @@ export async function cleanupFixtures(client) {
     )`,
     [SMOKE_SITES.map(({ id }) => id), SMOKE_SITES.map(({ slug }) => slug)]
   );
+
+  // The smoke organizations can accumulate organization-level CRM tags with no site_id.
+  // Delete only those null-site rows for the two reserved smoke organization UUIDs.
+  await client.query(
+    `delete from crm_tags where organization_id = any($1) and site_id is null`,
+    [SMOKE_ORGANIZATIONS.map(({ id }) => id)]
+  );
+
   await client.query(
     `delete from organizations where (id, slug) in (
       select fixture.id, fixture.slug from unnest($1::uuid[], $2::text[]) fixture(id, slug)
