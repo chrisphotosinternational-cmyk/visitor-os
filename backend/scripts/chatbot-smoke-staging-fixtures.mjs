@@ -208,7 +208,7 @@ export async function cleanupFixtures(client) {
   // again at cleanup time: cleanup must also be safe when seed was never run.
   await assertReservedIdentitiesAvailable(client);
   const siteIds = SMOKE_SITES.map(({ id }) => id);
-  const reservedSiteIdsSql = siteIds.map((id) => `'${id}'::uuid`).join(',');
+  const reservedSiteIdsArraySql = siteIds.map((id) => `'${id}'::uuid`).join(',');
 
   // These two tables do not carry site_id and do not cascade from conversations.
   await client.query(
@@ -227,7 +227,11 @@ export async function cleanupFixtures(client) {
   // organization_id as a broad deletion boundary.
   await client.query(
     `do $$
-      declare t record; changed integer; total_changed integer := 1;
+      declare
+        t record;
+        changed integer;
+        total_changed integer := 1;
+        reserved_site_ids uuid[] := array[${reservedSiteIdsArraySql}];
       begin
         while total_changed > 0 loop
           total_changed := 0;
@@ -235,7 +239,8 @@ export async function cleanupFixtures(client) {
             where table_schema='public' and column_name='site_id' and table_name <> 'sites'
           loop
             begin
-              execute format('delete from %I where site_id in (${reservedSiteIdsSql})', t.table_name);
+              execute format('delete from %I where site_id = any($1)', t.table_name)
+                using reserved_site_ids;
               get diagnostics changed = row_count;
               total_changed := total_changed + changed;
             exception when foreign_key_violation then null;

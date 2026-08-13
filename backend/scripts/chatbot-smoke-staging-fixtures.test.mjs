@@ -222,6 +222,31 @@ describe('chatbot smoke staging PostgreSQL lifecycle', () => {
 });
 
 describe('chatbot smoke cleanup targeting', () => {
+  it('binds the reserved site UUID array outside the dynamic delete statement', async () => {
+    const statements = [];
+    const client = {
+      async query(sql) {
+        statements.push(sql);
+        return { rows: [] };
+      }
+    };
+
+    await cleanupFixtures(client);
+    const cleanupBlock = statements.find((sql) => /^\s*do\s+\$\$/i.test(sql));
+    assert.ok(cleanupBlock);
+    assert.match(cleanupBlock, /reserved_site_ids uuid\[\] := array\[/i);
+    assert.match(
+      cleanupBlock,
+      /execute format\('delete from %I where site_id = any\(\$1\)', t\.table_name\)\s+using reserved_site_ids;/i
+    );
+    const dynamicDelete = cleanupBlock.match(/execute format\('([^']+)'/i)?.[1];
+    assert.equal(dynamicDelete, 'delete from %I where site_id = any($1)');
+    for (const { id } of SMOKE_SITES) {
+      assert.match(cleanupBlock, new RegExp(`'${id}'::uuid`));
+      assert.doesNotMatch(dynamicDelete, new RegExp(id));
+    }
+  });
+
   it('never performs an organization-wide dependent-row deletion', async () => {
     const statements = [];
     const client = {
