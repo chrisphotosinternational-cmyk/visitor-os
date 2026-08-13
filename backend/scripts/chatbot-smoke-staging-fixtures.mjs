@@ -221,6 +221,11 @@ export async function cleanupFixtures(client) {
       (select id from conversations where site_id = any($1))`,
     [siteIds]
   );
+  await client.query(
+    `delete from lead_score_history where prospect_id in
+      (select id from prospects where site_id = any($1))`,
+    [siteIds]
+  );
 
   // Delete only rows anchored to the three reserved site UUIDs. Repeated passes allow
   // dependent site-scoped tables to disappear before their parents, without ever using
@@ -249,6 +254,33 @@ export async function cleanupFixtures(client) {
         end loop;
       end $$`
   );
+
+  // Remove the three non-cascading business parents in dependency order. Every
+  // delete remains anchored to the reserved site UUIDs.
+  await client.query(`delete from conversations where site_id = any($1)`, [siteIds]);
+  await client.query(`delete from prospects where site_id = any($1)`, [siteIds]);
+  await client.query(`delete from visitors where site_id = any($1)`, [siteIds]);
+
+  const residualParents = await client.query(
+    `select parent.table_name, parent.remaining_count from (
+      select 'conversations'::text table_name, count(*)::int remaining_count
+        from conversations where site_id = any($1)
+      union all
+      select 'prospects'::text, count(*)::int
+        from prospects where site_id = any($1)
+      union all
+      select 'visitors'::text, count(*)::int
+        from visitors where site_id = any($1)
+    ) parent where parent.remaining_count > 0`,
+    [siteIds]
+  );
+  if (residualParents.rows.length > 0) {
+    const { table_name: tableName, remaining_count: remainingCount } = residualParents.rows[0];
+    throw new Error(
+      `Smoke fixture cleanup blocked: ${tableName} has ${remainingCount} remaining row(s)`
+    );
+  }
+
   // Row-value comparison preserves each reserved id ↔ slug association. Separate
   // ANY predicates would only prove independent membership in both sets.
   await client.query(

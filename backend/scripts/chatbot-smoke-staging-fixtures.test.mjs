@@ -222,6 +222,70 @@ describe('chatbot smoke staging PostgreSQL lifecycle', () => {
 });
 
 describe('chatbot smoke cleanup targeting', () => {
+  it('deletes dependent and parent rows in a safe site-scoped order', async () => {
+    const statements = [];
+    const client = {
+      async query(sql, values = []) {
+        statements.push({ sql, values });
+        return { rows: [] };
+      }
+    };
+
+    await cleanupFixtures(client);
+    const indexOf = (pattern) => statements.findIndex(({ sql }) => pattern.test(sql));
+    const ordered = [
+      /delete from decision_events/,
+      /delete from messages/,
+      /delete from lead_score_history/,
+      /^\s*do\s+\$\$/,
+      /delete from conversations where site_id/,
+      /delete from prospects where site_id/,
+      /delete from visitors where site_id/,
+      /select parent\.table_name/,
+      /delete from sites where \(id, slug\)/,
+      /delete from organizations where \(id, slug\)/
+    ].map(indexOf);
+    assert.equal(ordered.every((index) => index >= 0), true);
+    assert.deepEqual(ordered, [...ordered].sort((left, right) => left - right));
+  });
+
+  it('deletes lead score history only through prospects scoped to reserved sites', async () => {
+    const statements = [];
+    const client = {
+      async query(sql, values = []) {
+        statements.push({ sql, values });
+        return { rows: [] };
+      }
+    };
+
+    await cleanupFixtures(client);
+    const statement = statements.find(({ sql }) => /delete from lead_score_history/i.test(sql));
+    assert.ok(statement);
+    assert.match(
+      statement.sql,
+      /where prospect_id in\s*\(\s*select id from prospects where site_id = any\(\$1\)\s*\)/i
+    );
+    assert.deepEqual(statement.values, [SMOKE_SITES.map(({ id }) => id)]);
+    assert.doesNotMatch(statement.sql, /organization_id/i);
+  });
+
+  it('stops before deleting sites when a business parent remains', async () => {
+    const statements = [];
+    const client = {
+      async query(sql) {
+        statements.push(sql);
+        if (sql.includes('select parent.table_name')) {
+          return { rows: [{ table_name: 'visitors', remaining_count: 2 }] };
+        }
+        return { rows: [] };
+      }
+    };
+
+    await assert.rejects(() => cleanupFixtures(client), /visitors has 2 remaining row\(s\)/);
+    assert.equal(statements.some((sql) => /delete from sites where/i.test(sql)), false);
+    assert.equal(statements.some((sql) => /delete from organizations where/i.test(sql)), false);
+  });
+
   it('binds the reserved site UUID array outside the dynamic delete statement', async () => {
     const statements = [];
     const client = {
