@@ -21,7 +21,9 @@ export type AIProviderMessage = {
 export type AIProviderRequest = {
   organizationId: string;
   siteId: string;
-  conversationId: string;
+  conversationId?: string;
+  /** Providers and their decorators must not write telemetry when false. */
+  persist?: boolean;
   question: string;
   messages: AIProviderMessage[];
   systemPrompt: string;

@@ -1727,11 +1727,11 @@ export function registerAdminManagementRoutes(
     const decision = await dependencies?.decisionEngine?.decide({
       organizationId,
       siteId: params.siteId,
-      conversationId: '00000000-0000-4000-8000-000000000000',
       activity: siteConfig.rows[0]?.business_config_id ?? 'default',
       message: body.message,
       recentHistory: [],
-      debug: true
+      debug: true,
+      persist: false
     });
 
     return {

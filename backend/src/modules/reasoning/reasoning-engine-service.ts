@@ -26,13 +26,15 @@ export type NextBestAction = (typeof nextBestActions)[number];
 export type ReasoningInput = {
   siteId: string;
   organizationId: string;
-  visitorId: string;
-  conversationId: string;
+  visitorId?: string;
+  conversationId?: string;
   userMessage: string;
   conversationHistory?: Array<{ senderType: string; content: string }> | undefined;
   detectedIntent?: string | undefined;
   knowledgeAnswer?: KnowledgeAnswer | null | undefined;
   messageId?: string | undefined;
+  /** Execute reasoning without creating or updating conversation-owned records. */
+  persist?: boolean;
 };
 
 export type ReasoningOutput = {
@@ -87,7 +89,9 @@ export class ReasoningEngineService {
   async reason(input: ReasoningInput): Promise<ReasoningOutput> {
     const startedAt = Date.now();
     const [context, personality, goals, flows, intents, knowledge] = await Promise.all([
-      this.getOrCreateContext(input),
+      input.persist === false
+        ? Promise.resolve({ previous_intents: [], lead_readiness_score: 0 })
+        : this.getOrCreateContext(input),
       this.getPersonality(input.organizationId, input.siteId),
       this.getGoals(input.organizationId, input.siteId),
       this.getFlows(input.organizationId, input.siteId),
@@ -142,7 +146,14 @@ export class ReasoningEngineService {
       nextBestAction: action,
       leadReadinessScore: leadScore
     });
-    const updatedContext = await this.updateContext(input, context, detected.intent, leadScore);
+    const updatedContext =
+      input.persist === false
+        ? {
+            ...context,
+            previous_intents: [...asStringArray(context.previous_intents), detected.intent].slice(-12),
+            lead_readiness_score: leadScore
+          }
+        : await this.updateContext(input, context, detected.intent, leadScore);
     const output: ReasoningOutput = {
       detected_intent: detected.intent,
       intent_confidence: roundScore(detected.confidence),
@@ -168,8 +179,8 @@ export class ReasoningEngineService {
       quality_scores: qualityScores
     };
 
-    await this.recordTrace(input, output);
-    if (output.confidence_score < 0.45) {
+    if (input.persist !== false) await this.recordTrace(input, output);
+    if (input.persist !== false && output.confidence_score < 0.45) {
       await this.recordLowConfidence(input, output);
     }
 
@@ -228,9 +239,8 @@ export class ReasoningEngineService {
     return this.reason({
       organizationId: input.organizationId,
       siteId: input.siteId,
-      visitorId: '00000000-0000-4000-8000-000000000000',
-      conversationId: '00000000-0000-4000-8000-000000000000',
-      userMessage: input.message
+      userMessage: input.message,
+      persist: false
     });
   }
 
@@ -280,6 +290,9 @@ export class ReasoningEngineService {
   }
 
   private async getOrCreateContext(input: ReasoningInput): Promise<Record<string, unknown>> {
+    if (!input.conversationId || !input.visitorId) {
+      throw new Error('Persistent reasoning requires a conversation and visitor');
+    }
     const existing = await this.getContext(input.organizationId, input.conversationId);
     if (existing) return existing;
 
@@ -373,6 +386,9 @@ export class ReasoningEngineService {
   }
 
   private async recordLowConfidence(input: ReasoningInput, output: ReasoningOutput): Promise<void> {
+    if (!input.conversationId) {
+      throw new Error('Persistent reasoning requires a conversation');
+    }
     await this.database.query(
       `update conversations set status = 'in_review', updated_at = now() where id = $1 and organization_id = $2`,
       [input.conversationId, input.organizationId]

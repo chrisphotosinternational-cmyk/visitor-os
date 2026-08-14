@@ -12,6 +12,41 @@ import { MockAIProvider } from '../src/modules/ai/mock-ai-provider.js';
 import { createBusinessConfigEngine } from '../src/modules/business-config/configuration-loader.js';
 
 describe('decision engine', () => {
+  it('marks diagnostics as non-persistent without a fictitious conversation id', async () => {
+    let providerInput: Parameters<AIProvider['generateReply']>[0] | undefined;
+    const provider = new MockAIProvider();
+    const generateReply = provider.generateReply.bind(provider);
+    provider.generateReply = async (input) => {
+      providerInput = input;
+      return generateReply(input);
+    };
+    const engine = createTestDecisionEngine(provider);
+
+    const { conversationId, ...input } = baseInput('Question inconnue simple');
+    void conversationId;
+    const result = await engine.decide({ ...input, debug: true, persist: false });
+
+    assert.equal(providerInput?.conversationId, undefined);
+    assert.equal(providerInput?.persist, false);
+    assert.ok(result.reply);
+    assert.ok(result.debug);
+  });
+
+  it('keeps persistence enabled for the public decision path', async () => {
+    let providerInput: Parameters<AIProvider['generateReply']>[0] | undefined;
+    const provider = new MockAIProvider();
+    const generateReply = provider.generateReply.bind(provider);
+    provider.generateReply = async (input) => {
+      providerInput = input;
+      return generateReply(input);
+    };
+
+    await createTestDecisionEngine(provider).decide(baseInput('Question inconnue simple'));
+
+    assert.equal(providerInput?.conversationId, baseInput('').conversationId);
+    assert.equal(providerInput?.persist, true);
+  });
+
   it('routes pricing through KMS with the dedicated smoke configuration', async () => {
     let searches = 0;
     const engine = createDecisionEngine({
