@@ -172,6 +172,22 @@ ipcMain.handle('project:open', async () => {
   const port = await ensurePreviewServer();
   return { root: projectRoot, name: path.basename(projectRoot), tree: scanDirectory(projectRoot), previewBase: `http://127.0.0.1:${port}` };
 });
+ipcMain.handle('project:open-html-file', async () => {
+  const result = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Fichiers HTML', extensions: ['html', 'htm'] }] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const absoluteFile = result.filePaths[0];
+  projectRoot = path.dirname(absoluteFile); lastBackup = null;
+  const port = await ensurePreviewServer();
+  const selectedFile = path.basename(absoluteFile);
+  return {
+    root: projectRoot,
+    name: path.basename(projectRoot),
+    tree: scanDirectory(projectRoot),
+    previewBase: `http://127.0.0.1:${port}`,
+    selectedFile,
+    selectedContent: fs.readFileSync(absoluteFile, 'utf8')
+  };
+});
 ipcMain.handle('project:tree', async () => projectRoot ? scanDirectory(projectRoot) : []);
 ipcMain.handle('file:read', async (_, rel) => fs.readFileSync(safePath(projectRoot, rel), 'utf8'));
 ipcMain.handle('file:write', async (_, rel, content) => {
