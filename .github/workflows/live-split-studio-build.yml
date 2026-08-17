@@ -3,7 +3,7 @@ name: Build Live Split Studio macOS
 on:
   push:
     branches:
-      - build/live-split-studio-v3-1
+      - build/live-split-studio-0-2-1-html-minimal
     paths:
       - 'live-split-studio/**'
       - '.github/workflows/live-split-studio-build.yml'
@@ -40,14 +40,14 @@ jobs:
       - name: Build renderer
         run: npm run build:renderer
 
-      - name: Build DMG
+      - name: Build ZIP app
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --mac dmg --${{ matrix.arch }} --publish never
+        run: npx electron-builder --mac zip --${{ matrix.arch }} --publish never
 
-      - name: Upload DMG
+      - name: Upload ZIP app
         uses: actions/upload-artifact@v4
         with:
           name: Live-Split-Studio-macOS-${{ matrix.arch }}
-          path: live-split-studio/release/*.dmg
+          path: live-split-studio/release/*.zip
           if-no-files-found: error
