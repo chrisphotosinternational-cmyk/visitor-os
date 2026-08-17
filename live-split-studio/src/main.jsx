@@ -50,6 +50,15 @@ function App(){
 
   function findFirst(nodes,pred){ for(const n of nodes){ if(pred(n)) return n; if(n.children){ const r=findFirst(n.children,pred); if(r) return r; } } return null; }
 
+  async function openHtmlFile(){
+    const p=await window.studio.openHtmlFile();
+    if(!p) return;
+    setProject(p); setTree(p.tree); setCanRestore(false);
+    if(p.selectedFile){
+      setFile(p.selectedFile); setContent(p.selectedContent ?? ''); setSavedContent(p.selectedContent ?? ''); setStatus(`Fichier : ${p.selectedFile}`);
+    }
+  }
+
   async function openProject(){
     const p=await window.studio.openProject();
     if(!p) return;
@@ -128,7 +137,8 @@ function App(){
   return <div className="app">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">LS</span><strong>Live Split Studio</strong></div>
-      <button className="primary" onClick={openProject} disabled={busy}>Ouvrir un dossier</button>
+      <button className="primary" onClick={openHtmlFile} disabled={busy}>Ouvrir HTML</button>
+      <button className="ghost" onClick={openProject} disabled={busy}>Ouvrir un dossier</button>
       <div className="segmented">
         <button className={mode==='code'?'on':''} onClick={()=>setMode('code')}>Code</button>
         <button className={mode==='split'?'on':''} onClick={()=>setMode('split')}>Split</button>
@@ -150,7 +160,7 @@ function App(){
     <main className="workspace">
       <aside className="sidebar">
         <div className="side-title">FICHIERS</div>
-        {project ? <Tree nodes={tree} selected={file} onOpen={openFile}/> : <div className="empty-small">Ouvrez le dossier d’un site HTML/CSS/JS.</div>}
+        {project ? <Tree nodes={tree} selected={file} onOpen={openFile}/> : <div className="empty-small">Ouvrez directement un fichier HTML, ou le dossier complet du site.</div>}
       </aside>
 
       <section className={'panes mode-'+mode}>
