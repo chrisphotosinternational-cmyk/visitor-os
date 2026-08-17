@@ -9,6 +9,7 @@ const languageFor = (file='') => {
 };
 const minifiable = (file='') => /\.(html?|css|js|mjs|cjs)$/i.test(file);
 const formatBytes = n => n < 1024 ? `${n} o` : n < 1024*1024 ? `${(n/1024).toFixed(1)} Ko` : `${(n/1024/1024).toFixed(1)} Mo`;
+const escapeRegex = s => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function Tree({ nodes, selected, onOpen, depth=0 }) {
   const [open, setOpen] = useState({});
@@ -35,11 +36,14 @@ function App(){
   const [mode,setMode]=useState('split');
   const [device,setDevice]=useState('desktop');
   const [autoSave,setAutoSave]=useState(true);
+  const [inspectMode,setInspectMode]=useState(true);
   const [status,setStatus]=useState('Aucun projet ouvert');
   const [previewNonce,setPreviewNonce]=useState(0);
   const [busy,setBusy]=useState(false);
   const [canRestore,setCanRestore]=useState(false);
   const saveTimer=useRef(null);
+  const editorRef=useRef(null);
+  const iframeRef=useRef(null);
 
   const dirty = file && content !== savedContent;
   const previewPath = useMemo(()=> {
@@ -49,6 +53,100 @@ function App(){
   },[project,file,previewNonce]);
 
   function findFirst(nodes,pred){ for(const n of nodes){ if(pred(n)) return n; if(n.children){ const r=findFirst(n.children,pred); if(r) return r; } } return null; }
+  function findByPath(nodes,target){ for(const n of nodes){ if(n.path===target) return n; if(n.children){ const r=findByPath(n.children,target); if(r) return r; } } return null; }
+
+  function locateElementInSource(text, data){
+    const candidates=[];
+    const attr=(name,value)=>{
+      if(!value) return;
+      const re=new RegExp(`\\b${name}\\s*=\\s*["']${escapeRegex(value)}["']`,'i');
+      const m=re.exec(text);
+      if(m) candidates.push(m.index);
+    };
+    attr('id',data.id);
+    attr('src',data.src);
+    attr('href',data.href);
+    attr('alt',data.alt);
+    attr('name',data.name);
+
+    if(data.className){
+      const token=String(data.className).split(/\s+/).find(Boolean);
+      if(token){
+        const re=new RegExp(`\\bclass\\s*=\\s*["'][^"']*\\b${escapeRegex(token)}\\b[^"']*["']`,'i');
+        const m=re.exec(text); if(m) candidates.push(m.index);
+      }
+    }
+
+    if(!candidates.length && data.text){
+      const piece=String(data.text).slice(0,60).trim();
+      if(piece){ const i=text.indexOf(piece); if(i>=0) candidates.push(i); }
+    }
+
+    if(!candidates.length && data.tag){
+      const re=new RegExp(`<${escapeRegex(data.tag)}\\b`,'i');
+      const m=re.exec(text); if(m) candidates.push(m.index);
+    }
+
+    if(!candidates.length) return null;
+    const anchor=Math.min(...candidates);
+    let start=text.lastIndexOf('<',anchor);
+    if(start<0) start=anchor;
+    let end=text.indexOf('>',Math.max(start,anchor));
+    if(end<0) end=Math.min(text.length,start+1); else end+=1;
+    return {start,end};
+  }
+
+  function selectSourceRange(text,data){
+    const editor=editorRef.current;
+    const model=editor?.getModel();
+    if(!editor || !model) return false;
+    const range=locateElementInSource(text,data);
+    if(!range) return false;
+    const a=model.getPositionAt(range.start);
+    const b=model.getPositionAt(range.end);
+    editor.setSelection({startLineNumber:a.lineNumber,startColumn:a.column,endLineNumber:b.lineNumber,endColumn:b.column});
+    editor.revealRangeInCenter({startLineNumber:a.lineNumber,startColumn:a.column,endLineNumber:b.lineNumber,endColumn:b.column});
+    editor.focus();
+    return true;
+  }
+
+  function sendInspectMode(){
+    try{ iframeRef.current?.contentWindow?.postMessage({type:'LSS_INSPECT_MODE',enabled:inspectMode},'*'); }catch{}
+  }
+
+  async function focusClickedElement(data){
+    if(!project || !inspectMode) return;
+    let target=decodeURIComponent(String(data.pagePath||'')).replace(/^\/+/, '').split(/[?#]/)[0];
+    if(!target) target='index.html';
+    if(target.endsWith('/')) target+='index.html';
+    let targetNode=findByPath(tree,target);
+    if(!targetNode && target==='') targetNode=findByPath(tree,'index.html');
+
+    let sourceText=content;
+    let targetFile=file;
+    if(targetNode && targetNode.path!==file){
+      if(dirty) await saveNow();
+      sourceText=await window.studio.readFile(targetNode.path);
+      targetFile=targetNode.path;
+      setFile(targetFile); setContent(sourceText); setSavedContent(sourceText);
+    }
+
+    if(!targetFile || !/\.html?$/i.test(targetFile)){
+      const fallback=findByPath(tree,'index.html') || findFirst(tree,n=>n.type==='file' && /\.html?$/i.test(n.path));
+      if(fallback){
+        sourceText=await window.studio.readFile(fallback.path);
+        targetFile=fallback.path;
+        setFile(targetFile); setContent(sourceText); setSavedContent(sourceText);
+      }
+    }
+
+    setMode('split');
+    setStatus(`Élément Live → code : <${data.tag || 'élément'}>${data.id ? '#'+data.id : ''}`);
+    setTimeout(()=>{
+      const ok=selectSourceRange(sourceText,data);
+      if(!ok) setStatus(`Élément détecté, mais correspondance exacte introuvable dans ${targetFile || 'le HTML'}`);
+    },80);
+  }
 
   async function openProject(){
     const p=await window.studio.openProject();
@@ -124,6 +222,13 @@ function App(){
     window.addEventListener('keydown',fn); return()=>window.removeEventListener('keydown',fn);
   });
 
+  useEffect(()=>{
+    const fn=(e)=>{ if(e.data?.type==='LSS_ELEMENT_CLICK') focusClickedElement(e.data); };
+    window.addEventListener('message',fn); return()=>window.removeEventListener('message',fn);
+  },[project,tree,file,content,savedContent,inspectMode]);
+
+  useEffect(()=>{ sendInspectMode(); },[inspectMode,previewNonce,project]);
+
   const previewWidth = device==='desktop' ? '100%' : device==='tablet' ? '820px' : '390px';
   return <div className="app">
     <header className="topbar">
@@ -134,6 +239,7 @@ function App(){
         <button className={mode==='split'?'on':''} onClick={()=>setMode('split')}>Split</button>
         <button className={mode==='live'?'on':''} onClick={()=>setMode('live')}>Live</button>
       </div>
+      <button className={inspectMode?'minify':'ghost'} onClick={()=>setInspectMode(v=>!v)} disabled={!project || busy}>{inspectMode?'Sélection Live ON':'Sélection Live OFF'}</button>
       <div className="segmented compact">
         <button className={device==='desktop'?'on':''} onClick={()=>setDevice('desktop')}>Desktop</button>
         <button className={device==='tablet'?'on':''} onClick={()=>setDevice('tablet')}>Tablet</button>
@@ -156,13 +262,13 @@ function App(){
       <section className={'panes mode-'+mode}>
         {(mode==='code'||mode==='split') && <div className="editor-pane">
           <div className="pane-head"><span>{file || 'Aucun fichier'}</span>{dirty && <span className="dirty">● modifié</span>}</div>
-          {file ? <Editor height="100%" language={languageFor(file)} value={content} onChange={v=>setContent(v??'')} theme="vs-dark" options={{fontSize:14,minimap:{enabled:false},automaticLayout:true,wordWrap:'on',tabSize:2,insertSpaces:true,smoothScrolling:true,formatOnPaste:true}}/> : <div className="empty">Sélectionnez un fichier éditable.</div>}
+          {file ? <Editor onMount={editor=>{editorRef.current=editor;}} height="100%" language={languageFor(file)} value={content} onChange={v=>setContent(v??'')} theme="vs-dark" options={{fontSize:14,minimap:{enabled:false},automaticLayout:true,wordWrap:'on',tabSize:2,insertSpaces:true,smoothScrolling:true,formatOnPaste:true}}/> : <div className="empty">Sélectionnez un fichier éditable.</div>}
         </div>}
 
         {(mode==='live'||mode==='split') && <div className="preview-pane">
-          <div className="pane-head preview-head"><span>LIVE PREVIEW</span><button onClick={()=>setPreviewNonce(n=>n+1)}>↻ Recharger</button></div>
+          <div className="pane-head preview-head"><span>LIVE PREVIEW {inspectMode ? '— cliquez un élément pour retrouver son code' : '— navigation normale'}</span><button onClick={()=>setPreviewNonce(n=>n+1)}>↻ Recharger</button></div>
           <div className="preview-stage">
-            {project ? <iframe title="Live preview" key={previewNonce} src={previewPath} style={{width:previewWidth}}/> : <div className="empty">Le rendu apparaîtra ici.</div>}
+            {project ? <iframe ref={iframeRef} onLoad={sendInspectMode} title="Live preview" key={previewNonce} src={previewPath} style={{width:previewWidth}}/> : <div className="empty">Le rendu apparaîtra ici.</div>}
           </div>
         </div>}
       </section>
