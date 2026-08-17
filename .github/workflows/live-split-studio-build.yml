@@ -3,7 +3,7 @@ name: Build Live Split Studio macOS
 on:
   push:
     branches:
-      - build/live-split-studio-v3-1
+      - build/live-split-studio-0-2-1-html
     paths:
       - 'live-split-studio/**'
       - '.github/workflows/live-split-studio-build.yml'
