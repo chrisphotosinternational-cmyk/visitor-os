@@ -1,6 +1,6 @@
 {
   "name": "live-split-studio",
-  "version": "0.2.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Autonomous code editor with split live preview, save and safe minification.",
   "main": "electron.cjs",
@@ -45,19 +45,21 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        {
-          "target": "dmg",
-          "arch": ["arm64", "x64"]
-        },
-        {
-          "target": "zip",
-          "arch": ["arm64", "x64"]
-        }
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
       ]
     },
     "dmg": {
       "title": "Live Split Studio ${version}"
     },
-    "artifactName": "Live-Split-Studio-${version}-${arch}.${ext}"
+    "artifactName": "Live-Split-Studio-${version}-${arch}.${ext}",
+    "fileAssociations": [
+      {
+        "ext": ["html", "htm"],
+        "name": "HTML document",
+        "description": "HTML document",
+        "role": "Editor"
+      }
+    ]
   }
 }
